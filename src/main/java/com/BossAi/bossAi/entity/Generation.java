@@ -25,6 +25,9 @@ public class Generation {
     @Enumerated(EnumType.STRING)
     private GenerationStatus generationStatus;
 
+    @Enumerated(EnumType.STRING)
+    private GenerationType generationType;
+
     private String imageUrl;
     private String videoUrl;
 
