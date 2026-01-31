@@ -5,8 +5,10 @@ import com.BossAi.bossAi.request.GenerateImageRequest;
 import com.BossAi.bossAi.request.GenerateVideoRequest;
 import com.BossAi.bossAi.response.GenerationResponse;
 import com.BossAi.bossAi.service.GenerationService;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.UUID;
@@ -19,25 +21,32 @@ public class GenerationController {
     private final GenerationService generationService;
 
     @PostMapping("/image")
-    public ResponseEntity<GenerationResponse> generateImage(@RequestBody GenerateImageRequest request) {
+    public ResponseEntity<GenerationResponse> generateImage(
+            @Valid @RequestBody GenerateImageRequest request,
+            Authentication authentication
+    ) {
         return ResponseEntity.ok(
-                generationService.generateImage(request)
+                generationService.generateImage(request, authentication.getName())
         );
     }
 
     @PostMapping("/video")
-    public ResponseEntity<GenerationResponse> generateVideo(@RequestBody GenerateVideoRequest request) {
+    public ResponseEntity<GenerationResponse> generateVideo(
+            @Valid @RequestBody GenerateVideoRequest request,
+            Authentication authentication
+    ) {
         return ResponseEntity.ok(
-                generationService.generateVideo(request)
+                generationService.generateVideo(request, authentication.getName())
         );
     }
 
     @GetMapping("/{id}")
     public ResponseEntity<Generation> getGeneration(
-            @PathVariable UUID id
+            @PathVariable UUID id,
+            Authentication authentication
             ) {
         return ResponseEntity.ok(
-                generationService.getById(id)
+                generationService.getById(id, authentication.getName())
         );
     }
 

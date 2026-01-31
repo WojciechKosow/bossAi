@@ -11,6 +11,7 @@ import com.BossAi.bossAi.request.GenerateVideoRequest;
 import com.BossAi.bossAi.response.GenerationResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.scheduling.annotation.Async;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
@@ -26,11 +27,10 @@ public class GenerationServiceImpl implements GenerationService {
     private final GenerationRepository generationRepository;
     private final AiImageService aiImageService;
     private final AiVideoService aiVideoService;
+    private final ImageStorageService imageStorageService;
 
     @Override
-    public GenerationResponse generateImage(GenerateImageRequest request) {
-        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
-        String email = authentication.getName();
+    public GenerationResponse generateImage(GenerateImageRequest request, String email) {
 
         User user = userRepository.findByEmail(email).orElseThrow();
 
@@ -52,9 +52,7 @@ public class GenerationServiceImpl implements GenerationService {
 
 
     @Override
-    public GenerationResponse generateVideo(GenerateVideoRequest request) {
-        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
-        String email = authentication.getName();
+    public GenerationResponse generateVideo(GenerateVideoRequest request, String email) {
 
         User user = userRepository.findByEmail(email).orElseThrow();
 
@@ -73,16 +71,21 @@ public class GenerationServiceImpl implements GenerationService {
         return new GenerationResponse(generation.getId(), generation.getGenerationStatus());
     }
 
-    @Async
+    @Async("aiExecutor")
     void processImageAsync(UUID generationId, GenerateImageRequest request) {
         Generation generation = generationRepository.findById(generationId).orElseThrow();
         try {
             generation.setGenerationStatus(GenerationStatus.PROCESSING);
             generationRepository.save(generation);
 
-            String imageUrl = aiImageService.generateImage(
+            byte[] imageBytes = aiImageService.generateImage(
                     request.getPrompt(),
                     request.getImageUrl()
+            );
+
+            String imageUrl = imageStorageService.saveImage(
+                    imageBytes,
+                    generation.getId()
             );
 
             generation.setImageUrl(imageUrl);
@@ -96,7 +99,7 @@ public class GenerationServiceImpl implements GenerationService {
         generationRepository.save(generation);
     }
 
-    @Async
+    @Async("aiExecutor")
     void processVideoAsync(UUID generationId, GenerateVideoRequest request) {
         Generation generation = generationRepository.findById(generationId).orElseThrow();
         try {
@@ -108,7 +111,7 @@ public class GenerationServiceImpl implements GenerationService {
                     request.getImageUrl()
             );
 
-            generation.setImageUrl(videoUrl);
+            generation.setVideoUrl(videoUrl);
             generation.setGenerationStatus(GenerationStatus.DONE);
             generation.setFinishedAt(LocalDateTime.now());
         } catch (Exception e) {
@@ -119,8 +122,16 @@ public class GenerationServiceImpl implements GenerationService {
     }
 
     @Override
-    public Generation getById(UUID id) {
-        return generationRepository.findById(id).orElseThrow();
+    public Generation getById(UUID id, String email) {
+        User user = userRepository.findByEmail(email).orElseThrow();
+
+        Generation generation = generationRepository.findById(id).orElseThrow();
+
+        if (!generation.getUser().equals(user)) {
+            throw new AccessDeniedException("Not your generation");
+        }
+
+        return generation;
     }
 
 }
