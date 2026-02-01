@@ -3,7 +3,9 @@ package com.BossAi.bossAi.service;
 import com.BossAi.bossAi.dto.UserDTO;
 import com.BossAi.bossAi.entity.Plan;
 import com.BossAi.bossAi.entity.User;
+import com.BossAi.bossAi.entity.VerificationToken;
 import com.BossAi.bossAi.repository.UserRepository;
+import com.BossAi.bossAi.repository.VerificationTokenRepository;
 import com.BossAi.bossAi.request.LoginRequest;
 import com.BossAi.bossAi.request.RegisterRequest;
 import com.BossAi.bossAi.response.AuthResponse;
@@ -13,6 +15,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
+import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
@@ -21,6 +24,8 @@ public class UserServiceImpl implements UserService {
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtProvider jwtProvider;
+    private final MailService mailService;
+    private final VerificationTokenRepository verificationTokenRepository;
 
     @Override
     public AuthResponse register(RegisterRequest request) {
@@ -38,6 +43,16 @@ public class UserServiceImpl implements UserService {
 
         userRepository.save(user);
 
+        String token = UUID.randomUUID().toString();
+        VerificationToken verificationToken  = VerificationToken.builder()
+                .token(token)
+                .user(user)
+                .expiresAt(LocalDateTime.now().plusMinutes(30))
+                .build();
+
+        verificationTokenRepository.save(verificationToken);
+        mailService.sendVerificationEmail(user.getEmail(), token);
+
         return new AuthResponse(null, mapToDTO(user));
     }
 
@@ -51,12 +66,32 @@ public class UserServiceImpl implements UserService {
             throw new RuntimeException("invalid password or email");
         }
 
-//        if (!user.isEmailVerified()) {
-//            throw new RuntimeException("Your account hasn't been activated yet");
-//        }
+        if (!user.isEmailVerified()) {
+            throw new RuntimeException("Your account hasn't been activated yet");
+        }
 
         String token = jwtProvider.generateToken(user.getEmail());
         return new AuthResponse(token, mapToDTO(user));
+    }
+
+    @Override
+    public void verifyAccount(String token) {
+        VerificationToken verificationToken = verificationTokenRepository.findByToken(token)
+                .orElseThrow(() -> new RuntimeException("Invalid token"));
+
+        if (verificationToken.getExpiresAt().isBefore(LocalDateTime.now())) {
+            throw new RuntimeException("The token has expired");
+        }
+
+        User user = verificationToken.getUser();
+        user.setEmailVerified(true);
+        userRepository.save(user);
+        verificationTokenRepository.delete(verificationToken);
+    }
+
+    @Override
+    public void resendVerificationEmail(String email) {
+
     }
 
     private UserDTO mapToDTO(User user) {

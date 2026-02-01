@@ -1,5 +1,6 @@
 package com.BossAi.bossAi.controller;
 
+import com.BossAi.bossAi.dto.GenerationDTO;
 import com.BossAi.bossAi.entity.Generation;
 import com.BossAi.bossAi.request.GenerateImageRequest;
 import com.BossAi.bossAi.request.GenerateVideoRequest;
@@ -41,7 +42,7 @@ public class GenerationController {
     }
 
     @GetMapping("/{id}")
-    public ResponseEntity<Generation> getGeneration(
+    public ResponseEntity<GenerationDTO> getGeneration(
             @PathVariable UUID id,
             Authentication authentication
             ) {

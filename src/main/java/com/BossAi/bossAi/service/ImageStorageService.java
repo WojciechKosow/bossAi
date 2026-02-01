@@ -28,7 +28,6 @@ public class ImageStorageService {
 
             Files.write(filePath, imageBytes);
 
-            // URL, który zapiszesz do DB
             return publicUrl + "/" + fileName;
 
         } catch (IOException e) {
@@ -36,4 +35,16 @@ public class ImageStorageService {
         }
     }
 
+
+    public byte[] loadImage(String imageUrl) {
+        try {
+            String fileName = imageUrl.substring(imageUrl.lastIndexOf("/") + 1);
+
+            Path filePath = Paths.get(imagesPath, fileName);
+
+            return Files.readAllBytes(filePath);
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to load image", e);
+        }
+    }
 }

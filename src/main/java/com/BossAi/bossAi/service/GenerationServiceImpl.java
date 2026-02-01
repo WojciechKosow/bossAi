@@ -1,5 +1,6 @@
 package com.BossAi.bossAi.service;
 
+import com.BossAi.bossAi.dto.GenerationDTO;
 import com.BossAi.bossAi.entity.Generation;
 import com.BossAi.bossAi.entity.GenerationStatus;
 import com.BossAi.bossAi.entity.GenerationType;
@@ -122,7 +123,7 @@ public class GenerationServiceImpl implements GenerationService {
     }
 
     @Override
-    public Generation getById(UUID id, String email) {
+    public GenerationDTO getById(UUID id, String email) {
         User user = userRepository.findByEmail(email).orElseThrow();
 
         Generation generation = generationRepository.findById(id).orElseThrow();
@@ -131,7 +132,20 @@ public class GenerationServiceImpl implements GenerationService {
             throw new AccessDeniedException("Not your generation");
         }
 
-        return generation;
+        return mapToDto(generation);
     }
 
+
+    private GenerationDTO mapToDto(Generation generation) {
+        return new GenerationDTO(
+                generation.getId(),
+                generation.getGenerationStatus(),
+                generation.getGenerationType(),
+                generation.getImageUrl(),
+                generation.getVideoUrl(),
+                generation.getErrorMessage(),
+                generation.getCreatedAt(),
+                generation.getFinishedAt()
+        );
+    }
 }

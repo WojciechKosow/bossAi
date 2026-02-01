@@ -2,19 +2,19 @@ package com.BossAi.bossAi.entity;
 
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
-import lombok.Getter;
+import lombok.Builder;
+import lombok.Data;
 import lombok.NoArgsConstructor;
-import lombok.Setter;
 
 import java.time.LocalDateTime;
 import java.util.UUID;
 
 @Entity
-@Table(name = "password_reset_tokens")
-@Getter @Setter
+@Data
+@Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class PasswordResetToken {
+public class EmailChangeToken {
 
     @Id
     @GeneratedValue
@@ -28,5 +28,4 @@ public class PasswordResetToken {
     private User user;
 
     private LocalDateTime expiresAt;
-//    private boolean used;
 }

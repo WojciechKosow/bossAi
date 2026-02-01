@@ -8,5 +8,7 @@ public interface UserService {
 
     AuthResponse register(RegisterRequest request);
     AuthResponse login(LoginRequest request);
+    void verifyAccount(String token);
+    void resendVerificationEmail(String email);
 
 }

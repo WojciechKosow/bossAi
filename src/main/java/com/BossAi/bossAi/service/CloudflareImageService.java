@@ -15,6 +15,7 @@ import java.util.Base64;
 @RequiredArgsConstructor
 public class CloudflareImageService implements AiImageService {
     private final CloudflareImageClient cloudflareWebClient;
+    private final ImageStorageService imageStorageService;
 
     @Value("${cloudflare.account-id}")
     private String accountId;
@@ -25,12 +26,6 @@ public class CloudflareImageService implements AiImageService {
         CloudflareImageRequest request = CloudflareImageRequest.builder()
                 .prompt(prompt)
                 .build();
-
-//        byte[] imageBytes  = cloudflareWebClient.generateImage(accountId, request);
-//
-//        String base64 = Base64.getEncoder().encodeToString(imageBytes);
-//        System.out.println("IMAGE SIZE = " + imageBytes.length);
-
 
         return cloudflareWebClient.generateImage(accountId, request);
     }
