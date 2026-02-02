@@ -1,12 +1,15 @@
 package com.BossAi.bossAi.service;
 
 import com.BossAi.bossAi.dto.UserDTO;
+import com.BossAi.bossAi.entity.PasswordResetToken;
 import com.BossAi.bossAi.entity.Plan;
 import com.BossAi.bossAi.entity.User;
 import com.BossAi.bossAi.entity.VerificationToken;
+import com.BossAi.bossAi.repository.PasswordResetTokenRepository;
 import com.BossAi.bossAi.repository.UserRepository;
 import com.BossAi.bossAi.repository.VerificationTokenRepository;
 import com.BossAi.bossAi.request.LoginRequest;
+import com.BossAi.bossAi.request.PasswordResetRequest;
 import com.BossAi.bossAi.request.RegisterRequest;
 import com.BossAi.bossAi.response.AuthResponse;
 import com.BossAi.bossAi.security.JwtProvider;
@@ -15,6 +18,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
+import java.util.Optional;
 import java.util.UUID;
 
 @Service
@@ -26,6 +30,7 @@ public class UserServiceImpl implements UserService {
     private final JwtProvider jwtProvider;
     private final MailService mailService;
     private final VerificationTokenRepository verificationTokenRepository;
+    private final PasswordResetTokenRepository passwordResetTokenRepository;
 
     @Override
     public AuthResponse register(RegisterRequest request) {
@@ -92,6 +97,63 @@ public class UserServiceImpl implements UserService {
     @Override
     public void resendVerificationEmail(String email) {
 
+        User user = userRepository.findByEmail(email)
+                .orElseThrow(() -> new RuntimeException("User not found"));
+
+        if (user.isEmailVerified()) {
+            throw new RuntimeException("Account has been already verified");
+        }
+
+        Optional<VerificationToken> oldToken = verificationTokenRepository.findByUser(user);
+
+        oldToken.ifPresent(verificationTokenRepository::delete);
+
+        String token = UUID.randomUUID().toString();
+        VerificationToken verificationToken = VerificationToken.builder()
+                .token(token)
+                .user(user)
+                .expiresAt(LocalDateTime.now().plusMinutes(30))
+                .build();
+
+        verificationTokenRepository.save(verificationToken);
+        mailService.sendVerificationEmail(email, token);
+    }
+
+    @Override
+    public void forgotPassword(String email) {
+        User user = userRepository.findByEmail(email)
+                .orElseThrow(() -> new RuntimeException("User not found"));
+
+        Optional<PasswordResetToken> oldToken = passwordResetTokenRepository.findByUser(user);
+        oldToken.ifPresent(passwordResetTokenRepository::delete);
+
+        String token = UUID.randomUUID().toString();
+        PasswordResetToken passwordResetToken = PasswordResetToken.builder()
+                .token(token)
+                .user(user)
+                .expiresAt(LocalDateTime.now().plusMinutes(30))
+                .build();
+
+        passwordResetTokenRepository.save(passwordResetToken);
+        mailService.sendPasswordResetEmail(email, token);
+    }
+
+    @Override
+    public void resetPassword(String token, PasswordResetRequest request) {
+        User user = userRepository.findByEmail(request.getEmail())
+                .orElseThrow(() -> new RuntimeException("User not found"));
+
+        PasswordResetToken passwordResetToken = passwordResetTokenRepository
+                .findByToken(token).orElseThrow(() -> new RuntimeException("Token not found"));
+
+        if (passwordResetToken.getExpiresAt().isBefore(LocalDateTime.now())) {
+            throw new RuntimeException("Invalid token");
+        }
+
+        user.setPassword(passwordEncoder.encode(request.getNewPassword()));
+        userRepository.save(user);
+
+        passwordResetTokenRepository.delete(passwordResetToken);
     }
 
     private UserDTO mapToDTO(User user) {

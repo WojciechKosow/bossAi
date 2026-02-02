@@ -11,6 +11,7 @@ import java.util.UUID;
 
 @Entity
 @Data
+@Table(name = "verification_tokens")
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
