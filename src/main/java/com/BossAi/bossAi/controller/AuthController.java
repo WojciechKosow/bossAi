@@ -1,13 +1,11 @@
 package com.BossAi.bossAi.controller;
 
-import com.BossAi.bossAi.request.EmailVerificationRequest;
-import com.BossAi.bossAi.request.LoginRequest;
-import com.BossAi.bossAi.request.PasswordResetRequest;
-import com.BossAi.bossAi.request.RegisterRequest;
+import com.BossAi.bossAi.request.*;
 import com.BossAi.bossAi.response.AuthResponse;
 import com.BossAi.bossAi.service.UserService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.parameters.P;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
@@ -49,6 +47,24 @@ public class AuthController {
     @PostMapping("reset-password")
     public ResponseEntity<String> resetPassword(@RequestParam String token, @RequestBody PasswordResetRequest request) {
         userService.resetPassword(token, request);
-        return ResponseEntity.ok("");
+        return ResponseEntity.ok("Successfully changed password");
+    }
+
+    @PostMapping("request-email-change")
+    public ResponseEntity<String> requestEmailChange(@RequestBody EmailChangeRequest request) {
+        userService.requestEmailChange(request);
+        return ResponseEntity.ok("Email change message has been sent to to your email");
+    }
+
+    @PostMapping("change-email")
+    public ResponseEntity<String> confirmEmailChangeRequest(@RequestParam String token) {
+        userService.requestEmailChangeConfirmation(token);
+        return ResponseEntity.ok("A confirmation link has been sent to your new email");
+    }
+
+    @PostMapping("/change-email-confirmation")
+    public ResponseEntity<String> confirmEmailChange(@RequestParam String token, @RequestBody EmailChangeConfirmationRequest request) {
+        userService.confirmEmailChange(token, request.getPassword());
+        return ResponseEntity.ok("Successfully changed your email");
     }
 }

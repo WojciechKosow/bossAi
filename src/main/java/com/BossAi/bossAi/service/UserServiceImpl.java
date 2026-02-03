@@ -1,19 +1,20 @@
 package com.BossAi.bossAi.service;
 
 import com.BossAi.bossAi.dto.UserDTO;
-import com.BossAi.bossAi.entity.PasswordResetToken;
-import com.BossAi.bossAi.entity.Plan;
-import com.BossAi.bossAi.entity.User;
-import com.BossAi.bossAi.entity.VerificationToken;
+import com.BossAi.bossAi.entity.*;
+import com.BossAi.bossAi.repository.EmailChangeTokenRepository;
 import com.BossAi.bossAi.repository.PasswordResetTokenRepository;
 import com.BossAi.bossAi.repository.UserRepository;
 import com.BossAi.bossAi.repository.VerificationTokenRepository;
+import com.BossAi.bossAi.request.EmailChangeRequest;
 import com.BossAi.bossAi.request.LoginRequest;
 import com.BossAi.bossAi.request.PasswordResetRequest;
 import com.BossAi.bossAi.request.RegisterRequest;
 import com.BossAi.bossAi.response.AuthResponse;
 import com.BossAi.bossAi.security.JwtProvider;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
@@ -31,6 +32,7 @@ public class UserServiceImpl implements UserService {
     private final MailService mailService;
     private final VerificationTokenRepository verificationTokenRepository;
     private final PasswordResetTokenRepository passwordResetTokenRepository;
+    private final EmailChangeTokenRepository emailChangeTokenRepository;
 
     @Override
     public AuthResponse register(RegisterRequest request) {
@@ -144,7 +146,7 @@ public class UserServiceImpl implements UserService {
                 .orElseThrow(() -> new RuntimeException("User not found"));
 
         PasswordResetToken passwordResetToken = passwordResetTokenRepository
-                .findByToken(token).orElseThrow(() -> new RuntimeException("Token not found"));
+                .findByToken(token).orElseThrow(() -> new RuntimeException("Invalid token"));
 
         if (passwordResetToken.getExpiresAt().isBefore(LocalDateTime.now())) {
             throw new RuntimeException("Invalid token");
@@ -154,6 +156,65 @@ public class UserServiceImpl implements UserService {
         userRepository.save(user);
 
         passwordResetTokenRepository.delete(passwordResetToken);
+    }
+
+    @Override
+    public void requestEmailChange(EmailChangeRequest request) {
+
+        if (userRepository.existsByEmail(request.getNewEmail())) {
+            throw new RuntimeException("Email is already in use");
+        }
+
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        String email = authentication.getName();
+
+        User user = userRepository.findByEmail(email)
+                .orElseThrow(() -> new RuntimeException("User not found"));
+
+        if (!passwordEncoder.matches(request.getPassword(), user.getPassword())) {
+            throw new RuntimeException("Invalid Password");
+        }
+
+        Optional<EmailChangeToken> oldEmailChangeToken = emailChangeTokenRepository.findByUser(user);
+        oldEmailChangeToken.ifPresent(emailChangeTokenRepository::delete);
+
+        String token = UUID.randomUUID().toString();
+        EmailChangeToken emailChangeToken = EmailChangeToken.builder()
+                .token(token)
+                .user(user)
+                .email(request.getNewEmail())
+                .expiresAt(LocalDateTime.now().plusMinutes(30))
+                .build();
+
+        emailChangeTokenRepository.save(emailChangeToken);
+        mailService.sendEmailChangeEmail(user.getEmail(), token);
+    }
+
+    @Override
+    public void requestEmailChangeConfirmation(String token) {
+        EmailChangeToken emailChangeToken = emailChangeTokenRepository.findByToken(token)
+                .orElseThrow(() -> new RuntimeException("Invalid token"));
+        mailService.sendEmailChangeConfirmation(emailChangeToken.getEmail(), emailChangeToken.getToken());
+    }
+
+    @Override
+    public void confirmEmailChange(String token, String password) {
+        EmailChangeToken emailChangeToken = emailChangeTokenRepository.findByToken(token)
+                .orElseThrow(() -> new RuntimeException("Invalid token"));
+
+        User user = emailChangeToken.getUser();
+
+        if (!passwordEncoder.matches(password, user.getPassword())) {
+            throw new RuntimeException("Invalid password");
+        }
+
+        if (emailChangeToken.getExpiresAt().isBefore(LocalDateTime.now())) {
+            throw new RuntimeException("Invalid token");
+        }
+
+        user.setEmail(emailChangeToken.getEmail());
+        userRepository.save(user);
+        emailChangeTokenRepository.delete(emailChangeToken);
     }
 
     private UserDTO mapToDTO(User user) {
