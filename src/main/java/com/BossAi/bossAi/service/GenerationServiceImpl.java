@@ -1,10 +1,7 @@
 package com.BossAi.bossAi.service;
 
 import com.BossAi.bossAi.dto.GenerationDTO;
-import com.BossAi.bossAi.entity.Generation;
-import com.BossAi.bossAi.entity.GenerationStatus;
-import com.BossAi.bossAi.entity.GenerationType;
-import com.BossAi.bossAi.entity.User;
+import com.BossAi.bossAi.entity.*;
 import com.BossAi.bossAi.repository.GenerationRepository;
 import com.BossAi.bossAi.repository.UserRepository;
 import com.BossAi.bossAi.request.GenerateImageRequest;
@@ -35,8 +32,9 @@ public class GenerationServiceImpl implements GenerationService {
 
         User user = userRepository.findByEmail(email).orElseThrow();
 
-//        checkLimits(user);
-
+//        if (!canGenerateImage(user)) {
+//            throw new RuntimeException("You're out of images to generate");
+//        }
 
         Generation generation = generationRepository.save(
                 Generation.builder()
@@ -89,6 +87,8 @@ public class GenerationServiceImpl implements GenerationService {
                     generation.getId()
             );
 
+
+
             generation.setImageUrl(imageUrl);
             generation.setGenerationStatus(GenerationStatus.DONE);
             generation.setFinishedAt(LocalDateTime.now());
@@ -135,6 +135,17 @@ public class GenerationServiceImpl implements GenerationService {
         return mapToDto(generation);
     }
 
+//    @Override
+//    public boolean canGenerateImage(User user) {
+//        return user.getPlans().stream()
+//                .filter(UserPlan::isActive)
+//                .anyMatch(p -> p.getImagesUsed() < p.getImagesTotal());
+//    }
+
+    @Override
+    public void useImage(UserPlan userPlan, User user) {
+
+    }
 
     private GenerationDTO mapToDto(Generation generation) {
         return new GenerationDTO(

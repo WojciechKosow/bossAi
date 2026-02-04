@@ -7,6 +7,8 @@ import lombok.*;
 import net.minidev.json.annotate.JsonIgnore;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 
 @Entity
@@ -35,19 +37,10 @@ public class User {
 
     private String avatarImage;
 
-    private boolean enabled = true;
+    private boolean enabled = false;
 
-    private boolean emailVerified = false;
-
-    @Enumerated(EnumType.STRING)
-    @Column(nullable = false)
-    private Plan plan;
-
-    private LocalDateTime planStartedAt;
-
-    private LocalDateTime planResetAt;
-
-    private int generationsUsed;
+    @OneToMany(mappedBy = "user", cascade = CascadeType.ALL)
+    private List<UserPlan> plans = new ArrayList<>();
 
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;

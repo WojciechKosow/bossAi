@@ -12,9 +12,6 @@ import java.util.UUID;
 @NoArgsConstructor
 @AllArgsConstructor
 public class PasswordResetRequest {
-    @Email
-    @NotBlank
-    private String email;
     @NotBlank
     private String newPassword;
 }

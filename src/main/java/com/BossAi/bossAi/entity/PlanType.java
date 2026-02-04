@@ -1,7 +1,10 @@
 package com.BossAi.bossAi.entity;
 
-public enum Plan {
+public enum PlanType {
     FREE,
+    TRIAL,
+    STARTER,
+    BASIC,
     PRO,
     CREATOR
 }

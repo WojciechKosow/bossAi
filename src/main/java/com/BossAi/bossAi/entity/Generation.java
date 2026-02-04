@@ -37,6 +37,9 @@ public class Generation {
     private LocalDateTime createdAt;
     private LocalDateTime finishedAt;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    private UserPlan userPlan;
+
     @PrePersist
     void onCreate() {
         this.createdAt = LocalDateTime.now();
