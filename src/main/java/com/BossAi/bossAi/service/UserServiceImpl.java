@@ -2,10 +2,7 @@ package com.BossAi.bossAi.service;
 
 import com.BossAi.bossAi.dto.UserDTO;
 import com.BossAi.bossAi.entity.*;
-import com.BossAi.bossAi.repository.EmailChangeTokenRepository;
-import com.BossAi.bossAi.repository.PasswordResetTokenRepository;
-import com.BossAi.bossAi.repository.UserRepository;
-import com.BossAi.bossAi.repository.VerificationTokenRepository;
+import com.BossAi.bossAi.repository.*;
 import com.BossAi.bossAi.request.EmailChangeRequest;
 import com.BossAi.bossAi.request.LoginRequest;
 import com.BossAi.bossAi.request.PasswordResetRequest;
@@ -17,6 +14,7 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.Optional;
@@ -33,6 +31,8 @@ public class UserServiceImpl implements UserService {
     private final VerificationTokenRepository verificationTokenRepository;
     private final PasswordResetTokenRepository passwordResetTokenRepository;
     private final EmailChangeTokenRepository emailChangeTokenRepository;
+    private final UserPlanRepository userPlanRepository;
+    private final PlanDefinitionRepository planDefinitionRepository;
 
     @Override
     public AuthResponse register(RegisterRequest request) {
@@ -97,6 +97,8 @@ public class UserServiceImpl implements UserService {
         User user = verificationToken.getUser();
         user.setEnabled(true);
         userRepository.save(user);
+
+        assignFreePlan(user);
         verificationTokenRepository.delete(verificationToken);
     }
 
@@ -228,6 +230,29 @@ public class UserServiceImpl implements UserService {
         user.setEmail(emailChangeToken.getEmail());
         userRepository.save(user);
         emailChangeTokenRepository.delete(emailChangeToken);
+    }
+
+    @Transactional
+    private void assignFreePlan(User user) {
+        if (userPlanRepository.existsByUserAndPlanType(user, PlanType.FREE)) {
+            return;
+        }
+
+        PlanDefinition planDefinition = planDefinitionRepository.findById(PlanType.FREE)
+                .orElseThrow();
+
+        UserPlan userPlan = new UserPlan();
+        userPlan.setUser(user);
+        userPlan.setPlanType(PlanType.FREE);
+        userPlan.setImagesTotal(planDefinition.getImagesLimit());
+        userPlan.setVideosTotal(planDefinition.getVideosLimit());
+        userPlan.setImagesUsed(0);
+        userPlan.setVideosUsed(0);
+        userPlan.setActivatedAt(LocalDateTime.now());
+        userPlan.setExpiresAt(LocalDateTime.now().plusDays(planDefinition.getDurationDays()));
+        userPlan.setActive(true);
+
+        userPlanRepository.save(userPlan);
     }
 
     private UserDTO mapToDTO(User user) {

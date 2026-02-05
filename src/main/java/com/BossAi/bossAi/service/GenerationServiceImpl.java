@@ -32,9 +32,9 @@ public class GenerationServiceImpl implements GenerationService {
 
         User user = userRepository.findByEmail(email).orElseThrow();
 
-//        if (!canGenerateImage(user)) {
-//            throw new RuntimeException("You're out of images to generate");
-//        }
+        if (!canGenerateImage(user)) {
+            throw new RuntimeException("You're out of images to generate");
+        }
 
         Generation generation = generationRepository.save(
                 Generation.builder()
@@ -135,17 +135,18 @@ public class GenerationServiceImpl implements GenerationService {
         return mapToDto(generation);
     }
 
-//    @Override
-//    public boolean canGenerateImage(User user) {
-//        return user.getPlans().stream()
-//                .filter(UserPlan::isActive)
-//                .anyMatch(p -> p.getImagesUsed() < p.getImagesTotal());
-//    }
+    @Override
+    public boolean canGenerateImage(User user) {
+        return user.getPlans().stream()
+                .filter(UserPlan::isActive)
+                .anyMatch(UserPlan::hasImagesLeft);
+    }
 
     @Override
-    public void useImage(UserPlan userPlan, User user) {
+    public void incrementUserImageLimit(UserPlan plan) {
 
     }
+
 
     private GenerationDTO mapToDto(Generation generation) {
         return new GenerationDTO(

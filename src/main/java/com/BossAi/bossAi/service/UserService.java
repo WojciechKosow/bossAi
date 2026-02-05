@@ -1,5 +1,6 @@
 package com.BossAi.bossAi.service;
 
+import com.BossAi.bossAi.entity.User;
 import com.BossAi.bossAi.request.EmailChangeRequest;
 import com.BossAi.bossAi.request.LoginRequest;
 import com.BossAi.bossAi.request.PasswordResetRequest;

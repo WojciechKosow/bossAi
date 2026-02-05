@@ -14,6 +14,6 @@ public interface GenerationService {
     GenerationResponse generateImage(GenerateImageRequest request, String email);
     GenerationResponse generateVideo(GenerateVideoRequest request, String email);
     GenerationDTO getById(UUID id, String email);
-//    boolean canGenerateImage(User user);
-    void useImage(UserPlan userPlan, User user);
+    boolean canGenerateImage(User user);
+    void incrementUserImageLimit(UserPlan plan);
 }
