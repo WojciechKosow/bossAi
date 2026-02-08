@@ -1,4 +1,4 @@
-package com.BossAi.bossAi.service;
+package com.BossAi.bossAi.security;
 
 import com.BossAi.bossAi.repository.UserRepository;
 import lombok.RequiredArgsConstructor;

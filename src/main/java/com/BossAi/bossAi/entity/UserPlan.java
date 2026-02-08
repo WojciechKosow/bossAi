@@ -44,4 +44,8 @@ public class UserPlan {
     public boolean hasVideosLeft() {
         return videosUsed < videosTotal;
     }
+
+    public boolean isActive() {
+        return active && (expiresAt == null || expiresAt.isAfter(LocalDateTime.now()));
+    }
 }

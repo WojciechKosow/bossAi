@@ -3,18 +3,21 @@ package com.BossAi.bossAi.service;
 import com.BossAi.bossAi.dto.GenerationDTO;
 import com.BossAi.bossAi.entity.*;
 import com.BossAi.bossAi.repository.GenerationRepository;
+import com.BossAi.bossAi.repository.UserPlanRepository;
 import com.BossAi.bossAi.repository.UserRepository;
 import com.BossAi.bossAi.request.GenerateImageRequest;
 import com.BossAi.bossAi.request.GenerateVideoRequest;
 import com.BossAi.bossAi.response.GenerationResponse;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpStatus;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.security.access.AccessDeniedException;
-import org.springframework.security.core.Authentication;
-import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.UUID;
 
 @Service
@@ -26,19 +29,23 @@ public class GenerationServiceImpl implements GenerationService {
     private final AiImageService aiImageService;
     private final AiVideoService aiVideoService;
     private final ImageStorageService imageStorageService;
+    private final UserPlanRepository userPlanRepository;
 
     @Override
+    @Transactional
     public GenerationResponse generateImage(GenerateImageRequest request, String email) {
 
         User user = userRepository.findByEmail(email).orElseThrow();
 
-        if (!canGenerateImage(user)) {
-            throw new RuntimeException("You're out of images to generate");
-        }
+        UserPlan userPlan = selectPlanForImage(user);
+
+        userPlan.setImagesUsed(userPlan.getImagesUsed() + 1);
+        userPlanRepository.save(userPlan);
 
         Generation generation = generationRepository.save(
                 Generation.builder()
                         .user(user)
+                        .userPlan(userPlan)
                         .generationType(GenerationType.IMAGE)
                         .generationStatus(GenerationStatus.PENDING)
                         .build()
@@ -51,15 +58,19 @@ public class GenerationServiceImpl implements GenerationService {
 
 
     @Override
+    @Transactional
     public GenerationResponse generateVideo(GenerateVideoRequest request, String email) {
 
         User user = userRepository.findByEmail(email).orElseThrow();
 
-//        checkUserLimits(user);
+        UserPlan userPlan = selectPlanForVideo(user);
+        userPlan.setVideosUsed(userPlan.getVideosUsed() + 1);
+        userPlanRepository.save(userPlan);
 
         Generation generation = generationRepository.save(
                 Generation.builder()
                         .user(user)
+                        .userPlan(userPlan)
                         .generationType(GenerationType.VIDEO)
                         .generationStatus(GenerationStatus.PENDING)
                         .build()
@@ -87,14 +98,18 @@ public class GenerationServiceImpl implements GenerationService {
                     generation.getId()
             );
 
-
-
             generation.setImageUrl(imageUrl);
             generation.setGenerationStatus(GenerationStatus.DONE);
             generation.setFinishedAt(LocalDateTime.now());
+
         } catch (Exception e) {
             generation.setGenerationStatus(GenerationStatus.FAILED);
             generation.setErrorMessage(e.getMessage());
+
+            UserPlan userPlan = generation.getUserPlan();
+
+            userPlan.setImagesUsed(userPlan.getImagesUsed() - 1);
+            userPlanRepository.save(userPlan);
         }
 
         generationRepository.save(generation);
@@ -118,6 +133,10 @@ public class GenerationServiceImpl implements GenerationService {
         } catch (Exception e) {
             generation.setGenerationStatus(GenerationStatus.FAILED);
             generation.setErrorMessage(e.getMessage());
+
+            UserPlan userPlan = generation.getUserPlan();
+            userPlan.setVideosUsed(userPlan.getVideosUsed() -1);
+            userPlanRepository.save(userPlan);
         }
         generationRepository.save(generation);
     }
@@ -135,7 +154,7 @@ public class GenerationServiceImpl implements GenerationService {
         return mapToDto(generation);
     }
 
-    @Override
+/*    @Override
     public boolean canGenerateImage(User user) {
         return user.getPlans().stream()
                 .filter(UserPlan::isActive)
@@ -143,10 +162,45 @@ public class GenerationServiceImpl implements GenerationService {
     }
 
     @Override
-    public void incrementUserImageLimit(UserPlan plan) {
+    public boolean canGenerateVideo(User user) {
+        return user.getPlans().stream()
+                .filter(UserPlan::isActive)
+                .anyMatch(UserPlan::hasVideosLeft);
+    }*/
 
+    @Override
+    public UserPlan selectPlanForImage(User user) {
+        List<UserPlan> activePlans = userPlanRepository.findByUserAndActiveTrue(user);
+        return PLAN_PRIORITY.stream()
+                .flatMap(priority ->
+                        activePlans.stream()
+                                .filter(p -> p.getPlanType() == priority)
+                                .filter(UserPlan::hasImagesLeft)
+                                .filter(UserPlan::isActive)
+                )
+                .findFirst()
+                .orElseThrow(() -> new ResponseStatusException(
+                        HttpStatus.PAYMENT_REQUIRED,
+                        "No active plan"
+                ));
     }
 
+    @Override
+    public UserPlan selectPlanForVideo(User user) {
+        List<UserPlan> activePlans = userPlanRepository.findByUserAndActiveTrue(user);
+        return PLAN_PRIORITY.stream()
+                .flatMap(priority ->
+                        activePlans.stream()
+                                .filter(p -> p.getPlanType() == priority)
+                                .filter(UserPlan::hasVideosLeft)
+                                .filter(UserPlan::isActive)
+                )
+                .findFirst()
+                .orElseThrow(() -> new ResponseStatusException(
+                        HttpStatus.PAYMENT_REQUIRED,
+                        "No active plan"
+                ));
+    }
 
     private GenerationDTO mapToDto(Generation generation) {
         return new GenerationDTO(
@@ -160,4 +214,13 @@ public class GenerationServiceImpl implements GenerationService {
                 generation.getFinishedAt()
         );
     }
+
+    private static final List<PlanType> PLAN_PRIORITY = List.of(
+            PlanType.CREATOR,
+            PlanType.PRO,
+            PlanType.BASIC,
+            PlanType.STARTER,
+            PlanType.TRIAL,
+            PlanType.FREE
+    );
 }

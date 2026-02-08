@@ -1,7 +1,6 @@
 package com.BossAi.bossAi.service;
 
 import com.BossAi.bossAi.dto.GenerationDTO;
-import com.BossAi.bossAi.entity.Generation;
 import com.BossAi.bossAi.entity.User;
 import com.BossAi.bossAi.entity.UserPlan;
 import com.BossAi.bossAi.request.GenerateImageRequest;
@@ -12,8 +11,14 @@ import java.util.UUID;
 
 public interface GenerationService {
     GenerationResponse generateImage(GenerateImageRequest request, String email);
+
     GenerationResponse generateVideo(GenerateVideoRequest request, String email);
+
     GenerationDTO getById(UUID id, String email);
-    boolean canGenerateImage(User user);
-    void incrementUserImageLimit(UserPlan plan);
+
+    //    boolean canGenerateImage(User user);
+//    boolean canGenerateVideo(User user);
+    UserPlan selectPlanForImage(User user);
+
+    UserPlan selectPlanForVideo(User user);
 }

@@ -1,6 +1,5 @@
 package com.BossAi.bossAi.security;
 
-import com.BossAi.bossAi.service.CustomUserDetailsService;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
