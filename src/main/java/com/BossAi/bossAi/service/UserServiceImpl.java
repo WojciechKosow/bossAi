@@ -28,11 +28,10 @@ public class UserServiceImpl implements UserService {
     private final PasswordEncoder passwordEncoder;
     private final JwtProvider jwtProvider;
     private final MailService mailService;
-    private final VerificationTokenRepository verificationTokenRepository;
-    private final PasswordResetTokenRepository passwordResetTokenRepository;
     private final EmailChangeTokenRepository emailChangeTokenRepository;
     private final UserPlanRepository userPlanRepository;
     private final PlanDefinitionRepository planDefinitionRepository;
+    private final UserTokenRepository userTokenRepository;
 
     @Override
     public AuthResponse register(RegisterRequest request) {
@@ -46,20 +45,28 @@ public class UserServiceImpl implements UserService {
         user.setDisplayName(request.getDisplayName());
         user.setEmail(request.getEmail());
         user.setPassword(passwordEncoder.encode(request.getPassword()));
-//        user.setPlan(PlanType.FREE);
+
 
         userRepository.save(user);
 
+
+        UUID tokenId = UUID.randomUUID();
         String rawToken = UUID.randomUUID().toString();
-        String hashedToken = passwordEncoder.encode(rawToken);
-        VerificationToken verificationToken  = VerificationToken.builder()
-                .token(hashedToken)
+
+        UserToken token = UserToken.builder()
+                .id(tokenId)
                 .user(user)
+                .type(TokenType.EMAIL_VERIFICATION)
+                .tokenHash(passwordEncoder.encode(rawToken))
                 .expiresAt(LocalDateTime.now().plusMinutes(30))
+                .used(false)
+                .createdAt(LocalDateTime.now())
                 .build();
 
-        verificationTokenRepository.save(verificationToken);
-        mailService.sendVerificationEmail(user.getEmail(), rawToken);
+
+        userTokenRepository.save(token);
+
+        mailService.sendVerificationEmail(user.getEmail(), tokenId, rawToken);
 
         return new AuthResponse(null, mapToDTO(user));
     }
@@ -83,23 +90,35 @@ public class UserServiceImpl implements UserService {
     }
 
     @Override
-    public void verifyAccount(String token) {
+    public void verifyAccount(UUID tokenId, String rawToken) {
 
-        VerificationToken verificationToken = verificationTokenRepository.findAll().stream()
-                .filter(t -> passwordEncoder.matches(token, t.getToken()))
-                .findFirst()
+        UserToken token = userTokenRepository.findById(tokenId)
                 .orElseThrow(() -> new RuntimeException("Invalid token"));
 
-        if (verificationToken.getExpiresAt().isBefore(LocalDateTime.now())) {
-            throw new RuntimeException("The token has expired");
+
+        if (token.isUsed()) {
+            throw new RuntimeException("Token already used");
         }
 
-        User user = verificationToken.getUser();
-        user.setEnabled(true);
-        userRepository.save(user);
+        if (token.getExpiresAt().isBefore(LocalDateTime.now())) {
+            throw new RuntimeException("Token expired");
+        }
 
-        assignFreePlan(user);
-        verificationTokenRepository.delete(verificationToken);
+        if (!passwordEncoder.matches(rawToken, token.getTokenHash())) {
+            throw new RuntimeException("Invalid token");
+        }
+
+        if (!token.getType().equals(TokenType.EMAIL_VERIFICATION)) {
+            throw new RuntimeException("Invalid token");
+        }
+
+        User user = token.getUser();
+        user.setEnabled(true);
+
+        token.setUsed(true);
+
+        userRepository.save(user);
+        userTokenRepository.save(token);
     }
 
     @Override
@@ -112,20 +131,26 @@ public class UserServiceImpl implements UserService {
             throw new RuntimeException("Account has been already verified");
         }
 
-        Optional<VerificationToken> oldToken = verificationTokenRepository.findByUser(user);
+        Optional<UserToken> oldToken = userTokenRepository.findByUser(user);
 
-        oldToken.ifPresent(verificationTokenRepository::delete);
+        oldToken.ifPresent(userTokenRepository::delete);
 
+        UUID tokenId = UUID.randomUUID();
         String rawToken = UUID.randomUUID().toString();
-        String hashedToken = passwordEncoder.encode(rawToken);
-        VerificationToken verificationToken = VerificationToken.builder()
-                .token(hashedToken)
+
+        UserToken token = UserToken.builder()
+                .id(tokenId)
                 .user(user)
+                .type(TokenType.EMAIL_VERIFICATION)
+                .tokenHash(passwordEncoder.encode(rawToken))
                 .expiresAt(LocalDateTime.now().plusMinutes(30))
+                .used(false)
+                .createdAt(LocalDateTime.now())
                 .build();
 
-        verificationTokenRepository.save(verificationToken);
-        mailService.sendVerificationEmail(email, rawToken);
+
+        userTokenRepository.save(token);
+        mailService.sendVerificationEmail(email, tokenId, rawToken);
     }
 
     @Override
@@ -133,39 +158,56 @@ public class UserServiceImpl implements UserService {
         User user = userRepository.findByEmail(email)
                 .orElseThrow(() -> new RuntimeException("User not found"));
 
-        Optional<PasswordResetToken> oldToken = passwordResetTokenRepository.findByUser(user);
-        oldToken.ifPresent(passwordResetTokenRepository::delete);
+
+        Optional<UserToken> oldToken = userTokenRepository.findByUser(user);
+        oldToken.ifPresent(userTokenRepository::delete);
 
         String rawToken = UUID.randomUUID().toString();
-        String hashedToken = passwordEncoder.encode(rawToken);
-        PasswordResetToken passwordResetToken = PasswordResetToken.builder()
-                .token(hashedToken)
+        UUID tokenId = UUID.randomUUID();
+
+        UserToken token = UserToken.builder()
+                .id(tokenId)
                 .user(user)
+                .type(TokenType.PASSWORD_RESET)
+                .tokenHash(passwordEncoder.encode(rawToken))
                 .expiresAt(LocalDateTime.now().plusMinutes(30))
+                .used(false)
+                .createdAt(LocalDateTime.now())
                 .build();
 
-        passwordResetTokenRepository.save(passwordResetToken);
-        mailService.sendPasswordResetEmail(email, rawToken);
+        userTokenRepository.save(token);
+        mailService.sendPasswordResetEmail(email, tokenId, rawToken);
     }
 
     @Override
-    public void resetPassword(String token, PasswordResetRequest request) {
+    public void resetPassword(UUID tokenId, String rawToken, PasswordResetRequest request) {
 
-        PasswordResetToken passwordResetToken = passwordResetTokenRepository.findAll().stream()
-                .filter(t -> passwordEncoder.matches(token, t.getToken()))
-                .findFirst()
+        UserToken token = userTokenRepository.findById(tokenId)
                 .orElseThrow(() -> new RuntimeException("Invalid token"));
 
-        User user = passwordResetToken.getUser();
+        if (token.isUsed()) {
+            throw new RuntimeException("Token already used");
+        }
 
-        if (passwordResetToken.getExpiresAt().isBefore(LocalDateTime.now())) {
+        if (token.getExpiresAt().isBefore(LocalDateTime.now())) {
             throw new RuntimeException("Invalid token");
         }
+
+        if (!passwordEncoder.matches(rawToken, token.getTokenHash())) {
+            throw new RuntimeException("Invalid token");
+        }
+
+        if (!token.getType().equals(TokenType.PASSWORD_RESET)) {
+            throw new RuntimeException("Invalid token");
+        }
+
+        User user = token.getUser();
 
         user.setPassword(passwordEncoder.encode(request.getNewPassword()));
         userRepository.save(user);
 
-        passwordResetTokenRepository.delete(passwordResetToken);
+        token.setUsed(true);
+        userTokenRepository.save(token);
     }
 
     @Override
@@ -198,7 +240,7 @@ public class UserServiceImpl implements UserService {
                 .build();
 
         emailChangeTokenRepository.save(emailChangeToken);
-        mailService.sendEmailChangeEmail(user.getEmail(), rawToken);
+//        mailService.sendEmailChangeEmail(user.getEmail(), rawToken);
     }
 
     @Override
@@ -207,7 +249,7 @@ public class UserServiceImpl implements UserService {
                 .filter(t -> passwordEncoder.matches(token, t.getToken()))
                 .findFirst()
                 .orElseThrow(() -> new RuntimeException("Invalid token"));
-        mailService.sendEmailChangeConfirmation(emailChangeToken.getEmail(), token);
+//        mailService.sendEmailChangeConfirmation(emailChangeToken.getEmail(), token);
     }
 
     @Override

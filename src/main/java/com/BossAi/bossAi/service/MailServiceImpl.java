@@ -6,6 +6,8 @@ import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.stereotype.Service;
 
+import java.util.UUID;
+
 @Service
 @RequiredArgsConstructor
 public class MailServiceImpl implements MailService {
@@ -14,9 +16,9 @@ public class MailServiceImpl implements MailService {
 
 
     @Override
-    public void sendVerificationEmail(String to, String token) {
+    public void sendVerificationEmail(String to, UUID tokenId, String token) {
         String subject = "Verify your email to activate your account";
-        String confirmationUrl = "http://localhost:8080/api/auth/verify?token=" + token;
+        String confirmationUrl = "http://localhost:8080/api/auth/verify?tokenId=" + tokenId + "&token=" + token;
         String content = """
                  <div style="font-family: Arial, sans-serif; background-color: #f5f6fa; padding: 40px;">
                             <table align="center" width="600" style="background: #ffffff; border-radius: 8px; padding: 40px;">
@@ -78,9 +80,9 @@ public class MailServiceImpl implements MailService {
     }
 
     @Override
-    public void sendPasswordResetEmail(String to, String token) {
+    public void sendPasswordResetEmail(String to, UUID tokenId, String token) {
         String subject = "Reset your password";
-        String passwordResetUrl = "http://localhost:8080/api/auth/reset-password?token=" + token;
+        String passwordResetUrl = "http://localhost:8080/api/auth/reset-password?tokenId=" + tokenId + "&token=" + token;
         String content = """
                 <div style="font-family: Arial, sans-serif; background-color: #f5f6fa; padding: 40px;">
                     <table align="center" width="600" style="background: #ffffff; border-radius: 8px; padding: 40px;">
@@ -143,9 +145,9 @@ public class MailServiceImpl implements MailService {
     }
 
     @Override
-    public void sendEmailChangeEmail(String to, String token) {
+    public void sendEmailChangeEmail(String to, UUID tokenId, String token) {
         String subject = "Change your email";
-        String emailChangeUrl = "http://localhost:8080/api/auth/change-email?token=" + token;
+        String emailChangeUrl = "http://localhost:8080/api/auth/change-email?tokenId=" + tokenId + "&token=" + token;
         String content = """
                     <div style="font-family: Arial, sans-serif; background-color: #f5f6fa; padding: 40px;">
                         <table align="center" width="600" style="background: #ffffff; border-radius: 8px; padding: 40px;">
@@ -208,9 +210,9 @@ public class MailServiceImpl implements MailService {
     }
 
     @Override
-    public void sendEmailChangeConfirmation(String to, String token) {
+    public void sendEmailChangeConfirmation(String to, UUID tokenId, String token) {
         String subject = "Confirm your new email";
-        String emailChangeConfirmationUrl = "http://localhost:8080/api/auth/change-email-confirmation?token=" + token;
+        String emailChangeConfirmationUrl = "http://localhost:8080/api/auth/change-email-confirmation?tokenId=" + tokenId + "&token=" + token;
         String content = """
                 <div style="font-family: Arial, sans-serif; background-color: #f5f6fa; padding: 40px;">
                     <table align="center" width="600" style="background: #ffffff; border-radius: 8px; padding: 40px;">

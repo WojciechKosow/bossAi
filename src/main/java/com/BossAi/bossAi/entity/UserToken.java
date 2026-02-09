@@ -11,24 +11,30 @@ import java.util.UUID;
 
 @Entity
 @Data
-@Table(name = "verification_tokens")
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class VerificationToken {
+@Table(name = "user_tokens", indexes = {
+        @Index(columnList = "user_id"),
+        @Index(columnList = "expiresAt")
+})
+public class UserToken {
 
     @Id
-    @GeneratedValue
     private UUID id;
 
-    @Column(nullable = false, unique = true)
-    private String token;
-
-    @OneToOne(fetch = FetchType.EAGER)
-    @JoinColumn(nullable = false, name = "user_id")
+    @ManyToOne(fetch = FetchType.LAZY)
     private User user;
 
-    @Column
+    @Enumerated(EnumType.STRING)
+    private TokenType type;
+
+    @Column(nullable = false)
+    private String tokenHash;
+
     private LocalDateTime expiresAt;
 
+    private boolean used;
+
+    private LocalDateTime createdAt;
 }

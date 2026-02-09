@@ -8,6 +8,8 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.parameters.P;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.UUID;
+
 @RestController
 @RequestMapping("/api/auth")
 @RequiredArgsConstructor
@@ -27,8 +29,8 @@ public class AuthController {
     }
 
     @GetMapping("/verify")
-    public ResponseEntity<String> verifyAccount(@RequestParam String token) {
-        userService.verifyAccount(token);
+    public ResponseEntity<String> verifyAccount(@RequestParam UUID tokenId, @RequestParam String token) {
+        userService.verifyAccount(tokenId, token);
         return ResponseEntity.ok("Your account has been activated.");
     }
 
@@ -45,8 +47,8 @@ public class AuthController {
     }
 
     @PostMapping("reset-password")
-    public ResponseEntity<String> resetPassword(@RequestParam String token, @RequestBody PasswordResetRequest request) {
-        userService.resetPassword(token, request);
+    public ResponseEntity<String> resetPassword(@RequestParam UUID tokenId, @RequestParam String token, @RequestBody PasswordResetRequest request) {
+        userService.resetPassword(tokenId, token, request);
         return ResponseEntity.ok("Successfully changed password");
     }
 
