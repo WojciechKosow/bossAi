@@ -3,6 +3,7 @@ package com.BossAi.bossAi.controller;
 import com.BossAi.bossAi.request.*;
 import com.BossAi.bossAi.response.AuthResponse;
 import com.BossAi.bossAi.service.UserService;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.parameters.P;
@@ -17,13 +18,13 @@ public class AuthController {
     private final UserService userService;
 
     @PostMapping("/register")
-    public ResponseEntity<AuthResponse> register(@RequestBody RegisterRequest request) {
+    public ResponseEntity<AuthResponse> register(@Valid @RequestBody RegisterRequest request) {
         AuthResponse res = userService.register(request);
         return ResponseEntity.ok(res);
     }
 
     @PostMapping("/login")
-    public ResponseEntity<AuthResponse> login(@RequestBody LoginRequest request) {
+    public ResponseEntity<AuthResponse> login(@Valid @RequestBody LoginRequest request) {
         AuthResponse res = userService.login(request);
         return ResponseEntity.ok(res);
     }
@@ -35,38 +36,38 @@ public class AuthController {
     }
 
     @PostMapping("resend-verification-email")
-    public ResponseEntity<String> resendVerificationEmail(@RequestBody EmailVerificationRequest request) {
+    public ResponseEntity<String> resendVerificationEmail(@Valid @RequestBody EmailVerificationRequest request) {
         userService.resendVerificationEmail(request.getEmail());
         return ResponseEntity.ok("Verification code has been resend to your email");
     }
 
     @PostMapping("forgot-password")
-    public ResponseEntity<String> forgotPassword(@RequestBody EmailVerificationRequest request) {
+    public ResponseEntity<String> forgotPassword(@Valid @RequestBody EmailVerificationRequest request) {
         userService.forgotPassword(request.getEmail());
         return ResponseEntity.ok("Password reset link has been sent to your account");
     }
 
     @PostMapping("reset-password")
-    public ResponseEntity<String> resetPassword(@RequestParam UUID tokenId, @RequestParam String token, @RequestBody PasswordResetRequest request) {
+    public ResponseEntity<String> resetPassword(@RequestParam UUID tokenId, @RequestParam String token, @Valid @RequestBody PasswordResetRequest request) {
         userService.resetPassword(tokenId, token, request);
         return ResponseEntity.ok("Successfully changed password");
     }
 
     @PostMapping("request-email-change")
-    public ResponseEntity<String> requestEmailChange(@RequestBody EmailChangeRequest request) {
+    public ResponseEntity<String> requestEmailChange(@Valid @RequestBody EmailChangeRequest request) {
         userService.requestEmailChange(request);
         return ResponseEntity.ok("Email change message has been sent to to your email");
     }
 
     @PostMapping("change-email")
-    public ResponseEntity<String> confirmEmailChangeRequest(@RequestParam String token) {
-        userService.requestEmailChangeConfirmation(token);
+    public ResponseEntity<String> confirmEmailChangeRequest(@RequestParam UUID tokenId, @RequestParam String token) {
+        userService.requestEmailChangeConfirmation(tokenId, token);
         return ResponseEntity.ok("A confirmation link has been sent to your new email");
     }
 
     @PostMapping("/change-email-confirmation")
-    public ResponseEntity<String> confirmEmailChange(@RequestParam String token, @RequestBody EmailChangeConfirmationRequest request) {
-        userService.confirmEmailChange(token, request.getPassword());
+    public ResponseEntity<String> confirmEmailChange(@RequestParam UUID tokenId, @RequestParam String token, @Valid @RequestBody EmailChangeConfirmationRequest request) {
+        userService.confirmEmailChange(tokenId, token, request.getPassword());
         return ResponseEntity.ok("Successfully changed your email");
     }
 }

@@ -60,6 +60,7 @@ public class UserServiceImpl implements UserService {
                 .tokenHash(passwordEncoder.encode(rawToken))
                 .expiresAt(LocalDateTime.now().plusMinutes(30))
                 .used(false)
+                .payload(null)
                 .createdAt(LocalDateTime.now())
                 .build();
 
@@ -90,6 +91,7 @@ public class UserServiceImpl implements UserService {
     }
 
     @Override
+    @Transactional
     public void verifyAccount(UUID tokenId, String rawToken) {
 
         UserToken token = userTokenRepository.findById(tokenId)
@@ -117,6 +119,8 @@ public class UserServiceImpl implements UserService {
 
         token.setUsed(true);
 
+        assignFreePlan(user);
+
         userRepository.save(user);
         userTokenRepository.save(token);
     }
@@ -131,7 +135,7 @@ public class UserServiceImpl implements UserService {
             throw new RuntimeException("Account has been already verified");
         }
 
-        Optional<UserToken> oldToken = userTokenRepository.findByUser(user);
+        Optional<UserToken> oldToken = userTokenRepository.findByUserAndTypeAndUsedFalse(user, TokenType.EMAIL_VERIFICATION);
 
         oldToken.ifPresent(userTokenRepository::delete);
 
@@ -145,6 +149,7 @@ public class UserServiceImpl implements UserService {
                 .tokenHash(passwordEncoder.encode(rawToken))
                 .expiresAt(LocalDateTime.now().plusMinutes(30))
                 .used(false)
+                .payload(null)
                 .createdAt(LocalDateTime.now())
                 .build();
 
@@ -159,7 +164,7 @@ public class UserServiceImpl implements UserService {
                 .orElseThrow(() -> new RuntimeException("User not found"));
 
 
-        Optional<UserToken> oldToken = userTokenRepository.findByUser(user);
+        Optional<UserToken> oldToken = userTokenRepository.findByUserAndTypeAndUsedFalse(user, TokenType.PASSWORD_RESET);
         oldToken.ifPresent(userTokenRepository::delete);
 
         String rawToken = UUID.randomUUID().toString();
@@ -172,6 +177,7 @@ public class UserServiceImpl implements UserService {
                 .tokenHash(passwordEncoder.encode(rawToken))
                 .expiresAt(LocalDateTime.now().plusMinutes(30))
                 .used(false)
+                .payload(null)
                 .createdAt(LocalDateTime.now())
                 .build();
 
@@ -180,6 +186,7 @@ public class UserServiceImpl implements UserService {
     }
 
     @Override
+    @Transactional
     public void resetPassword(UUID tokenId, String rawToken, PasswordResetRequest request) {
 
         UserToken token = userTokenRepository.findById(tokenId)
@@ -227,51 +234,106 @@ public class UserServiceImpl implements UserService {
             throw new RuntimeException("Invalid Password");
         }
 
-        Optional<EmailChangeToken> oldEmailChangeToken = emailChangeTokenRepository.findByUser(user);
-        oldEmailChangeToken.ifPresent(emailChangeTokenRepository::delete);
+        Optional<UserToken> oldToken = userTokenRepository.findByUserAndTypeAndUsedFalse(user, TokenType.EMAIL_CHANGE);
+        oldToken.ifPresent(userTokenRepository::delete);
 
         String rawToken = UUID.randomUUID().toString();
-        String hashedToken = passwordEncoder.encode(rawToken);
-        EmailChangeToken emailChangeToken = EmailChangeToken.builder()
-                .token(hashedToken)
+        UUID tokenId = UUID.randomUUID();
+
+
+        UserToken token = UserToken.builder()
+                .id(tokenId)
                 .user(user)
-                .email(request.getNewEmail())
+                .type(TokenType.EMAIL_CHANGE)
+                .tokenHash(passwordEncoder.encode(rawToken))
                 .expiresAt(LocalDateTime.now().plusMinutes(30))
+                .used(false)
+                .payload(request.getNewEmail())
+                .createdAt(LocalDateTime.now())
                 .build();
 
-        emailChangeTokenRepository.save(emailChangeToken);
-//        mailService.sendEmailChangeEmail(user.getEmail(), rawToken);
+        userTokenRepository.save(token);
+        mailService.sendEmailChangeEmail(user.getEmail(), tokenId, rawToken);
     }
 
     @Override
-    public void requestEmailChangeConfirmation(String token) {
-        EmailChangeToken emailChangeToken = emailChangeTokenRepository.findAll().stream()
-                .filter(t -> passwordEncoder.matches(token, t.getToken()))
-                .findFirst()
+    public void requestEmailChangeConfirmation(UUID tokenId, String rawToken) {
+
+        UserToken token = userTokenRepository.findById(tokenId)
                 .orElseThrow(() -> new RuntimeException("Invalid token"));
-//        mailService.sendEmailChangeConfirmation(emailChangeToken.getEmail(), token);
+
+        if (token.isUsed()) {
+            throw new RuntimeException("Token already used");
+        }
+
+        if (token.getExpiresAt().isBefore(LocalDateTime.now())) {
+            throw new RuntimeException("Invalid token");
+        }
+
+        if (!passwordEncoder.matches(rawToken, token.getTokenHash())) {
+            throw new RuntimeException("Invalid token");
+        }
+
+        if (!token.getType().equals(TokenType.EMAIL_CHANGE)) {
+            throw new RuntimeException("Invalid token");
+        }
+
+        User user = token.getUser();
+
+        String rawConfirmationToken = UUID.randomUUID().toString();
+        UUID confirmationTokenId = UUID.randomUUID();
+
+        UserToken confirmationToken = UserToken.builder()
+                .id(confirmationTokenId)
+                .user(user)
+                .type(TokenType.EMAIL_CHANGE)
+                .tokenHash(passwordEncoder.encode(rawConfirmationToken))
+                .expiresAt(LocalDateTime.now().plusMinutes(30))
+                .used(false)
+                .payload(token.getPayload())
+                .createdAt(LocalDateTime.now())
+                .build();
+
+        userTokenRepository.save(confirmationToken);
+
+        mailService.sendEmailChangeConfirmation(token.getPayload(), confirmationTokenId, rawConfirmationToken);
+        token.setUsed(true);
+        userTokenRepository.save(token);
     }
 
     @Override
-    public void confirmEmailChange(String token, String password) {
-        EmailChangeToken emailChangeToken = emailChangeTokenRepository.findAll().stream()
-                .filter(t -> passwordEncoder.matches(token, t.getToken()))
-                .findFirst()
+    @Transactional
+    public void confirmEmailChange(UUID tokenId, String rawToken, String password) {
+
+        UserToken token = userTokenRepository.findById(tokenId)
                 .orElseThrow(() -> new RuntimeException("Invalid token"));
 
-        User user = emailChangeToken.getUser();
+        if (token.isUsed()) {
+            throw new RuntimeException("Token already used");
+        }
+
+        if (token.getExpiresAt().isBefore(LocalDateTime.now())) {
+            throw new RuntimeException("Invalid token");
+        }
+
+        if (!passwordEncoder.matches(rawToken, token.getTokenHash())) {
+            throw new RuntimeException("Invalid token");
+        }
+
+        if (!token.getType().equals(TokenType.EMAIL_CHANGE)) {
+            throw new RuntimeException("Invalid token");
+        }
+
+        User user = token.getUser();
 
         if (!passwordEncoder.matches(password, user.getPassword())) {
             throw new RuntimeException("Invalid password");
         }
 
-        if (emailChangeToken.getExpiresAt().isBefore(LocalDateTime.now())) {
-            throw new RuntimeException("Invalid token");
-        }
-
-        user.setEmail(emailChangeToken.getEmail());
+        user.setEmail(token.getPayload());
         userRepository.save(user);
-        emailChangeTokenRepository.delete(emailChangeToken);
+        token.setUsed(true);
+        userTokenRepository.save(token);
     }
 
     @Transactional

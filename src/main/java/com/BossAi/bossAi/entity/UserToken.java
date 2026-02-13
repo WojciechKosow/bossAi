@@ -16,7 +16,8 @@ import java.util.UUID;
 @AllArgsConstructor
 @Table(name = "user_tokens", indexes = {
         @Index(columnList = "user_id"),
-        @Index(columnList = "expiresAt")
+        @Index(columnList = "expiresAt"),
+        @Index(columnList = "user_id, type, used")
 })
 public class UserToken {
 
@@ -35,6 +36,8 @@ public class UserToken {
     private LocalDateTime expiresAt;
 
     private boolean used;
+
+    private String payload;
 
     private LocalDateTime createdAt;
 }

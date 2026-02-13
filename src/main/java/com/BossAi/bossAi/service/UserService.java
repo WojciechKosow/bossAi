@@ -1,6 +1,5 @@
 package com.BossAi.bossAi.service;
 
-import com.BossAi.bossAi.entity.User;
 import com.BossAi.bossAi.request.EmailChangeRequest;
 import com.BossAi.bossAi.request.LoginRequest;
 import com.BossAi.bossAi.request.PasswordResetRequest;
@@ -18,6 +17,6 @@ public interface UserService {
     void forgotPassword(String email);
     void resetPassword(UUID tokenId, String token, PasswordResetRequest request);
     void requestEmailChange(EmailChangeRequest request);
-    void requestEmailChangeConfirmation(String token);
-    void confirmEmailChange(String token, String password);
+    void requestEmailChangeConfirmation(UUID tokenId, String token);
+    void confirmEmailChange(UUID tokenId, String token, String password);
 }

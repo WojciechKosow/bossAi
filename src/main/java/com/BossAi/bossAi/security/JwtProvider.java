@@ -1,17 +1,23 @@
 package com.BossAi.bossAi.security;
 
+import com.BossAi.bossAi.entity.User;
+import com.BossAi.bossAi.repository.UserRepository;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.SignatureAlgorithm;
 import io.jsonwebtoken.security.Keys;
+import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.security.Key;
 import java.util.Date;
+import java.util.Optional;
+import java.util.UUID;
 import java.util.function.Function;
 
 @Component
+@RequiredArgsConstructor
 public class JwtProvider {
 
     @Value("${jwt.secret}")
@@ -20,14 +26,19 @@ public class JwtProvider {
     @Value("${jwt.expiration}")
     private long expiration;
 
+    private final UserRepository userRepository;
+
 
     public String generateToken(String email) {
+
+        User user = userRepository.findByEmail(email).orElseThrow();
+
         Date now = new Date();
 
         Date expiry = new Date(now.getTime() + expiration);
 
         return Jwts.builder()
-                .setSubject(email)
+                .setSubject(user.getId().toString())
                 .setIssuedAt(now)
                 .setExpiration(expiry)
                 .signWith(getSigningKey(), SignatureAlgorithm.HS256)
@@ -38,9 +49,17 @@ public class JwtProvider {
         if (token == null || token.isEmpty()) return null;
         String cleanToken = token.replace("Bearer ", "");
         try {
-            return extractClaimsFromToken(cleanToken, Claims::getSubject);
+            String userId = extractClaimsFromToken(cleanToken, Claims::getSubject);
+
+            UUID cleanUserId = UUID.fromString(userId);
+
+
+            User user = userRepository.findById(cleanUserId).orElseThrow();
+
+//            extractClaimsFromToken(cleanToken, Claims::getSubject)
+            return user.getEmail();
         } catch (Exception e) {
-            return e.getMessage();
+            return null;
         }
     }
 

@@ -20,6 +20,4 @@ public class RegisterRequest {
     private String email;
     @NotBlank
     private String password;
-    @NotNull
-    private LocalDateTime createdAt;
 }
