@@ -1,5 +1,8 @@
 package com.BossAi.bossAi.security;
 
+import com.BossAi.bossAi.ratelimit.RateLimitFilter;
+import com.BossAi.bossAi.ratelimit.RateLimitService;
+import jakarta.servlet.Filter;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -19,10 +22,12 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 public class SecurityConfig {
 
     private final JwtAuthFilter jwtAuthFilter;
+    private final RateLimitFilter rateLimitFilter;
 
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http
+                .addFilterBefore(rateLimitFilter, UsernamePasswordAuthenticationFilter.class)
                 .cors(cors -> {
                 })
                 .csrf(csrf -> csrf.disable())
