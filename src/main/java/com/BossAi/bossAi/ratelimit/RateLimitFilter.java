@@ -15,12 +15,13 @@ import java.io.IOException;
 public class RateLimitFilter extends OncePerRequestFilter {
 
     private final RateLimitService rateLimitService;
+    private final IpResolver ipResolver;
 
     @Override
     protected void doFilterInternal(
             HttpServletRequest request, HttpServletResponse response, FilterChain filterChain
     ) throws ServletException, IOException {
-        String ip = request.getRemoteAddr();
+        String ip = ipResolver.resolveClientIp(request);
         String path = request.getRequestURI();
 
         if (path.contains("/api/auth/register")) {
