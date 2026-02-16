@@ -24,19 +24,19 @@ public class RateLimitFilter extends OncePerRequestFilter {
         String ip = ipResolver.resolveClientIp(request);
         String path = request.getRequestURI();
 
-        if (path.contains("/api/auth/register")) {
+        if (path.equals("/api/auth/register")) {
             rateLimitService.checkRateLimit(ip + ":register", RateLimitType.REGISTER);
         }
 
-        if (path.contains("/api/auth/login")) {
+        if (path.equals("/api/auth/login")) {
             rateLimitService.checkRateLimit(ip + ":login", RateLimitType.LOGIN);
         }
 
-        if (path.contains("/api/auth/forgot-password")) {
+        if (path.equals("/api/auth/forgot-password")) {
             rateLimitService.checkRateLimit(ip + ":forgot", RateLimitType.FORGOT_PASSWORD);
         }
 
-        if (path.contains("/api/auth/resend-verification-email")) {
+        if (path.equals("/api/auth/resend-verification-email")) {
             rateLimitService.checkRateLimit(ip + ":resend", RateLimitType.RESEND_VERIFICATION);
         }
 

@@ -73,14 +73,32 @@ public class UserServiceImpl implements UserService {
     }
 
     @Override
+    @Transactional
     public AuthResponse login(LoginRequest request) {
 
         User user = userRepository.findByEmail(request.getEmail())
                 .orElseThrow(() -> new RuntimeException("invalid password or email"));
 
+        if (user.getLockUntil() != null && user.getLockUntil().isAfter(LocalDateTime.now())) {
+            throw new RuntimeException("Account is temporarily locked. try again later.");
+        }
+
         if (!passwordEncoder.matches(request.getPassword(), user.getPassword())) {
+
+            user.setFailedLoginAttempts(user.getFailedLoginAttempts() + 1);
+
+            if (user.getFailedLoginAttempts() >= 5) {
+                user.setLockUntil(LocalDateTime.now().plusMinutes(5));
+                user.setFailedLoginAttempts(0);
+            }
+
+            userRepository.save(user);
             throw new RuntimeException("invalid password or email");
         }
+
+        user.setFailedLoginAttempts(0);
+        user.setLockUntil(null);
+        userRepository.save(user);
 
         if (!user.isEnabled()) {
             throw new RuntimeException("Your account hasn't been activated yet");
@@ -128,8 +146,16 @@ public class UserServiceImpl implements UserService {
     @Override
     public void resendVerificationEmail(String email) {
 
-        User user = userRepository.findByEmail(email)
-                .orElseThrow(() -> new RuntimeException("User not found"));
+        Optional<User> userOptional = userRepository.findByEmail(email);
+
+        if (userOptional.isEmpty()) {
+            return;
+        }
+
+        User user = userOptional.get();
+
+//        User user = userRepository.findByEmail(email)
+//                .orElseThrow(() -> new RuntimeException("User not found"));
 
         if (user.isEnabled()) {
             throw new RuntimeException("Account has been already verified");
@@ -160,8 +186,17 @@ public class UserServiceImpl implements UserService {
 
     @Override
     public void forgotPassword(String email) {
-        User user = userRepository.findByEmail(email)
-                .orElseThrow(() -> new RuntimeException("User not found"));
+
+        Optional<User> userOptional = userRepository.findByEmail(email);
+
+        if (userOptional.isEmpty()) {
+            return;
+        }
+
+        User user = userOptional.get();
+
+//        User user = userRepository.findByEmail(email)
+//                .orElseThrow(() -> new RuntimeException("User not found"));
 
 
         Optional<UserToken> oldToken = userTokenRepository.findByUserAndTypeAndUsedFalse(user, TokenType.PASSWORD_RESET);
@@ -227,8 +262,16 @@ public class UserServiceImpl implements UserService {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         String email = authentication.getName();
 
-        User user = userRepository.findByEmail(email)
-                .orElseThrow(() -> new RuntimeException("User not found"));
+        Optional<User> userOptional = userRepository.findByEmail(email);
+
+        if (userOptional.isEmpty()) {
+            return;
+        }
+
+        User user = userOptional.get();
+
+//        User user = userRepository.findByEmail(email)
+//                .orElseThrow(() -> new RuntimeException("User not found"));
 
         if (!passwordEncoder.matches(request.getPassword(), user.getPassword())) {
             throw new RuntimeException("Invalid Password");

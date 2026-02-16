@@ -7,7 +7,7 @@ import org.springframework.stereotype.Component;
 public class IpResolver {
 
     public String resolveClientIp(HttpServletRequest request) {
-        String cfHeader = request.getHeader("CF-Connection-IP");
+        String cfHeader = request.getHeader("CF-Connecting-IP");
 
         if (isValid(cfHeader)) {
             return cfHeader;

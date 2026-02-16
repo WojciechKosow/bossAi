@@ -45,6 +45,9 @@ public class User {
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 
+    private int failedLoginAttempts;
+    private LocalDateTime lockUntil;
+
     @PrePersist
     void onCreate() {
         this.createdAt = LocalDateTime.now();

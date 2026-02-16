@@ -1,5 +1,6 @@
 package com.BossAi.bossAi.ratelimit;
 
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
@@ -12,10 +13,12 @@ public class InMemoryRateLimitService implements RateLimitService {
     private static class Bucket {
         int tokens;
         Instant lastRefill;
+        Instant lastAccess;
 
         Bucket(int tokens) {
             this.tokens = tokens;
             this.lastRefill = Instant.now();
+            this.lastAccess = Instant.now();
         }
     }
 
@@ -33,6 +36,7 @@ public class InMemoryRateLimitService implements RateLimitService {
             }
 
             bucket.tokens--;
+            bucket.lastAccess = Instant.now();
         }
     }
 
@@ -48,5 +52,20 @@ public class InMemoryRateLimitService implements RateLimitService {
             bucket.tokens = type.getCapacity();
             bucket.lastRefill = now;
         }
+    }
+
+    @Scheduled(fixedRate = 5 * 60 * 1000)
+    public void cleanUp() {
+
+        Instant now = Instant.now();
+
+        buckets.entrySet().removeIf(entry -> {
+            Bucket bucket = entry.getValue();
+
+            long secondsSinceLastAccess =
+                    now.getEpochSecond() - bucket.lastAccess.getEpochSecond();
+
+            return secondsSinceLastAccess > 3600;
+        });
     }
 }

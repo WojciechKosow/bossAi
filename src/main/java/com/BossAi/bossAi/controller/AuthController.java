@@ -18,9 +18,9 @@ public class AuthController {
     private final UserService userService;
 
     @PostMapping("/register")
-    public ResponseEntity<AuthResponse> register(@Valid @RequestBody RegisterRequest request) {
-        AuthResponse res = userService.register(request);
-        return ResponseEntity.ok(res);
+    public ResponseEntity<String> register(@Valid @RequestBody RegisterRequest request) {
+        userService.register(request);
+        return ResponseEntity.ok("\"If registration is possible, you will receive further instructions.\"\n");
     }
 
     @PostMapping("/login")
