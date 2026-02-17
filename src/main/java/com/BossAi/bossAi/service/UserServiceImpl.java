@@ -9,6 +9,9 @@ import com.BossAi.bossAi.request.PasswordResetRequest;
 import com.BossAi.bossAi.request.RegisterRequest;
 import com.BossAi.bossAi.response.AuthResponse;
 import com.BossAi.bossAi.security.JwtProvider;
+import com.BossAi.bossAi.security.RequestContextUtil;
+import com.BossAi.bossAi.security.SecurityEventService;
+import com.BossAi.bossAi.security.SecurityEventType;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -32,6 +35,8 @@ public class UserServiceImpl implements UserService {
     private final UserPlanRepository userPlanRepository;
     private final PlanDefinitionRepository planDefinitionRepository;
     private final UserTokenRepository userTokenRepository;
+    private final SecurityEventService securityEventService;
+    private final RequestContextUtil requestContextUtil;
 
     @Override
     public AuthResponse register(RegisterRequest request) {
@@ -77,10 +82,22 @@ public class UserServiceImpl implements UserService {
     public AuthResponse login(LoginRequest request) {
 
         User user = userRepository.findByEmail(request.getEmail())
-                .orElseThrow(() -> new RuntimeException("invalid password or email"));
+                .orElseThrow(() -> new RuntimeException("Invalid password or email"));
 
         if (user.getLockUntil() != null && user.getLockUntil().isAfter(LocalDateTime.now())) {
+
+            securityEventService.log(
+                    SecurityEventType.ACCOUNT_LOCKED,
+                    user.getEmail(),
+                    requestContextUtil.getClientIp(),
+                    requestContextUtil.getUserAgent()
+            );
+
             throw new RuntimeException("Account is temporarily locked. try again later.");
+        }
+
+        if (user.getCredentialsUpdatedAt() == null) {
+            user.setCredentialsUpdatedAt(LocalDateTime.now());
         }
 
         if (!passwordEncoder.matches(request.getPassword(), user.getPassword())) {
@@ -88,12 +105,28 @@ public class UserServiceImpl implements UserService {
             user.setFailedLoginAttempts(user.getFailedLoginAttempts() + 1);
 
             if (user.getFailedLoginAttempts() >= 5) {
+
                 user.setLockUntil(LocalDateTime.now().plusMinutes(5));
                 user.setFailedLoginAttempts(0);
+
+                securityEventService.log(
+                        SecurityEventType.ACCOUNT_LOCKED,
+                        user.getEmail(),
+                        requestContextUtil.getClientIp(),
+                        requestContextUtil.getUserAgent()
+                );
             }
 
+
+            securityEventService.log(
+                    SecurityEventType.FAILED_LOGIN,
+                    user.getEmail(),
+                    requestContextUtil.getClientIp(),
+                    requestContextUtil.getUserAgent()
+            );
+
             userRepository.save(user);
-            throw new RuntimeException("invalid password or email");
+            throw new RuntimeException("Invalid password or email");
         }
 
         user.setFailedLoginAttempts(0);
@@ -101,7 +134,7 @@ public class UserServiceImpl implements UserService {
         userRepository.save(user);
 
         if (!user.isEnabled()) {
-            throw new RuntimeException("Your account hasn't been activated yet");
+            throw new RuntimeException("Invalid password or email");
         }
 
         String token = jwtProvider.generateToken(user.getEmail());
@@ -158,7 +191,7 @@ public class UserServiceImpl implements UserService {
 //                .orElseThrow(() -> new RuntimeException("User not found"));
 
         if (user.isEnabled()) {
-            throw new RuntimeException("Account has been already verified");
+            return;
         }
 
         Optional<UserToken> oldToken = userTokenRepository.findByUserAndTypeAndUsedFalse(user, TokenType.EMAIL_VERIFICATION);
@@ -218,6 +251,13 @@ public class UserServiceImpl implements UserService {
 
         userTokenRepository.save(token);
         mailService.sendPasswordResetEmail(email, tokenId, rawToken);
+
+        securityEventService.log(
+                SecurityEventType.PASSWORD_RESET_REQUEST,
+                user.getEmail(),
+                requestContextUtil.getClientIp(),
+                requestContextUtil.getUserAgent()
+        );
     }
 
     @Override
@@ -245,18 +285,26 @@ public class UserServiceImpl implements UserService {
 
         User user = token.getUser();
 
+        user.setCredentialsUpdatedAt(LocalDateTime.now());
         user.setPassword(passwordEncoder.encode(request.getNewPassword()));
         userRepository.save(user);
 
         token.setUsed(true);
         userTokenRepository.save(token);
+
+        securityEventService.log(
+                SecurityEventType.PASSWORD_CHANGED,
+                user.getEmail(),
+                requestContextUtil.getClientIp(),
+                requestContextUtil.getUserAgent()
+        );
     }
 
     @Override
     public void requestEmailChange(EmailChangeRequest request) {
 
         if (userRepository.existsByEmail(request.getNewEmail())) {
-            throw new RuntimeException("Email is already in use");
+            throw new RuntimeException("Email already in use");
         }
 
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
@@ -277,7 +325,7 @@ public class UserServiceImpl implements UserService {
             throw new RuntimeException("Invalid Password");
         }
 
-        Optional<UserToken> oldToken = userTokenRepository.findByUserAndTypeAndUsedFalse(user, TokenType.EMAIL_CHANGE);
+        Optional<UserToken> oldToken = userTokenRepository.findByUserAndTypeAndUsedFalse(user, TokenType.EMAIL_CHANGE_REQUEST);
         oldToken.ifPresent(userTokenRepository::delete);
 
         String rawToken = UUID.randomUUID().toString();
@@ -287,7 +335,7 @@ public class UserServiceImpl implements UserService {
         UserToken token = UserToken.builder()
                 .id(tokenId)
                 .user(user)
-                .type(TokenType.EMAIL_CHANGE)
+                .type(TokenType.EMAIL_CHANGE_REQUEST)
                 .tokenHash(passwordEncoder.encode(rawToken))
                 .expiresAt(LocalDateTime.now().plusMinutes(30))
                 .used(false)
@@ -297,6 +345,13 @@ public class UserServiceImpl implements UserService {
 
         userTokenRepository.save(token);
         mailService.sendEmailChangeEmail(user.getEmail(), tokenId, rawToken);
+
+        securityEventService.log(
+                SecurityEventType.EMAIL_CHANGE_REQUEST,
+                user.getEmail(),
+                requestContextUtil.getClientIp(),
+                requestContextUtil.getUserAgent()
+        );
     }
 
     @Override
@@ -317,8 +372,12 @@ public class UserServiceImpl implements UserService {
             throw new RuntimeException("Invalid token");
         }
 
-        if (!token.getType().equals(TokenType.EMAIL_CHANGE)) {
+        if (!token.getType().equals(TokenType.EMAIL_CHANGE_REQUEST)) {
             throw new RuntimeException("Invalid token");
+        }
+
+        if (userRepository.existsByEmail(token.getPayload())) {
+            throw new RuntimeException("Email already in use");
         }
 
         User user = token.getUser();
@@ -329,7 +388,7 @@ public class UserServiceImpl implements UserService {
         UserToken confirmationToken = UserToken.builder()
                 .id(confirmationTokenId)
                 .user(user)
-                .type(TokenType.EMAIL_CHANGE)
+                .type(TokenType.EMAIL_CHANGE_CONFIRMATION)
                 .tokenHash(passwordEncoder.encode(rawConfirmationToken))
                 .expiresAt(LocalDateTime.now().plusMinutes(30))
                 .used(false)
@@ -363,8 +422,16 @@ public class UserServiceImpl implements UserService {
             throw new RuntimeException("Invalid token");
         }
 
-        if (!token.getType().equals(TokenType.EMAIL_CHANGE)) {
+        if (!token.getType().equals(TokenType.EMAIL_CHANGE_CONFIRMATION)) {
             throw new RuntimeException("Invalid token");
+        }
+
+        if (token.getPayload() == null) {
+            throw new RuntimeException("Invalid token");
+        }
+
+        if (userRepository.existsByEmail(token.getPayload())) {
+            throw new RuntimeException("Email already in use");
         }
 
         User user = token.getUser();
@@ -374,9 +441,17 @@ public class UserServiceImpl implements UserService {
         }
 
         user.setEmail(token.getPayload());
+        user.setCredentialsUpdatedAt(LocalDateTime.now());
         userRepository.save(user);
         token.setUsed(true);
         userTokenRepository.save(token);
+
+        securityEventService.log(
+                SecurityEventType.EMAIL_CHANGED,
+                user.getEmail(),
+                requestContextUtil.getClientIp(),
+                requestContextUtil.getUserAgent()
+        );
     }
 
     @Transactional

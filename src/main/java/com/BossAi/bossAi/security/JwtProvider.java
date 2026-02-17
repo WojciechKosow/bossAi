@@ -34,11 +34,11 @@ public class JwtProvider {
         User user = userRepository.findByEmail(email).orElseThrow();
 
         Date now = new Date();
-
         Date expiry = new Date(now.getTime() + expiration);
 
         return Jwts.builder()
                 .setSubject(user.getId().toString())
+                .claim("credAt", user.getCredentialsUpdatedAt().toString())
                 .setIssuedAt(now)
                 .setExpiration(expiry)
                 .signWith(getSigningKey(), SignatureAlgorithm.HS256)

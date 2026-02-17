@@ -48,9 +48,12 @@ public class User {
     private int failedLoginAttempts;
     private LocalDateTime lockUntil;
 
+    private LocalDateTime credentialsUpdatedAt;
+
     @PrePersist
     void onCreate() {
         this.createdAt = LocalDateTime.now();
+        this.credentialsUpdatedAt = LocalDateTime.now();
     }
 
     @PreUpdate
