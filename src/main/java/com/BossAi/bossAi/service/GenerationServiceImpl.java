@@ -10,6 +10,7 @@ import com.BossAi.bossAi.request.GenerateVideoRequest;
 import com.BossAi.bossAi.response.GenerationResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
+import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
@@ -31,11 +32,18 @@ public class GenerationServiceImpl implements GenerationService {
     private final ImageStorageService imageStorageService;
     private final UserPlanRepository userPlanRepository;
 
+    private static final int MAX_ACTIVE_GENERATIONS = 1;
+    private static final int GENERATION_COOLDOWN_SECONDS = 5;
+
+
     @Override
     @Transactional
-    public GenerationResponse generateImage(GenerateImageRequest request, String email) {
+    public GenerationResponse generateImage(GenerateImageRequest request, String email) throws Exception {
 
         User user = userRepository.findByEmail(email).orElseThrow();
+
+        validateActiveGenerations(user);
+        validateCooldown(user);
 
         UserPlan userPlan = selectPlanForImage(user);
 
@@ -63,7 +71,11 @@ public class GenerationServiceImpl implements GenerationService {
 
         User user = userRepository.findByEmail(email).orElseThrow();
 
+        validateActiveGenerations(user);
+        validateCooldown(user);
+
         UserPlan userPlan = selectPlanForVideo(user);
+
         userPlan.setVideosUsed(userPlan.getVideosUsed() + 1);
         userPlanRepository.save(userPlan);
 
@@ -135,7 +147,7 @@ public class GenerationServiceImpl implements GenerationService {
             generation.setErrorMessage(e.getMessage());
 
             UserPlan userPlan = generation.getUserPlan();
-            userPlan.setVideosUsed(userPlan.getVideosUsed() -1);
+            userPlan.setVideosUsed(userPlan.getVideosUsed() - 1);
             userPlanRepository.save(userPlan);
         }
         generationRepository.save(generation);
@@ -223,4 +235,38 @@ public class GenerationServiceImpl implements GenerationService {
             PlanType.TRIAL,
             PlanType.FREE
     );
+
+    private void validateActiveGenerations(User user) {
+        long activeCount = generationRepository.countByUserAndGenerationStatusIn(
+                user,
+                List.of(
+                        GenerationStatus.PENDING,
+                        GenerationStatus.PROCESSING
+                )
+        );
+
+        if (activeCount >= MAX_ACTIVE_GENERATIONS) {
+            throw new ResponseStatusException(
+                    HttpStatus.TOO_MANY_REQUESTS,
+                    "Too many active generations. Please wait."
+            );
+        }
+    }
+
+    private void validateCooldown(User user) {
+
+        if (user.getLastGeneration() == null) {
+            return;
+        }
+
+        LocalDateTime allowedTime =
+                user.getLastGeneration().plusSeconds(GENERATION_COOLDOWN_SECONDS);
+
+        if (allowedTime.isAfter(LocalDateTime.now())) {
+            throw new ResponseStatusException(
+                    HttpStatus.TOO_MANY_REQUESTS,
+                    "Please wait before starting another generation."
+            );
+        }
+    }
 }

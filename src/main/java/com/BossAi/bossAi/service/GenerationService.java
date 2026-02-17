@@ -10,7 +10,7 @@ import com.BossAi.bossAi.response.GenerationResponse;
 import java.util.UUID;
 
 public interface GenerationService {
-    GenerationResponse generateImage(GenerateImageRequest request, String email);
+    GenerationResponse generateImage(GenerateImageRequest request, String email) throws Exception;
 
     GenerationResponse generateVideo(GenerateVideoRequest request, String email);
 

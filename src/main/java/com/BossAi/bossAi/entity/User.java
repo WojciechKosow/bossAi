@@ -50,6 +50,8 @@ public class User {
 
     private LocalDateTime credentialsUpdatedAt;
 
+    private LocalDateTime lastGeneration;
+
     @PrePersist
     void onCreate() {
         this.createdAt = LocalDateTime.now();

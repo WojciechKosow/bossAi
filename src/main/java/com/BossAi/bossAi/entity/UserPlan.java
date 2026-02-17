@@ -37,6 +37,9 @@ public class UserPlan {
     private String stripePaymentIntentId;
     private String stripeSubscriptionId;
 
+    @Version
+    private Long version;
+
     public boolean hasImagesLeft() {
         return imagesUsed < imagesTotal;
     }

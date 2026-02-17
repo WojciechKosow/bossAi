@@ -25,7 +25,7 @@ public class GenerationController {
     public ResponseEntity<GenerationResponse> generateImage(
             @Valid @RequestBody GenerateImageRequest request,
             Authentication authentication
-    ) {
+    ) throws Exception {
         return ResponseEntity.ok(
                 generationService.generateImage(request, authentication.getName())
         );

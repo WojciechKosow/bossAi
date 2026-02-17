@@ -40,6 +40,25 @@ public class RateLimitFilter extends OncePerRequestFilter {
             rateLimitService.checkRateLimit(ip + ":resend", RateLimitType.RESEND_VERIFICATION);
         }
 
+        if (path.contains("/api/generations/image")) {
+            rateLimitService.checkRateLimit(ip + ":gen_img", RateLimitType.GENERATE_IMAGE);
+
+            if (request.getUserPrincipal() != null) {
+                String user = request.getUserPrincipal().getName();
+
+                rateLimitService.checkRateLimit(user + ":gen_img", RateLimitType.GENERATE_IMAGE);
+            }
+        }
+
+        if (path.contains("/api/generations/video")) {
+            rateLimitService.checkRateLimit(ip + ":gen_vid", RateLimitType.GENERATE_VIDEO);
+
+            if (request.getUserPrincipal() != null) {
+                String user = request.getUserPrincipal().getName();
+                rateLimitService.checkRateLimit(user + ":gen_vid", RateLimitType.GENERATE_VIDEO);
+            }
+        }
+
         filterChain.doFilter(request, response);
     }
 }
