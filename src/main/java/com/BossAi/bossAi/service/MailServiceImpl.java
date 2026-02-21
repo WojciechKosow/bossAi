@@ -18,7 +18,7 @@ public class MailServiceImpl implements MailService {
     @Override
     public void sendVerificationEmail(String to, UUID tokenId, String token) {
         String subject = "Verify your email to activate your account";
-        String confirmationUrl = "http://localhost:8080/api/auth/verify?tokenId=" + tokenId + "&token=" + token;
+        String confirmationUrl = "http://localhost:5173/verify?tokenId=" + tokenId + "&token=" + token;
         String content = """
                  <div style="font-family: Arial, sans-serif; background-color: #f5f6fa; padding: 40px;">
                             <table align="center" width="600" style="background: #ffffff; border-radius: 8px; padding: 40px;">
@@ -82,7 +82,7 @@ public class MailServiceImpl implements MailService {
     @Override
     public void sendPasswordResetEmail(String to, UUID tokenId, String token) {
         String subject = "Reset your password";
-        String passwordResetUrl = "http://localhost:8080/api/auth/reset-password?tokenId=" + tokenId + "&token=" + token;
+        String passwordResetUrl = "http://localhost:5173/api/auth/reset-password?tokenId=" + tokenId + "&token=" + token;
         String content = """
                 <div style="font-family: Arial, sans-serif; background-color: #f5f6fa; padding: 40px;">
                     <table align="center" width="600" style="background: #ffffff; border-radius: 8px; padding: 40px;">

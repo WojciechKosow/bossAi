@@ -8,5 +8,6 @@ public enum SecurityEventType {
     PASSWORD_CHANGED,
     EMAIL_CHANGE_REQUEST,
     EMAIL_CHANGED,
-    RATE_LIMIT_HIT
+    RATE_LIMIT_HIT,
+    REFRESH_TOKEN_REUSE
 }

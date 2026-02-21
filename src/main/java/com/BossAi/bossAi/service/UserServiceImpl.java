@@ -2,6 +2,7 @@ package com.BossAi.bossAi.service;
 
 import com.BossAi.bossAi.dto.UserDTO;
 import com.BossAi.bossAi.entity.*;
+import com.BossAi.bossAi.exceptions.EmailAlreadyExistsException;
 import com.BossAi.bossAi.repository.*;
 import com.BossAi.bossAi.request.EmailChangeRequest;
 import com.BossAi.bossAi.request.LoginRequest;
@@ -37,12 +38,13 @@ public class UserServiceImpl implements UserService {
     private final UserTokenRepository userTokenRepository;
     private final SecurityEventService securityEventService;
     private final RequestContextUtil requestContextUtil;
+    private final RefreshTokenService refreshTokenService;
 
     @Override
     public AuthResponse register(RegisterRequest request) {
 
         if (userRepository.existsByEmail(request.getEmail())) {
-            throw new RuntimeException("Email is already in use");
+            throw new EmailAlreadyExistsException("Email is already in use");
         }
 
         User user = new User();
@@ -74,7 +76,7 @@ public class UserServiceImpl implements UserService {
 
         mailService.sendVerificationEmail(user.getEmail(), tokenId, rawToken);
 
-        return new AuthResponse(null, mapToDTO(user));
+        return new AuthResponse(null, null,  mapToDTO(user));
     }
 
     @Override
@@ -137,8 +139,9 @@ public class UserServiceImpl implements UserService {
             throw new RuntimeException("Invalid password or email");
         }
 
-        String token = jwtProvider.generateToken(user.getEmail());
-        return new AuthResponse(token, mapToDTO(user));
+        String accessToken = jwtProvider.generateToken(user.getEmail());
+        String refreshToken = refreshTokenService.createRefreshToken(user, request.isRememberMe());
+        return new AuthResponse(accessToken, refreshToken, mapToDTO(user));
     }
 
     @Override
@@ -289,6 +292,9 @@ public class UserServiceImpl implements UserService {
         user.setPassword(passwordEncoder.encode(request.getNewPassword()));
         userRepository.save(user);
 
+
+        refreshTokenService.revokeAllUserTokens(user);
+
         token.setUsed(true);
         userTokenRepository.save(token);
 
@@ -304,7 +310,7 @@ public class UserServiceImpl implements UserService {
     public void requestEmailChange(EmailChangeRequest request) {
 
         if (userRepository.existsByEmail(request.getNewEmail())) {
-            throw new RuntimeException("Email already in use");
+            throw new EmailAlreadyExistsException("Email is already in use");
         }
 
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
@@ -377,7 +383,7 @@ public class UserServiceImpl implements UserService {
         }
 
         if (userRepository.existsByEmail(token.getPayload())) {
-            throw new RuntimeException("Email already in use");
+            throw new EmailAlreadyExistsException("Email is already in use");
         }
 
         User user = token.getUser();
@@ -431,7 +437,7 @@ public class UserServiceImpl implements UserService {
         }
 
         if (userRepository.existsByEmail(token.getPayload())) {
-            throw new RuntimeException("Email already in use");
+            throw new EmailAlreadyExistsException("Email is already in use");
         }
 
         User user = token.getUser();
@@ -445,6 +451,8 @@ public class UserServiceImpl implements UserService {
         userRepository.save(user);
         token.setUsed(true);
         userTokenRepository.save(token);
+
+        refreshTokenService.revokeAllUserTokens(user);
 
         securityEventService.log(
                 SecurityEventType.EMAIL_CHANGED,

@@ -45,6 +45,7 @@ public class JwtAuthFilter extends OncePerRequestFilter {
             return;
         }
 
+
         String userId = jwtProvider.extractClaimsFromToken(token, Claims::getSubject);
 
         if (userId == null) {
@@ -54,8 +55,11 @@ public class JwtAuthFilter extends OncePerRequestFilter {
 
         User user = customUserDetailsService.loadUserEntityById(userId);
 
-        String tokenCredAtString = jwtProvider.extractClaimsFromToken(token,
-                claims -> claims.get("credAt", String.class));
+
+        String tokenCredAtString = jwtProvider.extractClaimsFromToken(
+                token,
+                claims -> claims.get("credAt", String.class)
+        );
 
         if (tokenCredAtString == null) {
             filterChain.doFilter(request, response);
@@ -66,6 +70,7 @@ public class JwtAuthFilter extends OncePerRequestFilter {
 
         if (user.getCredentialsUpdatedAt() != null &&
                 tokenCredAt.isBefore(user.getCredentialsUpdatedAt())) {
+
             filterChain.doFilter(request, response);
             return;
         }

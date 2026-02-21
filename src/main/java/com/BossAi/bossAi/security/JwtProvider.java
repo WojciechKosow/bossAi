@@ -40,9 +40,35 @@ public class JwtProvider {
                 .setSubject(user.getId().toString())
                 .claim("credAt", user.getCredentialsUpdatedAt().toString())
                 .setIssuedAt(now)
-                .setExpiration(expiry)
+                .setExpiration(new Date(System.currentTimeMillis() + 15 * 60 * 1000))
                 .signWith(getSigningKey(), SignatureAlgorithm.HS256)
                 .compact();
+    }
+
+//    public String generateAccessToken(String email) {
+//
+//        User user = userRepository.findByEmail(email).orElseThrow();
+//
+//        return Jwts.builder()
+//                .setSubject(user.getId().toString())
+//                .setExpiration(new Date(System.currentTimeMillis() + 15 * 60 * 1000))
+//                .signWith(getSigningKey(), SignatureAlgorithm.HS256)
+//                .compact();
+//    }
+
+    public String generateRefreshToken(String email, int daysValid) {
+
+        User user = userRepository.findByEmail(email).orElseThrow();
+
+        return Jwts.builder()
+                .setSubject(user.getId().toString())
+                .setExpiration(new Date(System.currentTimeMillis() + daysValid * 24L * 60 * 60 * 1000))
+                .signWith(getSigningKey(), SignatureAlgorithm.HS256)
+                .compact();
+    }
+
+    public String generateRawRefreshToken() {
+        return UUID.randomUUID() + "." + UUID.randomUUID();
     }
 
     public String extractEmailFromToken(String token) {
