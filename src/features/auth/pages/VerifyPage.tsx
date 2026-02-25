@@ -40,7 +40,12 @@ const VerifyPage = () => {
             <p className="text-green-600 font-medium">
               Your account has been activated 🎉
             </p>
-            <Button onClick={() => navigate("/login")}>Go to login</Button>
+            <Button
+              className="bg-black text-white hover:bg-black"
+              onClick={() => navigate("/login")}
+            >
+              Go to login
+            </Button>
           </>
         )}
 
@@ -49,7 +54,10 @@ const VerifyPage = () => {
             <p className="text-red-600 font-medium">
               Invalid or expired verification link.
             </p>
-            <Button onClick={() => navigate("/register")}>
+            <Button
+              className="bg-black text-white hover:bg-black"
+              onClick={() => navigate("/register")}
+            >
               Register again
             </Button>
           </>

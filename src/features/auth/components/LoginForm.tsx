@@ -16,11 +16,14 @@ import {
 import { useNavigate, Link } from "react-router-dom";
 import { Loader2 } from "lucide-react";
 import { AxiosError } from "axios";
+import { useAuth } from "../context/AuthContext";
 
 export const LoginForm = () => {
   const navigate = useNavigate();
   const loginMutation = useLogin();
   const [showPassword, setShowPassword] = useState(false);
+
+  const { login } = useAuth();
 
   const form = useForm<LoginFormValues>({
     resolver: zodResolver(loginSchema),
@@ -29,7 +32,6 @@ export const LoginForm = () => {
     },
   });
 
-  // 🔥 Auto clear root error when user types
   useEffect(() => {
     const subscription = form.watch(() => {
       if (form.formState.errors.root) {
@@ -41,8 +43,14 @@ export const LoginForm = () => {
 
   const onSubmit = async (values: LoginFormValues) => {
     try {
-      await loginMutation.mutateAsync(values);
+      const res = await loginMutation.mutateAsync(values);
+
+      login(res.token, res.user);
+
       navigate("/dashboard");
+
+      // await loginMutation.mutateAsync(values);
+      // navigate("/dashboard");
     } catch (error) {
       const err = error as AxiosError<{ message?: string }>;
       const message = err.response?.data?.message?.toLowerCase();
@@ -114,11 +122,12 @@ export const LoginForm = () => {
             control={form.control}
             name="rememberMe"
             render={({ field }) => (
-              <label className="flex items-center gap-2 cursor-pointer">
+              <label className="flex  text-black items-center gap-2 cursor-pointer">
                 <input
                   type="checkbox"
                   checked={field.value}
                   onChange={field.onChange}
+                  className="accent-primary cursor-pointer"
                 />
                 Remember me
               </label>
@@ -128,7 +137,7 @@ export const LoginForm = () => {
           <button
             type="button"
             onClick={() => navigate("/forgot-password")}
-            className="text-primary hover:underline"
+            className="text-black hover:underline"
           >
             Forgot password?
           </button>
@@ -137,7 +146,7 @@ export const LoginForm = () => {
         <Button
           type="submit"
           disabled={loginMutation.isPending}
-          className="w-full flex items-center justify-center gap-2"
+          className="w-full flex items-center justify-center gap-2 bg-black text-white hover:bg-black"
         >
           {loginMutation.isPending && (
             <Loader2 className="h-4 w-4 animate-spin" />
@@ -145,11 +154,11 @@ export const LoginForm = () => {
           {loginMutation.isPending ? "Signing in..." : "Sign in"}
         </Button>
 
-        <p className="text-sm text-center text-muted-foreground">
+        <p className="text-sm text-center text-gray-600">
           Don't have an account?{" "}
           <Link
             to="/register"
-            className="text-primary hover:underline font-medium"
+            className="text-black hover:underline font-medium"
           >
             Create one
           </Link>

@@ -40,10 +40,10 @@ const plans = [
 
 const Pricing = () => {
   return (
-    <section id="pricing" className="py-28 bg-white">
+    <section id="pricing" className="py-28 bg-background">
       <div className="max-w-6xl mx-auto px-8 text-center">
         <motion.h2
-          className="text-3xl md:text-4xl font-semibold text-gray-900"
+          className="text-3xl md:text-4xl font-semibold text-foreground"
           initial={{ opacity: 0, y: 20 }}
           whileInView={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.6 }}
@@ -52,7 +52,7 @@ const Pricing = () => {
           Simple, transparent pricing.
         </motion.h2>
 
-        <p className="mt-4 text-gray-600 max-w-xl mx-auto">
+        <p className="mt-4 text-muted-foreground max-w-xl mx-auto">
           Choose the plan that fits your learning journey.
         </p>
 
@@ -60,27 +60,27 @@ const Pricing = () => {
           {plans.map((plan, i) => (
             <motion.div
               key={i}
-              className={`border rounded-2xl p-8 text-left transition
-              ${
+              className={`border rounded-2xl p-8 text-left transition ${
                 plan.highlighted
-                  ? "border-gray-900 shadow-lg scale-[1.03]"
-                  : "border-gray-200"
-              }
-            `}
+                  ? "border-primary shadow-lg scale-[1.03]"
+                  : "border-border"
+              }`}
               initial={{ opacity: 0, y: 30 }}
               whileInView={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.5, delay: i * 0.1 }}
               viewport={{ once: true }}
             >
-              <h3 className="text-xl font-semibold text-gray-900">
+              <h3 className="text-xl font-semibold text-foreground">
                 {plan.name}
               </h3>
-              <p className="text-3xl font-bold mt-3 text-gray-900">
+
+              <p className="text-3xl font-bold mt-3 text-foreground">
                 {plan.price}
               </p>
-              <p className="text-gray-600 mt-3">{plan.description}</p>
 
-              <ul className="mt-8 space-y-3 text-gray-700 text-sm">
+              <p className="text-muted-foreground mt-3">{plan.description}</p>
+
+              <ul className="mt-8 space-y-3 text-muted-foreground text-sm">
                 {plan.features.map((f, index) => (
                   <li key={index} className="flex items-center gap-2">
                     <span>•</span> {f}
@@ -89,13 +89,11 @@ const Pricing = () => {
               </ul>
 
               <button
-                className={`mt-10 w-full py-2.5 rounded-xl text-sm font-medium transition
-                ${
+                className={`mt-10 w-full py-2.5 rounded-xl text-sm font-medium transition ${
                   plan.highlighted
-                    ? "bg-gray-900 text-white hover:bg-black"
-                    : "border border-gray-900 text-gray-900 hover:bg-gray-100"
-                }
-              `}
+                    ? "bg-primary text-primary-foreground hover:opacity-90"
+                    : "border border-border text-foreground hover:bg-muted"
+                }`}
               >
                 Get Started
               </button>

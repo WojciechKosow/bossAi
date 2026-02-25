@@ -53,7 +53,7 @@ export const ForgotPasswordForm = () => {
 
               <Button
                 type="submit"
-                className="w-full"
+                className="w-full bg-black hover:bg-black text-white"
                 disabled={forgotMutation.isPending}
               >
                 {forgotMutation.isPending ? "Sending..." : "Send reset link"}
@@ -61,15 +61,12 @@ export const ForgotPasswordForm = () => {
             </>
           ) : (
             <div className="text-center space-y-4">
-              <p className="text-muted-foreground">
+              <p className="text-gray-600">
                 If an account with that email exists, a password reset link has
                 been sent.
               </p>
 
-              <Link
-                to="/login"
-                className="text-sm text-primary hover:underline"
-              >
+              <Link to="/login" className="text-sm text-black hover:underline">
                 Back to login
               </Link>
             </div>

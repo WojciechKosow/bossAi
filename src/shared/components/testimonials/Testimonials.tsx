@@ -23,12 +23,13 @@ const testimonials = [
 
 const Testimonials = () => {
   return (
-    <section id="testimonials" className="py-28 bg-gray-50">
+    <section id="testimonials" className="py-28 bg-muted">
       <div className="max-w-6xl mx-auto px-8 text-center">
-        <h2 className="text-3xl md:text-4xl font-semibold text-gray-900">
+        <h2 className="text-3xl md:text-4xl font-semibold text-foreground">
           Loved by learners around the world.
         </h2>
-        <p className="mt-4 text-gray-600 max-w-xl mx-auto">
+
+        <p className="mt-4 text-muted-foreground max-w-xl mx-auto">
           Real stories from real people.
         </p>
 
@@ -46,14 +47,15 @@ const Testimonials = () => {
             {[...testimonials, ...testimonials].map((t, index) => (
               <div
                 key={index}
-                className="min-w-[320px] md:min-w-[420px] bg-white shadow-sm border border-gray-200 rounded-2xl p-8 text-left"
+                className="min-w-[320px] md:min-w-[420px] bg-card border border-border rounded-2xl p-8 text-left"
               >
-                <p className="text-gray-800 text-lg leading-relaxed">
+                <p className="text-foreground text-lg leading-relaxed">
                   {t.quote}
                 </p>
+
                 <div className="mt-6">
-                  <p className="font-medium text-gray-900">{t.name}</p>
-                  <p className="text-sm text-gray-500">{t.role}</p>
+                  <p className="font-medium text-foreground">{t.name}</p>
+                  <p className="text-sm text-muted-foreground">{t.role}</p>
                 </div>
               </div>
             ))}

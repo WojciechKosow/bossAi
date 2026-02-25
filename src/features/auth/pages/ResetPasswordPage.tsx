@@ -185,7 +185,7 @@ const ResetPassword = () => {
 
               <Button
                 type="submit"
-                className="w-full"
+                className="w-full bg-black text-white hover:bg-black"
                 disabled={resetMutation.isPending}
               >
                 {resetMutation.isPending

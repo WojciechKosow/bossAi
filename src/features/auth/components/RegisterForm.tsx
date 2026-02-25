@@ -183,7 +183,7 @@ export const RegisterForm = () => {
 
         <Button
           type="submit"
-          className="w-full"
+          className="w-full bg-black text-white hover:bg-black"
           disabled={registerMutation.isPending}
         >
           {registerMutation.isPending && (
@@ -206,12 +206,9 @@ export const RegisterForm = () => {
         </Button>
       </form> */}
 
-        <p className="text-sm text-center text-muted-foreground">
+        <p className="text-sm text-center text-muted-foreground text-gray-600">
           Already have an account?{" "}
-          <Link
-            to="/login"
-            className="font-medium text-primary hover:underline"
-          >
+          <Link to="/login" className="font-medium text-black hover:underline">
             Sign in
           </Link>
         </p>

@@ -50,7 +50,7 @@ const CheckEmail = () => {
           type="button"
           onClick={handleResend}
           disabled={resendMutation.isPending || secondsLeft > 0}
-          className="w-full"
+          className="w-full bg-black text-white hover:bg-black"
         >
           {secondsLeft > 0
             ? `Resend in ${secondsLeft}s`

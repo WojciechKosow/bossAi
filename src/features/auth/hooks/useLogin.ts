@@ -7,11 +7,12 @@ export const useLogin = () => {
 
   return useMutation({
     mutationFn: loginRequest,
-    onSuccess: (data) => {
-      if (data.token) {
-        localStorage.setItem("access_token", data.token);
-      }
+    onSuccess: (data, variables) => {
+      const storage = variables.rememberMe
+        ? localStorage
+        : sessionStorage;
 
+      storage.setItem("access_token", data.token);
       setUser(data.user);
     },
   });
