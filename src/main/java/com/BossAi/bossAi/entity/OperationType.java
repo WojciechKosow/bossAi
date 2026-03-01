@@ -1,0 +1,15 @@
+package com.BossAi.bossAi.entity;
+
+public enum OperationType {
+    SCRIPT_GENERATION,
+    IMAGE_GENERATION,
+    VIDEO_GENERATION,
+    VOICE_GENERATION,
+    MUSIC_GENERATION,
+
+    TIKTOK_AD_FULL,
+    RENDER_ONLY,
+
+    ASSET_UPLOAD,
+    ASSET_STORAGE_MONTHLY
+}

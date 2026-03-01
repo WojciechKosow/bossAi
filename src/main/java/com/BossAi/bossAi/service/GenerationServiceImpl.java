@@ -10,7 +10,6 @@ import com.BossAi.bossAi.request.GenerateVideoRequest;
 import com.BossAi.bossAi.response.GenerationResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
-import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
@@ -31,6 +30,7 @@ public class GenerationServiceImpl implements GenerationService {
     private final AiVideoService aiVideoService;
     private final ImageStorageService imageStorageService;
     private final UserPlanRepository userPlanRepository;
+    private final CreditService creditService;
 
     private static final int MAX_ACTIVE_GENERATIONS = 1;
     private static final int GENERATION_COOLDOWN_SECONDS = 5;
@@ -47,19 +47,26 @@ public class GenerationServiceImpl implements GenerationService {
 
         UserPlan userPlan = selectPlanForImage(user);
 
-        userPlan.setImagesUsed(userPlan.getImagesUsed() + 1);
-        userPlanRepository.save(userPlan);
+        if (userPlan.getCreditsTotal() - userPlan.getCreditsUsed() <= 5) {
+            throw new RuntimeException("Not enough credits to generate image.");
+        }
+
+//        userPlan.setCreditsUsed(userPlan.getCreditsUsed() + 5);
+//        userPlanRepository.save(userPlan);
+
+        CreditTransaction tx = creditService.reserve(user, OperationType.IMAGE_GENERATION, userPlan.getId());
+
 
         Generation generation = generationRepository.save(
                 Generation.builder()
                         .user(user)
                         .userPlan(userPlan)
-                        .generationType(GenerationType.IMAGE)
+                        .generationType(GenerationType.IMAGE_GENERATION)
                         .generationStatus(GenerationStatus.PENDING)
                         .build()
         );
 
-        processImageAsync(generation.getId(), request);
+        processImageAsync(generation.getId(), request, tx);
 
         return new GenerationResponse(generation.getId(), generation.getGenerationStatus());
     }
@@ -76,14 +83,18 @@ public class GenerationServiceImpl implements GenerationService {
 
         UserPlan userPlan = selectPlanForVideo(user);
 
-        userPlan.setVideosUsed(userPlan.getVideosUsed() + 1);
+        if (userPlan.getCreditsTotal() - userPlan.getCreditsUsed() <= 20) {
+            throw new RuntimeException("Not enough credits to generate video");
+        }
+
+        userPlan.setCreditsUsed(userPlan.getCreditsUsed() + 20);
         userPlanRepository.save(userPlan);
 
         Generation generation = generationRepository.save(
                 Generation.builder()
                         .user(user)
                         .userPlan(userPlan)
-                        .generationType(GenerationType.VIDEO)
+                        .generationType(GenerationType.VIDEO_GENERATION)
                         .generationStatus(GenerationStatus.PENDING)
                         .build()
         );
@@ -94,7 +105,7 @@ public class GenerationServiceImpl implements GenerationService {
     }
 
     @Async("aiExecutor")
-    void processImageAsync(UUID generationId, GenerateImageRequest request) {
+    void processImageAsync(UUID generationId, GenerateImageRequest request, CreditTransaction tx) {
         Generation generation = generationRepository.findById(generationId).orElseThrow();
         try {
             generation.setGenerationStatus(GenerationStatus.PROCESSING);
@@ -114,14 +125,12 @@ public class GenerationServiceImpl implements GenerationService {
             generation.setGenerationStatus(GenerationStatus.DONE);
             generation.setFinishedAt(LocalDateTime.now());
 
+            creditService.confirm(tx.getId());
         } catch (Exception e) {
             generation.setGenerationStatus(GenerationStatus.FAILED);
             generation.setErrorMessage(e.getMessage());
 
-            UserPlan userPlan = generation.getUserPlan();
-
-            userPlan.setImagesUsed(userPlan.getImagesUsed() - 1);
-            userPlanRepository.save(userPlan);
+            creditService.refund(tx.getId());
         }
 
         generationRepository.save(generation);
@@ -147,7 +156,7 @@ public class GenerationServiceImpl implements GenerationService {
             generation.setErrorMessage(e.getMessage());
 
             UserPlan userPlan = generation.getUserPlan();
-            userPlan.setVideosUsed(userPlan.getVideosUsed() - 1);
+            userPlan.setCreditsUsed(userPlan.getCreditsUsed() - 20);
             userPlanRepository.save(userPlan);
         }
         generationRepository.save(generation);
@@ -187,7 +196,6 @@ public class GenerationServiceImpl implements GenerationService {
                 .flatMap(priority ->
                         activePlans.stream()
                                 .filter(p -> p.getPlanType() == priority)
-                                .filter(UserPlan::hasImagesLeft)
                                 .filter(UserPlan::isActive)
                 )
                 .findFirst()
@@ -204,7 +212,6 @@ public class GenerationServiceImpl implements GenerationService {
                 .flatMap(priority ->
                         activePlans.stream()
                                 .filter(p -> p.getPlanType() == priority)
-                                .filter(UserPlan::hasVideosLeft)
                                 .filter(UserPlan::isActive)
                 )
                 .findFirst()
@@ -212,6 +219,32 @@ public class GenerationServiceImpl implements GenerationService {
                         HttpStatus.PAYMENT_REQUIRED,
                         "No active plan"
                 ));
+    }
+
+
+
+    @Override
+    public List<GenerationDTO> getRecentGenerations(String email, int limit) {
+
+        User user = userRepository.findByEmail(email).orElseThrow();
+
+        return generationRepository
+                .findTopByUserOrderByCreatedAtDesc(user, limit)
+                .stream()
+                .map(this::mapToDto)
+                .toList();
+    }
+
+    @Override
+    public List<GenerationDTO> getAllUserGenerations(String email) {
+
+        User user = userRepository.findByEmail(email).orElseThrow();
+
+        return generationRepository
+                .findByUserOrderByCreatedAtDesc(user)
+                .stream()
+                .map(this::mapToDto)
+                .toList();
     }
 
     private GenerationDTO mapToDto(Generation generation) {

@@ -18,6 +18,7 @@ public class UserPlan {
     private UUID id;
 
     @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "user_id", nullable = false)
     private User user;
 
     @Enumerated(EnumType.STRING)
@@ -25,9 +26,16 @@ public class UserPlan {
 
     private int imagesTotal;
     private int videosTotal;
+    private int voicesTotal;
+    private int musicsTotal;
 
     private int imagesUsed;
     private int videosUsed;
+    private int voicesUsed;
+    private int musicsUsed;
+
+    private int creditsTotal;
+    private int creditsUsed;
 
     private LocalDateTime activatedAt;
     private LocalDateTime expiresAt;
@@ -46,6 +54,11 @@ public class UserPlan {
 
     public boolean hasVideosLeft() {
         return videosUsed < videosTotal;
+    }
+
+    public boolean hasCreditsLeft(int cost) {
+        int availableCredits = creditsTotal - creditsUsed;
+        return availableCredits >= cost;
     }
 
     public boolean isActive() {

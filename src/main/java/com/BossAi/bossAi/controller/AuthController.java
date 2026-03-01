@@ -1,9 +1,13 @@
 package com.BossAi.bossAi.controller;
 
+import com.BossAi.bossAi.dto.UserDTO;
 import com.BossAi.bossAi.entity.RefreshToken;
+import com.BossAi.bossAi.entity.User;
+import com.BossAi.bossAi.repository.UserRepository;
 import com.BossAi.bossAi.request.*;
 import com.BossAi.bossAi.response.AuthResponse;
 import com.BossAi.bossAi.security.JwtProvider;
+import com.BossAi.bossAi.service.RefreshTokenRotationResult;
 import com.BossAi.bossAi.service.RefreshTokenService;
 import com.BossAi.bossAi.service.UserService;
 import jakarta.validation.Valid;
@@ -11,6 +15,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseCookie;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
 import org.springframework.security.core.parameters.P;
 import org.springframework.web.bind.annotation.*;
 
@@ -26,6 +31,7 @@ public class AuthController {
     private final UserService userService;
     private final JwtProvider jwtProvider;
     private final RefreshTokenService refreshTokenService;
+    private final UserRepository userRepository;
 
     @PostMapping("/register")
     public ResponseEntity<String> register(@Valid @RequestBody RegisterRequest request) {
@@ -59,9 +65,16 @@ public class AuthController {
 
     @PostMapping("/logout")
     public ResponseEntity<Void> logout(
-            @CookieValue("refreshToken") String rawRefreshToken) {
+            @CookieValue(value = "refreshToken", required = false) String rawRefreshToken
+    ) {
 
-        refreshTokenService.revokeToken(rawRefreshToken);
+        if (rawRefreshToken != null) {
+            try {
+                refreshTokenService.revokeToken(rawRefreshToken);
+            } catch (Exception ignored) {
+
+            }
+        }
 
         ResponseCookie cookie = ResponseCookie.from("refreshToken", "")
                 .httpOnly(true)
@@ -74,6 +87,30 @@ public class AuthController {
                 .header(HttpHeaders.SET_COOKIE, cookie.toString())
                 .build();
     }
+
+
+    @GetMapping("/me")
+    public ResponseEntity<UserDTO> me(Authentication authentication) {
+
+        if (authentication == null || !authentication.isAuthenticated()) {
+            throw new RuntimeException("Unauthorized");
+        }
+
+        String email = authentication.getName();
+
+        User user = userRepository.findByEmail(email)
+                .orElseThrow(() -> new RuntimeException(""));
+
+        return ResponseEntity.ok(
+                new UserDTO(
+                        user.getId(),
+                        user.getDisplayName(),
+                        user.getEmail(),
+                        user.isEnabled()
+                )
+        );
+    }
+
 
     @GetMapping("/verify")
     public ResponseEntity<String> verifyAccount(@RequestParam UUID tokenId, @RequestParam String token) {
@@ -119,20 +156,27 @@ public class AuthController {
 
     @PostMapping("/refresh")
     public ResponseEntity<AuthResponse> refresh(
-            @CookieValue("refreshToken") String rawRefreshToken) {
+            @CookieValue(value = "refreshToken", required = false) String rawRefreshToken) {
+
+        if (rawRefreshToken == null) {
+            throw new RuntimeException("No refresh token");
+        }
 
         RefreshToken token = refreshTokenService.validateRefreshToken(rawRefreshToken);
 
         String newAccessToken = jwtProvider.generateToken(token.getUser().getEmail());
-        String newRefreshToken = refreshTokenService.rotateToken(token);
+        RefreshTokenRotationResult rotation =
+                refreshTokenService.rotateToken(token);
 
-        ResponseCookie cookie = ResponseCookie.from("refreshToken", newRefreshToken)
+
+        ResponseCookie cookie = ResponseCookie.from("refreshToken", rotation.rawToken())
                 .httpOnly(true)
                 .secure(true)
                 .sameSite("Strict")
                 .path("/")
-                .maxAge(Duration.between(LocalDateTime.now(), token.getExpiresAt()))
+                .maxAge(Duration.between(LocalDateTime.now(), rotation.expiresAt()))
                 .build();
+
 
         return ResponseEntity.ok()
                 .header(HttpHeaders.SET_COOKIE, cookie.toString())

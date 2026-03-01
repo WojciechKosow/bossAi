@@ -18,6 +18,7 @@ public class RefreshToken {
     private UUID id;
 
     @ManyToOne(optional = false)
+    @JoinColumn(name = "user_id")
     private User user;
 
     @Column(nullable = false, unique = true)
@@ -34,4 +35,7 @@ public class RefreshToken {
 
     private String createdByIp;
     private String userAgent;
+
+    @Version
+    private Long version;
 }

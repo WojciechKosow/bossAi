@@ -7,6 +7,7 @@ import com.BossAi.bossAi.request.GenerateImageRequest;
 import com.BossAi.bossAi.request.GenerateVideoRequest;
 import com.BossAi.bossAi.response.GenerationResponse;
 
+import java.util.List;
 import java.util.UUID;
 
 public interface GenerationService {
@@ -21,4 +22,8 @@ public interface GenerationService {
     UserPlan selectPlanForImage(User user);
 
     UserPlan selectPlanForVideo(User user);
+
+    List<GenerationDTO> getRecentGenerations(String email, int limit);
+
+    List<GenerationDTO> getAllUserGenerations(String email);
 }

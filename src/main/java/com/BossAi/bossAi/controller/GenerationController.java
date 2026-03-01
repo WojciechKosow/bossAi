@@ -12,6 +12,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
 import java.util.UUID;
 
 @RestController
@@ -51,4 +52,22 @@ public class GenerationController {
         );
     }
 
+    @GetMapping("/me")
+    public ResponseEntity<List<GenerationDTO>> getMyGenerations(
+            @RequestParam(defaultValue = "3") int limit,
+            Authentication authentication
+    ) {
+        return ResponseEntity.ok(
+                generationService.getRecentGenerations(authentication.getName(), limit)
+        );
+    }
+
+    @GetMapping("/me/all")
+    public ResponseEntity<List<GenerationDTO>> getAllMyGenerations(
+            Authentication authentication
+    ) {
+        return ResponseEntity.ok(
+                generationService.getAllUserGenerations(authentication.getName())
+        );
+    }
 }

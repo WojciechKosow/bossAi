@@ -474,8 +474,8 @@ public class UserServiceImpl implements UserService {
         UserPlan userPlan = new UserPlan();
         userPlan.setUser(user);
         userPlan.setPlanType(PlanType.FREE);
-        userPlan.setImagesTotal(planDefinition.getImagesLimit());
-        userPlan.setVideosTotal(planDefinition.getVideosLimit());
+        userPlan.setImagesTotal(planDefinition.getMaxImagesGenerations());
+        userPlan.setVideosTotal(planDefinition.getMaxVideosGenerations());
         userPlan.setImagesUsed(0);
         userPlan.setVideosUsed(0);
         userPlan.setActivatedAt(LocalDateTime.now());

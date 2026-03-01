@@ -60,7 +60,15 @@ public class RefreshTokenService {
             throw new RuntimeException("Invalid refresh token format");
         }
 
-        UUID tokenId = UUID.fromString(parts[0]);
+        UUID tokenId;
+
+        try {
+            tokenId = UUID.fromString(parts[0]);
+        } catch (IllegalArgumentException e) {
+            throw new RuntimeException("Invalid refresh token");
+        }
+
+
         String secret = parts[1];
 
         RefreshToken token = refreshTokenRepository.findById(tokenId)
@@ -82,7 +90,7 @@ public class RefreshTokenService {
     }
 
     @Transactional
-    public String rotateToken(RefreshToken oldToken) {
+    public RefreshTokenRotationResult rotateToken(RefreshToken oldToken) {
 
         int updated = refreshTokenRepository.revokeIfNotRevoked(oldToken.getId());
 
@@ -117,8 +125,10 @@ public class RefreshTokenService {
 
         refreshTokenRepository.save(newToken);
 
-        return rawToken;
+        return new RefreshTokenRotationResult(rawToken, newToken.getExpiresAt());
     }
+
+
 
     @Transactional
     public void revokeToken(String rawToken) {
