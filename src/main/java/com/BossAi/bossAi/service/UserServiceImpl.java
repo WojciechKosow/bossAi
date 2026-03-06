@@ -39,6 +39,7 @@ public class UserServiceImpl implements UserService {
     private final SecurityEventService securityEventService;
     private final RequestContextUtil requestContextUtil;
     private final RefreshTokenService refreshTokenService;
+    private final UserWalletRepository userWalletRepository;
 
     @Override
     public AuthResponse register(RegisterRequest request) {
@@ -50,7 +51,8 @@ public class UserServiceImpl implements UserService {
         User user = new User();
 
         user.setDisplayName(request.getDisplayName());
-        user.setEmail(request.getEmail());
+        user.setEmail(request.getEmail().toLowerCase());
+        System.out.println(user.getEmail());
         user.setPassword(passwordEncoder.encode(request.getPassword()));
 
 
@@ -83,14 +85,14 @@ public class UserServiceImpl implements UserService {
     @Transactional
     public AuthResponse login(LoginRequest request) {
 
-        User user = userRepository.findByEmail(request.getEmail())
+        User user = userRepository.findByEmail(request.getEmail().toLowerCase())
                 .orElseThrow(() -> new RuntimeException("Invalid password or email"));
 
         if (user.getLockUntil() != null && user.getLockUntil().isAfter(LocalDateTime.now())) {
 
             securityEventService.log(
                     SecurityEventType.ACCOUNT_LOCKED,
-                    user.getEmail(),
+                    user.getEmail().toLowerCase(),
                     requestContextUtil.getClientIp(),
                     requestContextUtil.getUserAgent()
             );
@@ -113,7 +115,7 @@ public class UserServiceImpl implements UserService {
 
                 securityEventService.log(
                         SecurityEventType.ACCOUNT_LOCKED,
-                        user.getEmail(),
+                        user.getEmail().toLowerCase(),
                         requestContextUtil.getClientIp(),
                         requestContextUtil.getUserAgent()
                 );
@@ -122,7 +124,7 @@ public class UserServiceImpl implements UserService {
 
             securityEventService.log(
                     SecurityEventType.FAILED_LOGIN,
-                    user.getEmail(),
+                    user.getEmail().toLowerCase(),
                     requestContextUtil.getClientIp(),
                     requestContextUtil.getUserAgent()
             );
@@ -468,20 +470,24 @@ public class UserServiceImpl implements UserService {
             return;
         }
 
+        UserWallet userWallet = new UserWallet();
+
         PlanDefinition planDefinition = planDefinitionRepository.findById(PlanType.FREE)
                 .orElseThrow();
+
 
         UserPlan userPlan = new UserPlan();
         userPlan.setUser(user);
         userPlan.setPlanType(PlanType.FREE);
-        userPlan.setImagesTotal(planDefinition.getMaxImagesGenerations());
-        userPlan.setVideosTotal(planDefinition.getMaxVideosGenerations());
-        userPlan.setImagesUsed(0);
-        userPlan.setVideosUsed(0);
+        userPlan.setCreditsTotal(planDefinition.getMonthlyCreditsTotal());
         userPlan.setActivatedAt(LocalDateTime.now());
         userPlan.setExpiresAt(LocalDateTime.now().plusDays(planDefinition.getDurationDays()));
         userPlan.setActive(true);
 
+        userWallet.setUserId(user.getId());
+        userWallet.setCreditsBalance(0);
+
+        userWalletRepository.save(userWallet);
         userPlanRepository.save(userPlan);
     }
 

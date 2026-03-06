@@ -31,6 +31,7 @@ public class GenerationServiceImpl implements GenerationService {
     private final ImageStorageService imageStorageService;
     private final UserPlanRepository userPlanRepository;
     private final CreditService creditService;
+    private final PlanSelectionService planSelectionService;
 
     private static final int MAX_ACTIVE_GENERATIONS = 1;
     private static final int GENERATION_COOLDOWN_SECONDS = 5;
@@ -45,17 +46,7 @@ public class GenerationServiceImpl implements GenerationService {
         validateActiveGenerations(user);
         validateCooldown(user);
 
-        UserPlan userPlan = selectPlanForImage(user);
-
-        if (userPlan.getCreditsTotal() - userPlan.getCreditsUsed() <= 5) {
-            throw new RuntimeException("Not enough credits to generate image.");
-        }
-
-//        userPlan.setCreditsUsed(userPlan.getCreditsUsed() + 5);
-//        userPlanRepository.save(userPlan);
-
-        CreditTransaction tx = creditService.reserve(user, OperationType.IMAGE_GENERATION, userPlan.getId());
-
+        UserPlan userPlan = planSelectionService.selectPlanForImageGeneration(user);
 
         Generation generation = generationRepository.save(
                 Generation.builder()
@@ -65,6 +56,8 @@ public class GenerationServiceImpl implements GenerationService {
                         .generationStatus(GenerationStatus.PENDING)
                         .build()
         );
+
+        CreditTransaction tx = creditService.reserve(user, OperationType.IMAGE_GENERATION, generation.getId());
 
         processImageAsync(generation.getId(), request, tx);
 
@@ -81,14 +74,7 @@ public class GenerationServiceImpl implements GenerationService {
         validateActiveGenerations(user);
         validateCooldown(user);
 
-        UserPlan userPlan = selectPlanForVideo(user);
-
-        if (userPlan.getCreditsTotal() - userPlan.getCreditsUsed() <= 20) {
-            throw new RuntimeException("Not enough credits to generate video");
-        }
-
-        userPlan.setCreditsUsed(userPlan.getCreditsUsed() + 20);
-        userPlanRepository.save(userPlan);
+        UserPlan userPlan = planSelectionService.selectPlanForVideoGeneration(user);
 
         Generation generation = generationRepository.save(
                 Generation.builder()
@@ -99,7 +85,9 @@ public class GenerationServiceImpl implements GenerationService {
                         .build()
         );
 
-        processVideoAsync(generation.getId(), request);
+        CreditTransaction tx = creditService.reserve(user, OperationType.VIDEO_GENERATION, generation.getId());
+
+        processVideoAsync(generation.getId(), request, tx);
 
         return new GenerationResponse(generation.getId(), generation.getGenerationStatus());
     }
@@ -137,7 +125,7 @@ public class GenerationServiceImpl implements GenerationService {
     }
 
     @Async("aiExecutor")
-    void processVideoAsync(UUID generationId, GenerateVideoRequest request) {
+    void processVideoAsync(UUID generationId, GenerateVideoRequest request, CreditTransaction tx) {
         Generation generation = generationRepository.findById(generationId).orElseThrow();
         try {
             generation.setGenerationStatus(GenerationStatus.PROCESSING);
@@ -151,13 +139,13 @@ public class GenerationServiceImpl implements GenerationService {
             generation.setVideoUrl(videoUrl);
             generation.setGenerationStatus(GenerationStatus.DONE);
             generation.setFinishedAt(LocalDateTime.now());
+
+            creditService.confirm(tx.getId());
         } catch (Exception e) {
             generation.setGenerationStatus(GenerationStatus.FAILED);
             generation.setErrorMessage(e.getMessage());
 
-            UserPlan userPlan = generation.getUserPlan();
-            userPlan.setCreditsUsed(userPlan.getCreditsUsed() - 20);
-            userPlanRepository.save(userPlan);
+            creditService.refund(tx.getId());
         }
         generationRepository.save(generation);
     }
@@ -220,7 +208,6 @@ public class GenerationServiceImpl implements GenerationService {
                         "No active plan"
                 ));
     }
-
 
 
     @Override

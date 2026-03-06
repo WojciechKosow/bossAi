@@ -28,28 +28,28 @@ public class OperationCostSeeder {
 
         operationCostRepository.save(OperationCost.builder()
                 .operationType(OperationType.IMAGE_GENERATION)
-                .creditsCost(5)
+                .creditsCost(8)
                 .active(true)
                 .updatedAt(LocalDateTime.now())
                 .build());
 
         operationCostRepository.save(OperationCost.builder()
                 .operationType(OperationType.VIDEO_GENERATION)
-                .creditsCost(25)
+                .creditsCost(40)
                 .active(true)
                 .updatedAt(LocalDateTime.now())
                 .build());
 
         operationCostRepository.save(OperationCost.builder()
                 .operationType(OperationType.VOICE_GENERATION)
-                .creditsCost(5)
+                .creditsCost(7)
                 .active(true)
                 .updatedAt(LocalDateTime.now())
                 .build());
 
         operationCostRepository.save(OperationCost.builder()
                 .operationType(OperationType.MUSIC_GENERATION)
-                .creditsCost(6)
+                .creditsCost(8)
                 .active(true)
                 .updatedAt(LocalDateTime.now())
                 .build());

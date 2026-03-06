@@ -56,9 +56,13 @@ public class UserPlan {
         return videosUsed < videosTotal;
     }
 
-    public boolean hasCreditsLeft(int cost) {
+    public boolean hasEnoughCreditsLeft(int cost) {
         int availableCredits = creditsTotal - creditsUsed;
         return availableCredits >= cost;
+    }
+
+    public boolean hasCreditsLeft() {
+        return creditsUsed < creditsTotal;
     }
 
     public boolean isActive() {

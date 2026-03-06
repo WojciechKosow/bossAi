@@ -27,6 +27,9 @@ public class CreditTransaction {
     private OperationType operationType;
 
     private int amount;
+
+    @Enumerated(EnumType.STRING)
+    private CreditSource source;
     
     @Enumerated(EnumType.STRING)
     private TransactionStatus status;

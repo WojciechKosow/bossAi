@@ -19,7 +19,7 @@ public class PlanDefinitionSeeder {
 
         planDefinitionRepository.save(PlanDefinition.builder()
                 .id(PlanType.FREE)
-                .monthlyCreditsTotal(5)
+                .monthlyCreditsTotal(8)
                 .maxVideosGenerations(0)
                 .maxImagesGenerations(1)
                 .maxVoiceGenerations(0)
@@ -37,7 +37,7 @@ public class PlanDefinitionSeeder {
 
         planDefinitionRepository.save(PlanDefinition.builder()
                 .id(PlanType.TRIAL)
-                .monthlyCreditsTotal(60)
+                .monthlyCreditsTotal(65)
                 .maxVideosGenerations(2)
                 .maxImagesGenerations(6)
                 .maxVoiceGenerations(2)
