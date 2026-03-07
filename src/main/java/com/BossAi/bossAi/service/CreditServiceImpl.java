@@ -67,33 +67,33 @@ public class CreditServiceImpl implements CreditService {
             throw new IllegalStateException("Operation disabled");
         }
 
-        if (operation.getOperationType() == OperationType.VIDEO_GENERATION) {
-            if (userPlan.getVideosUsed() >= planDefinition.getMaxVideosGenerations()) {
-                throw new RuntimeException("You've reached video generation limits");
-            }
-            userPlan.setVideosUsed(userPlan.getVideosUsed() + 1);
-        }
-
-        if (operation.getOperationType() == OperationType.IMAGE_GENERATION) {
-            if (userPlan.getImagesUsed() >= planDefinition.getMaxImagesGenerations()) {
-                throw new RuntimeException("You've reached image generation limits");
-            }
-            userPlan.setImagesUsed(userPlan.getImagesUsed() + 1);
-        }
-
-        if (operation.getOperationType() == OperationType.VOICE_GENERATION) {
-            if (userPlan.getVoicesUsed() >= planDefinition.getMaxVoiceGenerations()) {
-                throw new RuntimeException("You've reached voice generation limits");
-            }
-            userPlan.setVoicesUsed(userPlan.getVoicesUsed() + 1);
-        }
-
-        if (operation.getOperationType() == OperationType.MUSIC_GENERATION) {
-            if (userPlan.getMusicsUsed() >= planDefinition.getMaxMusicGenerations()) {
-                throw new RuntimeException("You've reached music generation limits");
-            }
-            userPlan.setMusicsUsed(userPlan.getMusicsUsed() + 1);
-        }
+//        if (operation.getOperationType() == OperationType.VIDEO_GENERATION) {
+//            if (userPlan.getVideosUsed() >= planDefinition.getMaxVideosGenerations()) {
+//                throw new RuntimeException("You've reached video generation limits");
+//            }
+//            userPlan.setVideosUsed(userPlan.getVideosUsed() + 1);
+//        }
+//
+//        if (operation.getOperationType() == OperationType.IMAGE_GENERATION) {
+//            if (userPlan.getImagesUsed() >= planDefinition.getMaxImagesGenerations()) {
+//                throw new RuntimeException("You've reached image generation limits");
+//            }
+//            userPlan.setImagesUsed(userPlan.getImagesUsed() + 1);
+//        }
+//
+//        if (operation.getOperationType() == OperationType.VOICE_GENERATION) {
+//            if (userPlan.getVoicesUsed() >= planDefinition.getMaxVoiceGenerations()) {
+//                throw new RuntimeException("You've reached voice generation limits");
+//            }
+//            userPlan.setVoicesUsed(userPlan.getVoicesUsed() + 1);
+//        }
+//
+//        if (operation.getOperationType() == OperationType.MUSIC_GENERATION) {
+//            if (userPlan.getMusicsUsed() >= planDefinition.getMaxMusicGenerations()) {
+//                throw new RuntimeException("You've reached music generation limits");
+//            }
+//            userPlan.setMusicsUsed(userPlan.getMusicsUsed() + 1);
+//        }
 
         CreditTransaction transaction = new CreditTransaction();
 

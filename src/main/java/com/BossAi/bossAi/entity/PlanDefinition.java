@@ -17,15 +17,12 @@ public class PlanDefinition {
     @Enumerated(EnumType.STRING)
     private PlanType id;
 
-//    private int imagesLimit;
-//    private int videosLimit;
-
     private int monthlyCreditsTotal;
 
-    private int maxVideosGenerations;
-    private int maxImagesGenerations;
-    private int maxVoiceGenerations;
-    private int maxMusicGenerations;
+//    private int maxVideosGenerations;
+//    private int maxImagesGenerations;
+//    private int maxVoiceGenerations;
+//    private int maxMusicGenerations;
 
     private int maxConcurrentGenerations;
 
