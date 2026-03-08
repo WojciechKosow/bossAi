@@ -5,5 +5,6 @@ public enum GenerationType {
     VIDEO_GENERATION,
     VOICE,
     MUSIC,
-    RENDER_ONLY
+    RENDER_ONLY,
+    SYSTEM_GENERATION
 }
