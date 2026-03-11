@@ -11,19 +11,17 @@ import java.util.UUID;
 
 public interface AssetService {
     AssetDTO createAsset(
-            User user,
             AssetType type,
             byte[] data,
             UUID generationId
     );
 
-    AssetType createUserUpload(
-            User user,
+    AssetDTO createUserUpload(
             AssetType type,
             MultipartFile file
-    );
+    ) throws Exception;
 
-    List<Asset> getUserAssets(User user);
+    List<AssetDTO> getUserAssets();
 
     void deleteAsset(UUID assetId);
 }

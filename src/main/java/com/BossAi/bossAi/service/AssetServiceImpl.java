@@ -4,9 +4,14 @@ import com.BossAi.bossAi.dto.AssetDTO;
 import com.BossAi.bossAi.entity.*;
 import com.BossAi.bossAi.repository.AssetRepository;
 import com.BossAi.bossAi.repository.GenerationRepository;
+import com.BossAi.bossAi.repository.UserPlanRepository;
 import com.BossAi.bossAi.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContext;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.time.LocalDateTime;
@@ -21,15 +26,22 @@ public class AssetServiceImpl implements AssetService {
     private final AssetRepository assetRepository;
     private final GenerationRepository generationRepository;
     private final PlanSelectionService planSelectionService;
+    private final StorageService storageService;
 
     @Override
-    public AssetDTO createAsset(User user, AssetType type, byte[] data, UUID generationId) {
+    @Transactional
+    public AssetDTO createAsset(AssetType type, byte[] data, UUID generationId) {
+
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        String email = authentication.getName();
+
+        User user = userRepository.findByEmail(email).orElseThrow();
 
         Generation generation = generationRepository.findById(generationId).orElseThrow();
 
         UserPlan userPlan = planSelectionService.selectHighestPlan(user);
 
-        Asset asset = new Asset();
+        Asset asset = assetRepository.save(new Asset());
         asset.setUser(user);
         asset.setType(type);
 
@@ -38,8 +50,6 @@ public class AssetServiceImpl implements AssetService {
         } else {
             asset.setSource(AssetSource.AI_GENERATED);
         }
-
-        asset.setSource(AssetSource.AI_GENERATED);
 
         String storageKey = getStorageKey(user, type, asset);
 
@@ -50,29 +60,82 @@ public class AssetServiceImpl implements AssetService {
 
         asset.setGenerationId(generationId);
 
+        storageService.save(data, storageKey);
+
+        assetRepository.save(asset);
         return mapToDto(asset);
     }
 
     @Override
-    public AssetType createUserUpload(User user, AssetType type, MultipartFile file) {
-        return null;
+    public AssetDTO createUserUpload(AssetType type, MultipartFile file) throws Exception {
+
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        String email = authentication.getName();
+
+        User user = userRepository.findByEmail(email).orElseThrow();
+
+        UserPlan userPlan = planSelectionService.selectHighestPlan(user);
+
+        if (!userPlan.getPlanType().equals(PlanType.CREATOR)) {
+            throw new RuntimeException("You cannot upload files. Please upgrade your plan.");
+        }
+
+        Asset asset = assetRepository.save(new Asset());
+        asset.setUser(user);
+        asset.setType(type);
+        asset.setCreatedAt(LocalDateTime.now());
+
+        String storageKey = getStorageKey(user, type, asset);
+
+        byte[] data = file.getBytes();
+        asset.setStorageKey(storageKey);
+        asset.setSizeBytes(file.getSize());
+        asset.setReusable(true);
+
+        storageService.save(data, storageKey);
+
+        assetRepository.save(asset);
+        return mapToDto(asset);
     }
 
     @Override
-    public List<Asset> getUserAssets(User user) {
-        return List.of();
+    public List<AssetDTO> getUserAssets() {
+
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        String email = authentication.getName();
+
+        User user = userRepository.findByEmail(email).orElseThrow();
+
+        return assetRepository.findByUserOrderByCreatedAtDesc(user)
+                .stream()
+                .map(this::mapToDto)
+                .toList();
     }
 
     @Override
     public void deleteAsset(UUID assetId) {
 
+        SecurityContext context = SecurityContextHolder.getContext();
+        String email = context.getAuthentication().getName();
+
+        User user = userRepository.findByEmail(email).orElseThrow();
+
+        Asset asset = assetRepository.findById(assetId)
+                .orElseThrow(() -> new RuntimeException("Asset not found"));
+
+        if (!asset.getUser().getId().equals(user.getId())) {
+            throw new RuntimeException("Not your asset");
+        }
+
+        storageService.delete(asset.getStorageKey());
+        assetRepository.delete(asset);
     }
 
     private AssetDTO mapToDto(Asset asset) {
         return new AssetDTO(
                 asset.getId(),
                 asset.getType(),
-                asset.getStorageKey(),
+                storageService.generateUrl(asset.getStorageKey()),
                 asset.getDurationSeconds(),
                 asset.getWidth(),
                 asset.getHeight(),
@@ -85,19 +148,19 @@ public class AssetServiceImpl implements AssetService {
         String storageKey = "";
 
         if (type.equals(AssetType.IMAGE)) {
-            storageKey = "assets/" + user.getId() + "/" + asset.getId() + ".jpg";
+            storageKey = "assets/" + user.getId() + "/images/" + asset.getId() + ".jpg";
         }
 
         if (type.equals(AssetType.VIDEO)) {
-            storageKey = "assets/" + user.getId() + "/" + asset.getId() + ".mp4";
+            storageKey = "assets/" + user.getId() + "/videos/" + asset.getId() + ".mp4";
         }
 
         if (type.equals(AssetType.VOICE) || type.equals(AssetType.MUSIC) || type.equals(AssetType.AUDIO)) {
-            storageKey = "assets/" + user.getId() + "/" + asset.getId() + ".mp3";
+            storageKey = "assets/" + user.getId() + "/voices/" + asset.getId() + ".mp3";
         }
 
         if (type.equals(AssetType.SCRIPT)) {
-            storageKey = "assets/" + user.getId() + "/" + asset.getId() + ".txt";
+            storageKey = "assets/" + user.getId() + "/scripts/" + asset.getId() + ".txt";
         }
         return storageKey;
     }
@@ -112,5 +175,9 @@ public class AssetServiceImpl implements AssetService {
             return LocalDateTime.now().plusHours(48);
         }
         return null;
+    }
+
+    private boolean hasPermanentStorage(UserPlan userPlan) {
+        return userPlan != null && userPlan.getPlanType().ordinal() >= PlanType.BASIC.ordinal();
     }
 }

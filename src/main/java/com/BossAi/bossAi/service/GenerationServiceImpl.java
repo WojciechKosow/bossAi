@@ -32,6 +32,7 @@ public class GenerationServiceImpl implements GenerationService {
     private final UserPlanRepository userPlanRepository;
     private final CreditService creditService;
     private final PlanSelectionService planSelectionService;
+    private final AssetService assetService;
 
     private static final int MAX_ACTIVE_GENERATIONS = 1;
     private static final int GENERATION_COOLDOWN_SECONDS = 5;
@@ -113,6 +114,7 @@ public class GenerationServiceImpl implements GenerationService {
             generation.setGenerationStatus(GenerationStatus.DONE);
             generation.setFinishedAt(LocalDateTime.now());
 
+            assetService.createAsset(AssetType.IMAGE, imageBytes, generationId);
             creditService.confirm(tx.getId());
         } catch (Exception e) {
             generation.setGenerationStatus(GenerationStatus.FAILED);
