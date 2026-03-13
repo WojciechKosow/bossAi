@@ -1,5 +1,6 @@
 package com.BossAi.bossAi.service;
 
+import com.BossAi.bossAi.dto.AssetDTO;
 import com.BossAi.bossAi.dto.GenerationDTO;
 import com.BossAi.bossAi.entity.*;
 import com.BossAi.bossAi.repository.GenerationRepository;
@@ -8,6 +9,8 @@ import com.BossAi.bossAi.repository.UserRepository;
 import com.BossAi.bossAi.request.GenerateImageRequest;
 import com.BossAi.bossAi.request.GenerateVideoRequest;
 import com.BossAi.bossAi.response.GenerationResponse;
+import com.BossAi.bossAi.service.generation.GenerationContext;
+import com.BossAi.bossAi.service.generation.GenerationExecutor;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.scheduling.annotation.Async;
@@ -33,6 +36,8 @@ public class GenerationServiceImpl implements GenerationService {
     private final CreditService creditService;
     private final PlanSelectionService planSelectionService;
     private final AssetService assetService;
+    private final StorageService storageService;
+    private final GenerationExecutor generationExecutor;
 
     private static final int MAX_ACTIVE_GENERATIONS = 1;
     private static final int GENERATION_COOLDOWN_SECONDS = 5;
@@ -60,7 +65,7 @@ public class GenerationServiceImpl implements GenerationService {
 
         CreditTransaction tx = creditService.reserve(user, OperationType.IMAGE_GENERATION, generation.getId());
 
-        processImageAsync(generation.getId(), request, tx);
+//        processImageAsync(generation.getId(), request, tx);
 
         return new GenerationResponse(generation.getId(), generation.getGenerationStatus());
     }
@@ -94,6 +99,40 @@ public class GenerationServiceImpl implements GenerationService {
     }
 
     @Async("aiExecutor")
+    void runPipelineAsync(
+            Generation generation,
+            GenerateImageRequest request,
+            CreditTransaction tx
+    ) throws Exception {
+
+        try {
+            generation.setGenerationStatus(GenerationStatus.PROCESSING);
+            generationRepository.save(generation);
+
+            GenerationContext context =
+                    new GenerationContext(
+                            generation.getId(),
+                            request.getPrompt(),
+                            request.getImageUrl()
+                    );
+
+            generationExecutor.execute(context);
+
+            generation.setGenerationStatus(GenerationStatus.DONE);
+            generation.setFinishedAt(LocalDateTime.now());
+
+            creditService.confirm(tx.getId());
+        } catch (Exception e) {
+            generation.setGenerationStatus(GenerationStatus.FAILED);
+            generation.setErrorMessage(e.getMessage());
+
+            creditService.refund(tx.getId());
+        }
+
+        generationRepository.save(generation);
+    }
+
+    @Async("aiExecutor")
     void processImageAsync(UUID generationId, GenerateImageRequest request, CreditTransaction tx) {
         Generation generation = generationRepository.findById(generationId).orElseThrow();
         try {
@@ -105,16 +144,17 @@ public class GenerationServiceImpl implements GenerationService {
                     request.getImageUrl()
             );
 
-            String imageUrl = imageStorageService.saveImage(
-                    imageBytes,
-                    generation.getId()
-            );
+//            String imageUrl = imageStorageService.saveImage(
+//                    imageBytes,
+//                    generation.getId()
+//            );
 
-            generation.setImageUrl(imageUrl);
             generation.setGenerationStatus(GenerationStatus.DONE);
             generation.setFinishedAt(LocalDateTime.now());
 
-            assetService.createAsset(AssetType.IMAGE, imageBytes, generationId);
+            AssetDTO asset = assetService.createAsset(generation.getUser().getEmail(), AssetType.IMAGE, imageBytes, generationId);
+            generation.setImageUrl(asset.getUrl());
+            System.out.println(asset.getUrl());
             creditService.confirm(tx.getId());
         } catch (Exception e) {
             generation.setGenerationStatus(GenerationStatus.FAILED);

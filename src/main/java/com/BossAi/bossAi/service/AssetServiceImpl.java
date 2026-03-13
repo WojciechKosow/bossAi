@@ -30,10 +30,7 @@ public class AssetServiceImpl implements AssetService {
 
     @Override
     @Transactional
-    public AssetDTO createAsset(AssetType type, byte[] data, UUID generationId) {
-
-        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
-        String email = authentication.getName();
+    public AssetDTO createAsset(String email, AssetType type, byte[] data, UUID generationId) {
 
         User user = userRepository.findByEmail(email).orElseThrow();
 
@@ -41,7 +38,7 @@ public class AssetServiceImpl implements AssetService {
 
         UserPlan userPlan = planSelectionService.selectHighestPlan(user);
 
-        Asset asset = assetRepository.save(new Asset());
+        Asset asset = new Asset();
         asset.setUser(user);
         asset.setType(type);
 
@@ -51,15 +48,20 @@ public class AssetServiceImpl implements AssetService {
             asset.setSource(AssetSource.AI_GENERATED);
         }
 
-        String storageKey = getStorageKey(user, type, asset);
 
-        asset.setStorageKey(storageKey);
         asset.setSizeBytes(data.length);
         asset.setReusable(canReuse(userPlan));
+        asset.setCreatedAt(LocalDateTime.now());
         asset.setExpiresAt(resolveExpiration(userPlan));
 
         asset.setGenerationId(generationId);
 
+
+        assetRepository.save(asset);
+
+        String storageKey = getStorageKey(user, type, asset);
+
+        asset.setStorageKey(storageKey);
         storageService.save(data, storageKey);
 
         assetRepository.save(asset);
@@ -67,10 +69,7 @@ public class AssetServiceImpl implements AssetService {
     }
 
     @Override
-    public AssetDTO createUserUpload(AssetType type, MultipartFile file) throws Exception {
-
-        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
-        String email = authentication.getName();
+    public AssetDTO createUserUpload(String email, AssetType type, MultipartFile file) throws Exception {
 
         User user = userRepository.findByEmail(email).orElseThrow();
 
@@ -80,21 +79,27 @@ public class AssetServiceImpl implements AssetService {
             throw new RuntimeException("You cannot upload files. Please upgrade your plan.");
         }
 
-        Asset asset = assetRepository.save(new Asset());
+        Asset asset = new Asset();
         asset.setUser(user);
         asset.setType(type);
         asset.setCreatedAt(LocalDateTime.now());
+
+
+        asset.setSizeBytes(file.getSize());
+        asset.setReusable(true);
+        asset.setSource(AssetSource.USER_UPLOAD);
+
+
+        assetRepository.save(asset);
 
         String storageKey = getStorageKey(user, type, asset);
 
         byte[] data = file.getBytes();
         asset.setStorageKey(storageKey);
-        asset.setSizeBytes(file.getSize());
-        asset.setReusable(true);
-
         storageService.save(data, storageKey);
 
         assetRepository.save(asset);
+
         return mapToDto(asset);
     }
 
@@ -148,19 +153,19 @@ public class AssetServiceImpl implements AssetService {
         String storageKey = "";
 
         if (type.equals(AssetType.IMAGE)) {
-            storageKey = "assets/" + user.getId() + "/images/" + asset.getId() + ".jpg";
+            storageKey = user.getId() + "/images/" + asset.getId() + ".jpg";
         }
 
         if (type.equals(AssetType.VIDEO)) {
-            storageKey = "assets/" + user.getId() + "/videos/" + asset.getId() + ".mp4";
+            storageKey = user.getId() + "/videos/" + asset.getId() + ".mp4";
         }
 
         if (type.equals(AssetType.VOICE) || type.equals(AssetType.MUSIC) || type.equals(AssetType.AUDIO)) {
-            storageKey = "assets/" + user.getId() + "/voices/" + asset.getId() + ".mp3";
+            storageKey = user.getId() + "/voices/" + asset.getId() + ".mp3";
         }
 
         if (type.equals(AssetType.SCRIPT)) {
-            storageKey = "assets/" + user.getId() + "/scripts/" + asset.getId() + ".txt";
+            storageKey = user.getId() + "/scripts/" + asset.getId() + ".txt";
         }
         return storageKey;
     }

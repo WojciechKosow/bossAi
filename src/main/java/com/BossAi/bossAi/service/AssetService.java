@@ -11,12 +11,14 @@ import java.util.UUID;
 
 public interface AssetService {
     AssetDTO createAsset(
+            String email,
             AssetType type,
             byte[] data,
             UUID generationId
     );
 
     AssetDTO createUserUpload(
+            String email,
             AssetType type,
             MultipartFile file
     ) throws Exception;
