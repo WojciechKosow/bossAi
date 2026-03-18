@@ -66,6 +66,7 @@ public class GenerationServiceImpl implements GenerationService {
         CreditTransaction tx = creditService.reserve(user, OperationType.IMAGE_GENERATION, generation.getId());
 
 //        processImageAsync(generation.getId(), request, tx);
+        runPipelineAsync(generation, request, tx);
 
         return new GenerationResponse(generation.getId(), generation.getGenerationStatus());
     }
