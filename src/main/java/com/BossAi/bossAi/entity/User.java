@@ -35,6 +35,11 @@ public class User {
     @Column(nullable = false)
     private String password;
 
+    @Enumerated(EnumType.STRING)
+    private AuthProvider provider;
+
+    private String providerId;
+
     private String avatarImage;
 
     private boolean enabled = false;

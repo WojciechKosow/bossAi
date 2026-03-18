@@ -40,6 +40,7 @@ public class UserServiceImpl implements UserService {
     private final RequestContextUtil requestContextUtil;
     private final RefreshTokenService refreshTokenService;
     private final UserWalletRepository userWalletRepository;
+    private final AssignPlanService assignPlanService;
 
     @Override
     public AuthResponse register(RegisterRequest request) {
@@ -52,8 +53,8 @@ public class UserServiceImpl implements UserService {
 
         user.setDisplayName(request.getDisplayName());
         user.setEmail(request.getEmail().toLowerCase());
-        System.out.println(user.getEmail());
         user.setPassword(passwordEncoder.encode(request.getPassword()));
+        user.setProvider(AuthProvider.LOCAL);
 
 
         userRepository.save(user);
@@ -87,6 +88,10 @@ public class UserServiceImpl implements UserService {
 
         User user = userRepository.findByEmail(request.getEmail().toLowerCase())
                 .orElseThrow(() -> new RuntimeException("Invalid password or email"));
+
+        if (user.getProvider() == AuthProvider.GOOGLE) {
+            throw new RuntimeException("Use Google login");
+        }
 
         if (user.getLockUntil() != null && user.getLockUntil().isAfter(LocalDateTime.now())) {
 
@@ -175,7 +180,7 @@ public class UserServiceImpl implements UserService {
 
         token.setUsed(true);
 
-        assignFreePlan(user);
+        assignPlanService.assignFreePlan(user);
 
         userRepository.save(user);
         userTokenRepository.save(token);
