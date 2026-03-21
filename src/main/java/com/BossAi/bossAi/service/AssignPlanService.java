@@ -34,6 +34,7 @@ public class AssignPlanService {
         userPlan.setPlanType(PlanType.FREE);
         userPlan.setUser(user);
         userPlan.setActive(true);
+        userPlan.setCreditsTotal(planDefinition.getMonthlyCreditsTotal());
         userPlan.setActivatedAt(LocalDateTime.now());
         userPlan.setExpiresAt(LocalDateTime.now().plusDays(planDefinition.getDurationDays()));
 

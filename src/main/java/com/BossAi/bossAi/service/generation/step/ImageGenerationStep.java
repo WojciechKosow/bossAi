@@ -27,18 +27,18 @@ public class ImageGenerationStep implements GenerationStep {
         Generation generation =
                 generationRepository.findById(context.getGenerationId()).orElseThrow();
 
-        byte[] imageBytes = aiImageService.generateImage(
-                context.getPrompt(),
-                context.getImageUrl()
-        );
+//        byte[] imageBytes = aiImageService.generateImage(
+//                context.getPrompt(),
+//                context.getImageUrl()
+//        );
 
-        AssetDTO asset = assetService.createAsset(
-                generation.getUser().getEmail(),
-                AssetType.IMAGE,
-                imageBytes,
-                generation.getId()
-        );
+//        AssetDTO asset = assetService.createAsset(
+//                generation.getUser().getEmail(),
+//                AssetType.IMAGE,
+//                imageBytes,
+//                generation.getId()
+//        );
 
-        context.setImages(List.of());
+//        context.setImages(List.of());
     }
 }

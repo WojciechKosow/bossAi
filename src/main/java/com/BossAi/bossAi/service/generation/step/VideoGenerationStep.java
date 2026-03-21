@@ -21,10 +21,10 @@ public class VideoGenerationStep implements GenerationStep {
     public void execute(GenerationContext context) throws Exception {
         Generation generation
                 = generationRepository.findById(context.getGenerationId()).orElseThrow();
-        aiVideoService.generateVideo(
-                context.getPrompt(),
-                context.getImageUrl()
-        );
+//        aiVideoService.generateVideo(
+//                context.getPrompt(),
+//                context.getImageUrl()
+//        );
         //TODO: download video
         byte[] videoBytes = new byte[]{};
 

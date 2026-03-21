@@ -110,13 +110,14 @@ public class GenerationServiceImpl implements GenerationService {
             generation.setGenerationStatus(GenerationStatus.PROCESSING);
             generationRepository.save(generation);
 
-            GenerationContext context =
-                    new GenerationContext(
-                            generation.getId(),
-                            request.getPrompt(),
-                            request.getImageUrl()
-                    );
+//            GenerationContext context =
+//                    new GenerationContext(
+//                            generation.getId(),
+//                            request.getPrompt(),
+//                            request.getImageUrl()
+//                    );
 
+            GenerationContext context = null;
             generationExecutor.execute(context);
 
             generation.setGenerationStatus(GenerationStatus.DONE);
