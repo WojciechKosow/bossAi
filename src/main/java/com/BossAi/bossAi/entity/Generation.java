@@ -31,7 +31,7 @@ public class Generation {
     private String imageUrl;
     private String videoUrl;
 
-    @Column(length = 1000)
+    @Column(length = 5000)
     private String errorMessage;
 
     private LocalDateTime createdAt;

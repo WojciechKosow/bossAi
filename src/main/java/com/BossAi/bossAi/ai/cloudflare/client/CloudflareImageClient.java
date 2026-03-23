@@ -10,18 +10,18 @@ import org.springframework.web.reactive.function.client.WebClient;
 @RequiredArgsConstructor
 public class CloudflareImageClient {
 
-    private final WebClient cloudflareWebClient;
-
-    public byte[] generateImage(
-            String accountId,
-            CloudflareImageRequest request
-    ) {
-        return cloudflareWebClient.post()
-                .uri("/accounts/{accountId}/ai/run/@cf/stabilityai/stable-diffusion-xl-base-1.0",
-                        accountId)
-                .bodyValue(request)
-                .retrieve()
-                .bodyToMono(byte[].class)
-                .block();
-    }
+//    private final WebClient cloudflareWebClient;
+//
+//    public byte[] generateImage(
+//            String accountId,
+//            CloudflareImageRequest request
+//    ) {
+//        return cloudflareWebClient.post()
+//                .uri("/accounts/{accountId}/ai/run/@cf/stabilityai/stable-diffusion-xl-base-1.0",
+//                        accountId)
+//                .bodyValue(request)
+//                .retrieve()
+//                .bodyToMono(byte[].class)
+//                .block();
+//    }
 }

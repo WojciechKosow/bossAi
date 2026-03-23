@@ -21,25 +21,25 @@ public class CloudflareConfig {
 //                .build();
 //    }
 
-    @Bean
-    public WebClient cloudflareWebClient(
-            @Value("${cloudflare.base-url}") String baseUrl,
-            @Value("${cloudflare.api-token}") String token
-    ) {
-
-        ExchangeStrategies strategies = ExchangeStrategies.builder()
-                .codecs(configurer ->
-                        configurer.defaultCodecs().maxInMemorySize(10 * 1024 * 1024) // 10 MB
-                )
-                .build();
-
-        return WebClient.builder()
-                .baseUrl(baseUrl)
-                .exchangeStrategies(strategies)
-                .defaultHeader("Authorization", "Bearer " + token)
-                .defaultHeader("Content-Type", "application/json")
-                .build();
-    }
+//    @Bean
+//    public WebClient cloudflareWebClient(
+//            @Value("${cloudflare.base-url}") String baseUrl,
+//            @Value("${cloudflare.api-token}") String token
+//    ) {
+//
+//        ExchangeStrategies strategies = ExchangeStrategies.builder()
+//                .codecs(configurer ->
+//                        configurer.defaultCodecs().maxInMemorySize(10 * 1024 * 1024) // 10 MB
+//                )
+//                .build();
+//
+//        return WebClient.builder()
+//                .baseUrl(baseUrl)
+//                .exchangeStrategies(strategies)
+//                .defaultHeader("Authorization", "Bearer " + token)
+//                .defaultHeader("Content-Type", "application/json")
+//                .build();
+//    }
 
 
 }

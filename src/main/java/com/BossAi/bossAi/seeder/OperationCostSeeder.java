@@ -67,6 +67,13 @@ public class OperationCostSeeder {
                 .active(true)
                 .updatedAt(LocalDateTime.now())
                 .build());
+
+        operationCostRepository.save(OperationCost.builder()
+                .operationType(OperationType.TIKTOK_AD_FULL)
+                .creditsCost(65)
+                .active(true)
+                .updatedAt(LocalDateTime.now())
+                .build());
     }
 
 }

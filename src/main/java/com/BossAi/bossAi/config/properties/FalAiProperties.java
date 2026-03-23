@@ -11,7 +11,6 @@ import org.springframework.stereotype.Component;
  */
 @Getter
 @Setter
-@Component
 @ConfigurationProperties(prefix = "falai")
 public class FalAiProperties {
 

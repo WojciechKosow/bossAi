@@ -7,6 +7,7 @@ import com.BossAi.bossAi.repository.GenerationRepository;
 import com.BossAi.bossAi.repository.UserPlanRepository;
 import com.BossAi.bossAi.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContext;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -19,6 +20,7 @@ import java.util.List;
 import java.util.UUID;
 
 @Service
+@Slf4j
 @RequiredArgsConstructor
 public class AssetServiceImpl implements AssetService {
 
@@ -30,11 +32,11 @@ public class AssetServiceImpl implements AssetService {
 
     @Override
     @Transactional
-    public AssetDTO createAsset(String email, AssetType type, byte[] data, UUID generationId) {
+    public AssetDTO createAsset(UUID userId, AssetType type, AssetSource source, byte[] data, String storageKey, UUID generationId) {
 
-        User user = userRepository.findByEmail(email).orElseThrow();
+        User user = userRepository.findById(userId).orElseThrow();
 
-        Generation generation = generationRepository.findById(generationId).orElseThrow();
+        Generation generation = generationRepository.getReferenceById(generationId);
 
         UserPlan userPlan = planSelectionService.selectHighestPlan(user);
 
@@ -42,12 +44,13 @@ public class AssetServiceImpl implements AssetService {
         asset.setUser(user);
         asset.setType(type);
 
-        if (generation.getGenerationType().equals(GenerationType.SYSTEM_GENERATION)) {
-            asset.setSource(AssetSource.SYSTEM_GENERATED);
-        } else {
-            asset.setSource(AssetSource.AI_GENERATED);
-        }
+//        if (generation.getGenerationType().equals(GenerationType.SYSTEM_GENERATION)) {
+//            asset.setSource(AssetSource.SYSTEM_GENERATED);
+//        } else {
+//            asset.setSource(AssetSource.AI_GENERATED);
+//        }
 
+        asset.setSource(source);
 
         asset.setSizeBytes(data.length);
         asset.setReusable(canReuse(userPlan));
@@ -59,7 +62,7 @@ public class AssetServiceImpl implements AssetService {
 
         assetRepository.save(asset);
 
-        String storageKey = getStorageKey(user, type, asset);
+//        String storageKey = getStorageKey(user, type, asset);
 
         asset.setStorageKey(storageKey);
         storageService.save(data, storageKey);
@@ -99,6 +102,35 @@ public class AssetServiceImpl implements AssetService {
         storageService.save(data, storageKey);
 
         assetRepository.save(asset);
+
+        return mapToDto(asset);
+    }
+
+    @Override
+    public AssetDTO createAssetFromUrl(
+            UUID userId,
+            AssetType type,
+            AssetSource source,
+            String externalUrl,
+            UUID generationId
+    ) {
+        String storageKey = "external/" + UUID.randomUUID();
+
+        Asset asset = Asset.builder()
+                .user(userRepository.getReferenceById(userId))
+                .type(type)
+                .source(source)
+                .storageKey(storageKey)
+                .originalFilename(externalUrl)
+                .sizeBytes(0)
+                .reusable(true)
+                .generationId(generationId)
+                .createdAt(LocalDateTime.now())
+                .build();
+
+        assetRepository.save(asset);
+
+        log.debug("[AssetService] Asset (URL) zapisany — type: {}, url: {}", type, externalUrl);
 
         return mapToDto(asset);
     }

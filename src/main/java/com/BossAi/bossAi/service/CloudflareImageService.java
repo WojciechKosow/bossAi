@@ -27,7 +27,7 @@ public class CloudflareImageService implements AiImageService {
                 .prompt(prompt)
                 .build();
 
-        return cloudflareWebClient.generateImage(accountId, request);
+        return null;
     }
 
 

@@ -33,19 +33,34 @@ import java.util.concurrent.TimeUnit;
  */
 @Slf4j
 @Service
-@RequiredArgsConstructor
+
 public class FalAiService {
 
-    @Qualifier("falAiWebClient")
     private final WebClient webClient;
 
     private final FalAiProperties properties;
     private final ObjectMapper objectMapper;
 
+    public FalAiService(
+            @Qualifier("falAiWebClient") WebClient webClient,
+            FalAiProperties properties,
+            ObjectMapper objectMapper
+    ) {
+        this.webClient = webClient;
+        this.properties = properties;
+        this.objectMapper = objectMapper;
+    }
+
+    private static class FalJobInfo {
+        String requestId;
+        String statusUrl;
+        String responseUrl;
+    }
+
     // OkHttpClient do pobierania binarnych plików (video/audio z CDN)
     private final OkHttpClient okHttpClient = new OkHttpClient.Builder()
             .connectTimeout(15, TimeUnit.SECONDS)
-            .readTimeout(300, TimeUnit.SECONDS)
+            .readTimeout(600, TimeUnit.SECONDS)
             .build();
 
     // =========================================================================
@@ -59,31 +74,87 @@ public class FalAiService {
      * @param modelId     model z ModelSelector (np. "fal-ai/flux/schnell")
      * @return publiczny URL wygenerowanego obrazu (na CDN fal.ai)
      */
+//    @Retry(name = "falAi")
+//    public String generateImage(String imagePrompt, String modelId) throws Exception {
+//        log.info("[FalAiService] generateImage — model: {}", modelId);
+//
+//        Map<String, Object> requestBody = Map.of(
+//                "prompt", imagePrompt,
+//                "image_size", "portrait_9_16",
+//                "num_images", 1,
+//                "enable_safety_checker", true
+//        );
+//
+//        String requestId = submitJob(modelId, requestBody);
+//        log.info("[FalAiService] Image job submitted — requestId: {}", requestId);
+//
+//        JsonNode result = pollUntilCompleted(requestId, modelId);
+//
+//        // fal.ai zwraca: { "images": [ { "url": "https://..." } ] }
+//        String imageUrl = result.path("images").get(0).path("url").asText();
+//
+//        if (imageUrl.isBlank()) {
+//            throw new RuntimeException("[FalAiService] Brak URL obrazu w odpowiedzi fal.ai");
+//        }
+//
+//        log.info("[FalAiService] Image gotowy — url: {}", imageUrl);
+//        return imageUrl;
+//    }
+
     @Retry(name = "falAi")
     public String generateImage(String imagePrompt, String modelId) throws Exception {
         log.info("[FalAiService] generateImage — model: {}", modelId);
 
         Map<String, Object> requestBody = Map.of(
                 "prompt", imagePrompt,
-                "image_size", "portrait_9_16",
+                "image_size", "portrait_16_9",
                 "num_images", 1,
                 "enable_safety_checker", true
         );
 
-        String requestId = submitJob(modelId, requestBody);
-        log.info("[FalAiService] Image job submitted — requestId: {}", requestId);
+        JsonNode submitResponse = submitJobFull(modelId, requestBody);
+        String requestId = submitResponse.path("request_id").asText();
+        String statusUrl  = submitResponse.path("status_url").asText();
+        String responseUrl = submitResponse.path("response_url").asText();
 
-        JsonNode result = pollUntilCompleted(requestId, modelId);
+        log.info("[FalAiService] Job submitted — requestId: {}", requestId);
 
-        // fal.ai zwraca: { "images": [ { "url": "https://..." } ] }
+        JsonNode result = pollUntilCompleted(requestId, statusUrl, responseUrl);
+
         String imageUrl = result.path("images").get(0).path("url").asText();
-
         if (imageUrl.isBlank()) {
-            throw new RuntimeException("[FalAiService] Brak URL obrazu w odpowiedzi fal.ai");
+            throw new RuntimeException("[FalAiService] Brak URL obrazu");
         }
-
-        log.info("[FalAiService] Image gotowy — url: {}", imageUrl);
         return imageUrl;
+    }
+
+    private String generateImageSync(String modelId, Map<String, Object> body) {
+        String responseJson = webClient.post()
+                .uri("https://fal.run/{modelId}", modelId) // 🔥 override baseUrl
+                .bodyValue(body)
+                .retrieve()
+                .bodyToMono(String.class)
+                .block();
+
+        try {
+            JsonNode root = objectMapper.readTree(responseJson);
+
+            String imageUrl = root.path("images").get(0).path("url").asText();
+
+            if (imageUrl.isBlank()) {
+                throw new RuntimeException("Brak URL obrazu (sync)");
+            }
+
+            log.info("[FalAiService] Image (sync) gotowy — {}", imageUrl);
+            return imageUrl;
+
+        } catch (Exception e) {
+            throw new RuntimeException("[FalAiService] Sync image parse error", e);
+        }
+    }
+
+    private boolean isFluxModel(String modelId) {
+        return modelId != null && modelId.contains("flux");
     }
 
     // =========================================================================
@@ -102,9 +173,6 @@ public class FalAiService {
     @Retry(name = "falAi")
     public byte[] generateVideo(String imageUrl, String motionPrompt,
                                 int durationMs, String modelId) throws Exception {
-        log.info("[FalAiService] generateVideo — model: {}, durationMs: {}", modelId, durationMs);
-
-        // Kling akceptuje czas w sekundach: 5 lub 10
         int durationSeconds = durationMs <= 5000 ? 5 : 10;
 
         Map<String, Object> requestBody = Map.of(
@@ -114,22 +182,21 @@ public class FalAiService {
                 "aspect_ratio", "9:16"
         );
 
-        String requestId = submitJob(modelId, requestBody);
+        JsonNode submitResponse = submitJobFull(modelId, requestBody);
+        String requestId  = submitResponse.path("request_id").asText();
+        String statusUrl  = submitResponse.path("status_url").asText();
+        String responseUrl = submitResponse.path("response_url").asText();
+
         log.info("[FalAiService] Video job submitted — requestId: {}", requestId);
 
-        JsonNode result = pollUntilCompleted(requestId, modelId);
+        JsonNode result = pollUntilCompleted(requestId, statusUrl, responseUrl);
 
-        // fal.ai zwraca: { "video": { "url": "https://..." } }
         String videoUrl = result.path("video").path("url").asText();
-
         if (videoUrl.isBlank()) {
-            throw new RuntimeException("[FalAiService] Brak URL wideo w odpowiedzi fal.ai");
+            throw new RuntimeException("[FalAiService] Brak URL wideo");
         }
-
-        log.info("[FalAiService] Video gotowy — pobieranie z: {}", videoUrl);
         return downloadBytes(videoUrl);
     }
-
     // =========================================================================
     // WEWNĘTRZNE — submit + polling
     // =========================================================================
@@ -139,23 +206,51 @@ public class FalAiService {
      *
      * @return requestId potrzebny do pollingu
      */
-    private String submitJob(String modelId, Map<String, Object> body) {
+//    private String submitJob(String modelId, Map<String, Object> body) {
+//        String responseJson = webClient.post()
+//                .uri("/" + modelId)
+//                .bodyValue(body)
+//                .retrieve()
+//                .bodyToMono(String.class)
+//                .block();
+//
+//        try {
+//            JsonNode root = objectMapper.readTree(responseJson);
+//            String requestId = root.path("request_id").asText();
+//
+//            if (requestId.isBlank()) {
+//                throw new RuntimeException("fal.ai nie zwrócił request_id. Response: " + responseJson);
+//            }
+//
+//            return requestId;
+//        } catch (Exception e) {
+//            throw new RuntimeException("[FalAiService] Błąd parsowania submit response: " + e.getMessage(), e);
+//        }
+//    }
+
+    private FalJobInfo submitJob(String modelId, Map<String, Object> body) {
         String responseJson = webClient.post()
-                .uri("/{modelId}", modelId)
+                .uri("/" + modelId)
                 .bodyValue(body)
                 .retrieve()
                 .bodyToMono(String.class)
                 .block();
 
+        log.info("[FalAiService] Submit raw response: {}", responseJson);
+
         try {
             JsonNode root = objectMapper.readTree(responseJson);
-            String requestId = root.path("request_id").asText();
 
-            if (requestId.isBlank()) {
+            FalJobInfo info = new FalJobInfo();
+            info.requestId  = root.path("request_id").asText();
+            info.statusUrl  = root.path("status_url").asText();
+            info.responseUrl = root.path("response_url").asText();
+
+            if (info.requestId.isBlank()) {
                 throw new RuntimeException("fal.ai nie zwrócił request_id. Response: " + responseJson);
             }
 
-            return requestId;
+            return info;
         } catch (Exception e) {
             throw new RuntimeException("[FalAiService] Błąd parsowania submit response: " + e.getMessage(), e);
         }
@@ -167,15 +262,16 @@ public class FalAiService {
      *
      * @return JsonNode z wynikiem (result payload z fal.ai)
      */
-    private JsonNode pollUntilCompleted(String requestId, String modelId) throws Exception {
+    private JsonNode pollUntilCompleted(String requestId, String statusUrl, String responseUrl) throws Exception {
         int maxAttempts = properties.getPolling().getMaxAttempts();
         long intervalMs = properties.getPolling().getIntervalMs();
 
         for (int attempt = 1; attempt <= maxAttempts; attempt++) {
             Thread.sleep(intervalMs);
 
+            // POST na status_url z odpowiedzi fal.ai (nie budujemy URL ręcznie!)
             String statusJson = webClient.get()
-                    .uri("/requests/{requestId}/status", requestId)
+                    .uri(statusUrl)
                     .retrieve()
                     .bodyToMono(String.class)
                     .block();
@@ -188,40 +284,37 @@ public class FalAiService {
 
             switch (status) {
                 case "COMPLETED" -> {
-                    return fetchResult(requestId);
+                    return fetchResult(responseUrl);
                 }
                 case "FAILED" -> {
                     String error = statusNode.path("error").asText("unknown error");
                     throw new RuntimeException(
                             "[FalAiService] Job FAILED — requestId: " + requestId + ", error: " + error);
                 }
-                case "IN_QUEUE", "IN_PROGRESS" -> {
-                    // Czekamy dalej
-                }
+                case "IN_QUEUE", "IN_PROGRESS" -> { /* czekamy */ }
                 default -> log.warn("[FalAiService] Nieznany status: {}", status);
             }
         }
 
         throw new RuntimeException(
-                "[FalAiService] Timeout — job nie zakończył się po "
-                        + (maxAttempts * intervalMs / 1000) + "s. requestId: " + requestId);
+                "[FalAiService] Timeout po " + (maxAttempts * intervalMs / 1000) + "s. requestId: " + requestId);
     }
 
     /**
      * Pobiera wynik zakończonego joba.
      */
-    private JsonNode fetchResult(String requestId) {
+    private JsonNode fetchResult(String responseUrl) {
         try {
+            // GET na response_url
             String resultJson = webClient.get()
-                    .uri("/requests/{requestId}", requestId)
+                    .uri(responseUrl)
                     .retrieve()
                     .bodyToMono(String.class)
                     .block();
 
             return objectMapper.readTree(resultJson);
         } catch (Exception e) {
-            throw new RuntimeException(
-                    "[FalAiService] Błąd pobierania wyniku — requestId: " + requestId, e);
+            throw new RuntimeException("[FalAiService] Błąd pobierania wyniku z: " + responseUrl, e);
         }
     }
 
@@ -243,6 +336,27 @@ public class FalAiService {
             byte[] bytes = response.body().bytes();
             log.info("[FalAiService] Pobrano {} bytes z {}", bytes.length, url);
             return bytes;
+        }
+    }
+
+    private JsonNode submitJobFull(String modelId, Map<String, Object> body) {
+        String responseJson = webClient.post()
+                .uri("/" + modelId)
+                .bodyValue(body)
+                .retrieve()
+                .bodyToMono(String.class)
+                .block();
+
+        try {
+            log.info("[FalAiService] Submit raw response: {}", responseJson);
+            JsonNode root = objectMapper.readTree(responseJson);
+
+            if (root.path("request_id").asText().isBlank()) {
+                throw new RuntimeException("fal.ai nie zwrócił request_id. Response: " + responseJson);
+            }
+            return root;
+        } catch (Exception e) {
+            throw new RuntimeException("[FalAiService] Błąd parsowania submit response", e);
         }
     }
 }

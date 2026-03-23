@@ -45,4 +45,25 @@ public class AssignPlanService {
         userPlanRepository.save(userPlan);
     }
 
+    @Transactional
+    public void assignCreatorPlan(User user) {
+
+        UserWallet userWallet = new UserWallet();
+        PlanDefinition planDefinition = planDefinitionRepository.findById(PlanType.PRO)
+                .orElseThrow();
+
+        UserPlan userPlan = new UserPlan();
+        userPlan.setPlanType(PlanType.PRO);
+        userPlan.setUser(user);
+        userPlan.setActive(true);
+        userPlan.setCreditsTotal(planDefinition.getMonthlyCreditsTotal());
+        userPlan.setActivatedAt(LocalDateTime.now());
+        userPlan.setExpiresAt(LocalDateTime.now().plusDays(planDefinition.getDurationDays()));
+
+        userWallet.setUserId(user.getId());
+        userWallet.setCreditsBalance(0);
+
+        userWalletRepository.save(userWallet);
+        userPlanRepository.save(userPlan);
+    }
 }

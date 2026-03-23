@@ -28,11 +28,11 @@ public class VideoGenerationStep implements GenerationStep {
         //TODO: download video
         byte[] videoBytes = new byte[]{};
 
-        assetService.createAsset(
-                generation.getUser().getEmail(),
-                AssetType.VIDEO,
-                videoBytes,
-                generation.getId()
-        );
+//        assetService.createAsset(
+//                generation.getUser().getEmail(),
+//                AssetType.VIDEO,
+//                videoBytes,
+//                generation.getId()
+//        );
     }
 }

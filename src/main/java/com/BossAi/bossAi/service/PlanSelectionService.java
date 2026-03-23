@@ -27,6 +27,44 @@ public class PlanSelectionService {
             PlanType.TRIAL, PlanType.FREE
     );
 
+    public UserPlan selectPlanForOperation(User user, OperationType operationType) {
+
+        Optional<UserWallet> wallet = userWalletRepository.findById(user.getId());
+        UserWallet userWallet = new UserWallet();
+        if (wallet.isPresent()) {
+            userWallet = wallet.get();
+        }
+
+        OperationCost operationCost = operationCostRepository.getById(operationType);
+        List<UserPlan> userPlans = userPlanRepository.findByUserAndActiveTrue(user);
+
+        if (userWallet.getCreditsBalance() < 8) {
+            return PLAN_PRIORITY.stream()
+                    .flatMap(priority ->
+                            userPlans.stream()
+                                    .filter(p -> p.getPlanType() == priority)
+                                    .filter(UserPlan::isActive)
+                                    .filter(p -> p.hasEnoughCreditsLeft(8))
+                    )
+                    .findFirst()
+                    .orElseThrow(() -> new ResponseStatusException(
+                            HttpStatus.PAYMENT_REQUIRED,
+                            "No active plan"
+                    ));
+        }
+
+        return PLAN_PRIORITY.stream()
+                .flatMap(priority ->
+                        userPlans.stream()
+                                .filter(p -> p.getPlanType() == priority)
+                                .filter(UserPlan::isActive)
+                )
+                .findFirst()
+                .orElseThrow(() -> new ResponseStatusException(
+                        HttpStatus.PAYMENT_REQUIRED,
+                        "No active plan"
+                ));
+    }
 
     public UserPlan selectPlanForImageGeneration(User user) {
 

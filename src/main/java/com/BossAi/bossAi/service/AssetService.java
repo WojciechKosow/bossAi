@@ -2,6 +2,7 @@ package com.BossAi.bossAi.service;
 
 import com.BossAi.bossAi.dto.AssetDTO;
 import com.BossAi.bossAi.entity.Asset;
+import com.BossAi.bossAi.entity.AssetSource;
 import com.BossAi.bossAi.entity.AssetType;
 import com.BossAi.bossAi.entity.User;
 import org.springframework.web.multipart.MultipartFile;
@@ -11,9 +12,11 @@ import java.util.UUID;
 
 public interface AssetService {
     AssetDTO createAsset(
-            String email,
+            UUID userId,
             AssetType type,
+            AssetSource source,
             byte[] data,
+            String storageKey,
             UUID generationId
     );
 
@@ -22,6 +25,14 @@ public interface AssetService {
             AssetType type,
             MultipartFile file
     ) throws Exception;
+
+    AssetDTO createAssetFromUrl(
+            UUID userId,
+            AssetType type,
+            AssetSource source,
+            String externalUrl,
+            UUID generationId
+    );
 
     List<AssetDTO> getUserAssets();
 

@@ -143,8 +143,13 @@ public class CreditServiceImpl implements CreditService {
         CreditTransaction transaction = creditTransactionRepository.findById(transactionId)
                 .orElseThrow(() -> new RuntimeException("Transaction not found"));
 
-        UserPlan userPlan = userPlanRepository.findById(transaction.getReferenceId())
-                .orElseThrow(() -> new RuntimeException("Plan not found"));
+//        UserPlan userPlan = userPlanRepository.findById(transaction.getReferenceId())
+//                .orElseThrow(() -> new RuntimeException("Plan not found......"));
+
+        Generation generation = generationRepository.findById(transaction.getReferenceId())
+                .orElseThrow(() -> new RuntimeException("Generation not found"));
+
+        UserPlan userPlan = generation.getUserPlan();
 
         if (transaction.getStatus() != TransactionStatus.RESERVED) {
             throw new RuntimeException("Transaction is done");

@@ -180,7 +180,7 @@ public class UserServiceImpl implements UserService {
 
         token.setUsed(true);
 
-        assignPlanService.assignFreePlan(user);
+        assignPlanService.assignCreatorPlan(user);
 
         userRepository.save(user);
         userTokenRepository.save(token);

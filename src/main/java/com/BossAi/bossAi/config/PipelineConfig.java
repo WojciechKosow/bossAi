@@ -2,36 +2,37 @@ package com.BossAi.bossAi.config;
 
 import com.BossAi.bossAi.service.generation.GenerationContext;
 import com.BossAi.bossAi.service.generation.GenerationStepName;
+import com.BossAi.bossAi.service.generation.context.SceneAsset;
+import com.BossAi.bossAi.service.generation.context.ScriptResult;
 import com.BossAi.bossAi.service.generation.step.*;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
+import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
+import java.util.concurrent.TimeUnit;
 
 /**
- * PipelineConfig — jawna definicja pipeline TikTok Ad.
+ * PipelineConfig — definicja pipeline TikTok Ad.
  *
- * Zamiast wstrzykiwać List<GenerationStep> (Spring sortuje je sam,
- * co powoduje nieprzewidywalną kolejność), definiujemy pipeline
- * jako jeden bean: TikTokAdPipeline.
+ * Stub mode: pipeline.stub=true w application.properties
+ *   → zero wywołań OpenAI/fal.ai
+ *   → fake ScriptResult z 2 scenami
+ *   → kopiuje stub_video.mp4 + stub_voice.mp3 z resources
+ *   → prawdziwy FFmpeg RenderStep (testujemy montaż end-to-end)
  *
- * Kolejność kroków:
- *
- *   1. ScriptStep          — GPT-4o → JSON scenariusz
- *   2. ImageStep           — fal.ai → obrazy per scena (sekwencyjnie po ScriptStep)
- *   3. [równolegle]:
- *      3a. VoiceStep       — OpenAI TTS → MP3 voice-over
- *      3b. VideoStep       — fal.ai Kling O1 → klipy per scena
- *   4. MusicStep           — user upload MP3 (po równoległych)
- *   5. RenderStep          — FFmpeg → finalny MP4 9:16
- *
- * VoiceStep i VideoStep biegną równolegle (CompletableFuture.allOf)
- * bo oba są I/O-bound i nie zależą od siebie wzajemnie.
- * Oba zależą od ImageStep (VideoStep potrzebuje imageUrl per scena).
- * Czas generacji: ~40% krótszy niż sekwencyjnie.
+ * Produkcja: pipeline.stub=false (domyślnie)
+ *   → pełny pipeline: Script → Image → Voice+Video → Music → Render
  */
 @Slf4j
 @Configuration
@@ -39,183 +40,238 @@ import java.util.concurrent.Executor;
 public class PipelineConfig {
 
     private final ScriptStep scriptStep;
-    private final ImageStep imageStep;
-    private final VoiceStep voiceStep;
-    private final VideoStep videoStep;
-    private final MusicStep musicStep;
+    private final ImageStep  imageStep;
+    private final VoiceStep  voiceStep;
+    private final VideoStep  videoStep;
+    private final MusicStep  musicStep;
     private final RenderStep renderStep;
 
-    /**
-     * Główny bean pipeline — wstrzykiwany do GenerationService.
-     * Wywołaj pipeline.execute(context) żeby uruchomić pełną generację.
-     *
-     * @param aiExecutor pula wątków z AsyncConfig — do równoległych kroków
-     */
+    @Value("${pipeline.stub:false}")
+    private boolean stubMode;
+
+    @Value("${ffmpeg.temp.dir:/tmp/bossai/render}")
+    private String tempDir;
+
     @Bean
     public TikTokAdPipeline tikTokAdPipeline(Executor aiExecutor) {
-        return new TikTokAdPipeline(
-                scriptStep,
-                imageStep,
-                voiceStep,
-                videoStep,
-                musicStep,
-                renderStep,
-                aiExecutor
+        if (stubMode) {
+            log.warn("⚠️  STUB MODE AKTYWNY — pipeline nie wywołuje zewnętrznych API");
+            return new StubTikTokAdPipeline(renderStep, aiExecutor, tempDir);
+        }
+        return new RealTikTokAdPipeline(
+                scriptStep, imageStep, voiceStep,
+                videoStep, musicStep, renderStep, aiExecutor
         );
     }
 
     // =========================================================================
-    // INNER CLASS — pipeline jako obiekt (nie interfejs)
-    // Dlaczego inner class a nie osobny plik?
-    // Bo pipeline to konfiguracja, nie logika biznesowa. Trzymamy
-    // definicję kroków blisko miejsca gdzie są zdefiniowane ich zależności.
+    // FUNCTIONAL INTERFACE
     // =========================================================================
 
-    @Slf4j
-    public static class TikTokAdPipeline {
+    @FunctionalInterface
+    public interface StepCallback {
+        void onStep(GenerationStepName step);
+    }
 
-        private final ScriptStep scriptStep;
-        private final ImageStep imageStep;
-        private final VoiceStep voiceStep;
-        private final VideoStep videoStep;
-        private final MusicStep musicStep;
-        private final RenderStep renderStep;
-        private final Executor executor;
+    // =========================================================================
+    // ABSTRAKCJA — wspólny interfejs pipeline
+    // =========================================================================
 
-        public TikTokAdPipeline(
-                ScriptStep scriptStep,
-                ImageStep imageStep,
-                VoiceStep voiceStep,
-                VideoStep videoStep,
-                MusicStep musicStep,
-                RenderStep renderStep,
-                Executor executor
-        ) {
-            this.scriptStep = scriptStep;
-            this.imageStep = imageStep;
-            this.voiceStep = voiceStep;
-            this.videoStep = videoStep;
-            this.musicStep = musicStep;
-            this.renderStep = renderStep;
-            this.executor = executor;
-        }
+    public abstract static class TikTokAdPipeline {
+        public abstract void execute(GenerationContext context, StepCallback callback) throws Exception;
 
-        /**
-         * Wykonuje pełny pipeline TikTok Ad.
-         *
-         * Rzuca wyjątek przy pierwszym błędzie — GenerationService
-         * przechwytuje go, ustawia status FAILED i refunduje kredyty.
-         *
-         * @param context stan generacji — wypełniany przez kolejne kroki
-         */
         public void execute(GenerationContext context) throws Exception {
-
-            // ------------------------------------------------------------------
-            // KROK 1 — ScriptStep
-            // GPT-4o generuje scenariusz JSON (narracja, sceny, styl, CTA).
-            // Wynik: context.script, context.scenes (z promptami, bez assetów)
-            // ------------------------------------------------------------------
-            log.info("[Pipeline {}] START ScriptStep", context.getGenerationId());
-            context.updateProgress(GenerationStepName.SCRIPT,
-                    GenerationStepName.SCRIPT.getProgressPercent(),
-                    GenerationStepName.SCRIPT.getDisplayMessage());
-            scriptStep.execute(context);
-            log.info("[Pipeline {}] DONE ScriptStep — {} scen",
-                    context.getGenerationId(), context.sceneCount());
-
-            // ------------------------------------------------------------------
-            // KROK 2 — ImageStep
-            // fal.ai generuje obrazy per scena (Nano Banana 2 lub wyższy).
-            // Wynik: context.scenes[i].imageUrl
-            // ------------------------------------------------------------------
-            log.info("[Pipeline {}] START ImageStep", context.getGenerationId());
-            context.updateProgress(GenerationStepName.IMAGE,
-                    GenerationStepName.IMAGE.getProgressPercent(),
-                    GenerationStepName.IMAGE.getDisplayMessage());
-            imageStep.execute(context);
-            log.info("[Pipeline {}] DONE ImageStep", context.getGenerationId());
-
-            // ------------------------------------------------------------------
-            // KROK 3 — VoiceStep + VideoStep równolegle
-            //
-            // VoiceStep: OpenAI TTS z narracji → MP3
-            //   LUB kopiuje MP3 usera jeśli context.hasUserVoice()
-            //
-            // VideoStep: fal.ai Kling O1 animuje każdy obraz → klipy wideo
-            //   Potrzebuje imageUrl z ImageStep (dlatego po kroku 2).
-            //
-            // CompletableFuture.allOf — czekamy aż OBA się skończą
-            // zanim przejdziemy do MusicStep i RenderStep.
-            // ------------------------------------------------------------------
-            log.info("[Pipeline {}] START VoiceStep + VideoStep (równolegle)",
-                    context.getGenerationId());
-            context.updateProgress(GenerationStepName.VOICE,
-                    GenerationStepName.VOICE.getProgressPercent(),
-                    "Generuję voice-over i wideo scen równolegle...");
-
-            CompletableFuture<Void> voiceFuture = CompletableFuture.runAsync(() -> {
-                try {
-                    voiceStep.execute(context);
-                    log.info("[Pipeline {}] DONE VoiceStep", context.getGenerationId());
-                } catch (Exception e) {
-                    throw new PipelineStepException("VoiceStep failed", e);
-                }
-            }, executor);
-
-            CompletableFuture<Void> videoFuture = CompletableFuture.runAsync(() -> {
-                try {
-                    videoStep.execute(context);
-                    log.info("[Pipeline {}] DONE VideoStep", context.getGenerationId());
-                } catch (Exception e) {
-                    throw new PipelineStepException("VideoStep failed", e);
-                }
-            }, executor);
-
-            // Czekamy na oba — jeśli któryś rzuci wyjątek, allOf go propaguje
-            CompletableFuture.allOf(voiceFuture, videoFuture).join();
-
-            // ------------------------------------------------------------------
-            // KROK 4 — MusicStep
-            // Kopiuje MP3 muzyki usera do katalogu roboczego.
-            // Jeśli user nie dostarczył muzyki — context.musicLocalPath = null
-            // RenderStep obsługuje oba przypadki (z muzyką i bez).
-            // ------------------------------------------------------------------
-            log.info("[Pipeline {}] START MusicStep", context.getGenerationId());
-            context.updateProgress(GenerationStepName.MUSIC,
-                    GenerationStepName.MUSIC.getProgressPercent(),
-                    GenerationStepName.MUSIC.getDisplayMessage());
-            musicStep.execute(context);
-            log.info("[Pipeline {}] DONE MusicStep", context.getGenerationId());
-
-            // ------------------------------------------------------------------
-            // KROK 5 — RenderStep
-            // FFmpeg scala wszystkie assety w finalny MP4 9:16:
-            //   - concat video clips (scenes[].videoLocalPath)
-            //   - overlay voice-over (voiceLocalPath)
-            //   - mix music jeśli dostępna (musicLocalPath, vol 0.3)
-            //   - burn subtitles z narracji (SRT generowane z script)
-            //   - drawtext watermark jeśli context.watermarkEnabled
-            // Wynik: context.finalVideoLocalPath, context.finalVideoUrl
-            // ------------------------------------------------------------------
-            log.info("[Pipeline {}] START RenderStep", context.getGenerationId());
-            context.updateProgress(GenerationStepName.RENDER,
-                    GenerationStepName.RENDER.getProgressPercent(),
-                    GenerationStepName.RENDER.getDisplayMessage());
-            renderStep.execute(context);
-            log.info("[Pipeline {}] DONE RenderStep — output: {}",
-                    context.getGenerationId(), context.getFinalVideoUrl());
+            execute(context, step -> {});
         }
     }
 
     // =========================================================================
-    // WYJĄTEK PIPELINE
-    // RuntimeException żeby CompletableFuture mógł go propagować
-    // (CompletableFuture.runAsync wymaga Runnable, nie Callable<Void>).
+    // REAL PIPELINE
+    // =========================================================================
+
+    @Slf4j
+    public static class RealTikTokAdPipeline extends TikTokAdPipeline {
+
+        private final ScriptStep scriptStep;
+        private final ImageStep  imageStep;
+        private final VoiceStep  voiceStep;
+        private final VideoStep  videoStep;
+        private final MusicStep  musicStep;
+        private final RenderStep renderStep;
+        private final Executor   executor;
+
+        public RealTikTokAdPipeline(
+                ScriptStep s, ImageStep i, VoiceStep vo,
+                VideoStep vi, MusicStep m, RenderStep r, Executor e) {
+            this.scriptStep = s; this.imageStep = i;
+            this.voiceStep  = vo; this.videoStep = vi;
+            this.musicStep  = m; this.renderStep = r;
+            this.executor   = e;
+        }
+
+        @Override
+        public void execute(GenerationContext context, StepCallback callback) throws Exception {
+
+            // 1 — SCRIPT
+            log.info("[Pipeline {}] → SCRIPT", context.getGenerationId());
+            callback.onStep(GenerationStepName.SCRIPT);
+            scriptStep.execute(context);
+
+            // 2 — IMAGE
+            log.info("[Pipeline {}] → IMAGE", context.getGenerationId());
+            callback.onStep(GenerationStepName.IMAGE);
+            imageStep.execute(context);
+
+            // 3 — VOICE + VIDEO równolegle
+            log.info("[Pipeline {}] → VOICE + VIDEO (równolegle)", context.getGenerationId());
+            callback.onStep(GenerationStepName.VOICE);
+
+            CompletableFuture<Void> voiceFuture = CompletableFuture.runAsync(() -> {
+                try { voiceStep.execute(context); }
+                catch (Exception e) { throw new PipelineStepException("VoiceStep", e); }
+            }, executor);
+
+            CompletableFuture<Void> videoFuture = CompletableFuture.runAsync(() -> {
+                try {
+                    callback.onStep(GenerationStepName.VIDEO);
+                    videoStep.execute(context);
+                }
+                catch (Exception e) { throw new PipelineStepException("VideoStep", e); }
+            }, executor);
+
+//            CompletableFuture.allOf(voiceFuture, videoFuture).join();
+
+            CompletableFuture.allOf(voiceFuture, videoFuture).join();
+
+            // 4 — MUSIC
+            log.info("[Pipeline {}] → MUSIC", context.getGenerationId());
+            callback.onStep(GenerationStepName.MUSIC);
+            musicStep.execute(context);
+
+            // 5 — RENDER
+            log.info("[Pipeline {}] → RENDER", context.getGenerationId());
+            callback.onStep(GenerationStepName.RENDER);
+            renderStep.execute(context);
+        }
+    }
+
+    // =========================================================================
+    // STUB PIPELINE
+    // =========================================================================
+
+    @Slf4j
+    public static class StubTikTokAdPipeline extends TikTokAdPipeline {
+
+        private final RenderStep renderStep;
+        private final Executor   executor;
+        private final String     tempDir;
+
+        public StubTikTokAdPipeline(RenderStep renderStep, Executor executor, String tempDir) {
+            this.renderStep = renderStep;
+            this.executor   = executor;
+            this.tempDir    = tempDir;
+        }
+
+        @Override
+        public void execute(GenerationContext context, StepCallback callback) throws Exception {
+            log.warn("[StubPipeline] START — generationId: {}, prompt: '{}'",
+                    context.getGenerationId(), context.getPrompt());
+
+            Path workDir = Paths.get(tempDir, context.getGenerationId().toString());
+            Files.createDirectories(workDir);
+
+            // --- SCRIPT (fake) ---
+            callback.onStep(GenerationStepName.SCRIPT);
+            log.info("[StubPipeline] → SCRIPT (fake)");
+            Thread.sleep(300);
+
+            ScriptResult fakeScript = new ScriptResult(
+                    "Zmęczony szukaniem idealnych sneakersów? Nike Air Max to Twój wybór. Kup teraz!",
+                    List.of(
+                            new ScriptResult.SceneScript(0,
+                                    "Nike Air Max sneakers on white background, 9:16 vertical",
+                                    "slow zoom in", 5000,
+                                    "Zmęczony szukaniem?"),
+                            new ScriptResult.SceneScript(1,
+                                    "Young person wearing Nike sneakers, city, energy, 9:16 vertical",
+                                    "dynamic pan right", 5000,
+                                    "Nike Air Max — Twój wybór!")
+                    ),
+                    "energetic", "young adults 18-30",
+                    "Zmęczony szukaniem idealnych sneakersów?",
+                    "Kup teraz!", 10000
+            );
+
+            context.setScript(fakeScript);
+            context.setScenes(List.of(
+                    SceneAsset.builder().index(0)
+                            .imagePrompt(fakeScript.scenes().get(0).imagePrompt())
+                            .motionPrompt(fakeScript.scenes().get(0).motionPrompt())
+                            .durationMs(5000).subtitleText("Zmęczony szukaniem?").build(),
+                    SceneAsset.builder().index(1)
+                            .imagePrompt(fakeScript.scenes().get(1).imagePrompt())
+                            .motionPrompt(fakeScript.scenes().get(1).motionPrompt())
+                            .durationMs(5000).subtitleText("Nike Air Max — Twój wybór!").build()
+            ));
+
+            // --- IMAGE (pomiń — stub video nie potrzebuje obrazów) ---
+            callback.onStep(GenerationStepName.IMAGE);
+            log.info("[StubPipeline] → IMAGE (pominięty w stub)");
+            Thread.sleep(200);
+
+            // --- VOICE (stub MP3) ---
+            callback.onStep(GenerationStepName.VOICE);
+            log.info("[StubPipeline] → VOICE (stub)");
+            Path voicePath = workDir.resolve("voice_" + context.getGenerationId() + ".mp3");
+            copyStubResource("stub/stub_voice.mp3", voicePath);
+            context.setVoiceLocalPath(voicePath.toString());
+
+            // --- VIDEO (stub MP4 per scena) ---
+            callback.onStep(GenerationStepName.VIDEO);
+            log.info("[StubPipeline] → VIDEO (stub)");
+            for (SceneAsset scene : context.getScenes()) {
+                Path videoPath = workDir.resolve(
+                        String.format("scene_%02d_%s.mp4", scene.getIndex(), context.getGenerationId()));
+                copyStubResource("stub/stub_video.mp4", videoPath);
+                scene.setVideoLocalPath(videoPath.toString());
+            }
+
+            // --- MUSIC ---
+            callback.onStep(GenerationStepName.MUSIC);
+            log.info("[StubPipeline] → MUSIC (brak w stub)");
+            context.setMusicLocalPath(null);
+
+            // --- RENDER (prawdziwy FFmpeg!) ---
+            callback.onStep(GenerationStepName.RENDER);
+            log.info("[StubPipeline] → RENDER (prawdziwy FFmpeg)");
+            renderStep.execute(context);
+
+            log.warn("[StubPipeline] DONE — finalUrl: {}", context.getFinalVideoUrl());
+        }
+
+        private void copyStubResource(String resourcePath, Path target) throws IOException {
+            try (InputStream is = getClass().getClassLoader().getResourceAsStream(resourcePath)) {
+                if (is == null) {
+                    throw new IllegalStateException(
+                            "Brak pliku: src/main/resources/" + resourcePath + "\n" +
+                                    "Wygeneruj:\n" +
+                                    "  ffmpeg -f lavfi -i color=black:s=1080x1920:r=30 -t 5 -c:v libx264 stub_video.mp4\n" +
+                                    "  ffmpeg -f lavfi -i anullsrc=r=44100:cl=mono -t 10 -q:a 9 stub_voice.mp3"
+                    );
+                }
+                Files.copy(is, target, StandardCopyOption.REPLACE_EXISTING);
+                log.debug("[StubPipeline] Skopiowano {} → {}", resourcePath, target);
+            }
+        }
+    }
+
+    // =========================================================================
+    // WYJĄTEK
     // =========================================================================
 
     public static class PipelineStepException extends RuntimeException {
-        public PipelineStepException(String message, Throwable cause) {
-            super(message, cause);
+        public PipelineStepException(String step, Throwable cause) {
+            super(step + " failed: " + cause.getMessage(), cause);
         }
     }
 }

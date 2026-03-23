@@ -1,17 +1,20 @@
 package com.BossAi.bossAi.service;
 
+import com.BossAi.bossAi.config.PipelineConfig;
+import com.BossAi.bossAi.config.properties.FfmpegProperties;
 import com.BossAi.bossAi.dto.AssetDTO;
 import com.BossAi.bossAi.dto.GenerationDTO;
 import com.BossAi.bossAi.entity.*;
-import com.BossAi.bossAi.repository.GenerationRepository;
-import com.BossAi.bossAi.repository.UserPlanRepository;
-import com.BossAi.bossAi.repository.UserRepository;
+import com.BossAi.bossAi.repository.*;
 import com.BossAi.bossAi.request.GenerateImageRequest;
 import com.BossAi.bossAi.request.GenerateVideoRequest;
+import com.BossAi.bossAi.request.TikTokAdRequest;
 import com.BossAi.bossAi.response.GenerationResponse;
 import com.BossAi.bossAi.service.generation.GenerationContext;
 import com.BossAi.bossAi.service.generation.GenerationExecutor;
+import com.BossAi.bossAi.service.generation.GenerationStepName;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.security.access.AccessDeniedException;
@@ -19,11 +22,15 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
 
 @Service
+@Slf4j
 @RequiredArgsConstructor
 public class GenerationServiceImpl implements GenerationService {
 
@@ -35,13 +42,75 @@ public class GenerationServiceImpl implements GenerationService {
     private final UserPlanRepository userPlanRepository;
     private final CreditService creditService;
     private final PlanSelectionService planSelectionService;
-    private final AssetService assetService;
+    private final ProgressService progressService;
     private final StorageService storageService;
     private final GenerationExecutor generationExecutor;
+    private final PipelineConfig.TikTokAdPipeline tikTokAdPipeline;
+    private final AssetRepository assetRepository;
+    private final PlanDefinitionRepository planDefinitionRepository;
+    private final AssetService assetService;
+    private final FfmpegProperties ffmpegProperties;
+
 
     private static final int MAX_ACTIVE_GENERATIONS = 1;
     private static final int GENERATION_COOLDOWN_SECONDS = 5;
 
+
+    @Override
+    @Transactional
+    public GenerationResponse generateTikTokAd(TikTokAdRequest request, String email) throws Exception {
+        User user = userRepository.findByEmail(email).orElseThrow();
+
+        validateActiveGenerations(user);
+        validateCooldown(user);
+
+        UserPlan userPlan = planSelectionService.selectPlanForOperation(user, OperationType.TIKTOK_AD_FULL);
+
+        Generation generation = generationRepository.save(
+                Generation.builder()
+                        .user(user)
+                        .userPlan(userPlan)
+                        .generationType(GenerationType.VIDEO_GENERATION)
+                        .generationStatus(GenerationStatus.PENDING)
+                        .build()
+        );
+
+        CreditTransaction tx = creditService.reserve(user, OperationType.TIKTOK_AD_FULL, generation.getId());
+
+        List<Asset> userAssets = resolveUserAssets(request.getAssetIds(), user);
+
+//        // Jeśli user przesłał plik muzyki bezpośrednio — uploaduj jako asset
+//        if (request.getMusicFile() != null && !request.getMusicFile().isEmpty()) {
+//            AssetDTO musicAssetDto = assetService.createUserUpload(
+//                    email, AssetType.MUSIC, request.getMusicFile());
+//            // Dodaj do assetIds żeby buildContext go znalazł
+//            Asset musicAsset = assetRepository.findById(musicAssetDto.getId()).orElseThrow();
+//            userAssets = new java.util.ArrayList<>(userAssets);
+//            userAssets.add(musicAsset);
+//        }
+
+        GenerationContext context = buildContext(generation, request, userPlan, userAssets, user);
+
+// Obsługa bezpośredniego uploadu muzyki z requestu
+        if (request.getMusicFile() != null && !request.getMusicFile().isEmpty()) {
+            String tempDirPath = ffmpegProperties.getTemp().getDir();
+            Path musicPath = Paths.get(tempDirPath, generation.getId().toString(),
+                    "music_" + generation.getId() + ".mp3");
+            Files.createDirectories(musicPath.getParent());
+            Files.write(musicPath, request.getMusicFile().getBytes());
+            context.setMusicLocalPath(musicPath.toString());
+            log.info("[GenerationService] Muzyka usera z requestu zapisana → {}", musicPath);
+        }
+
+
+
+        runPipelineAsync(generation, context, tx);
+
+        log.info("[GenerationService] TikTok Ad zainicjowany — generationId: {}, user: {}",
+                generation.getId(), email);
+
+        return new GenerationResponse(generation.getId(), generation.getGenerationStatus());
+    }
 
     @Override
     @Transactional
@@ -66,7 +135,7 @@ public class GenerationServiceImpl implements GenerationService {
         CreditTransaction tx = creditService.reserve(user, OperationType.IMAGE_GENERATION, generation.getId());
 
 //        processImageAsync(generation.getId(), request, tx);
-        runPipelineAsync(generation, request, tx);
+//        runPipelineAsync(generation, request, tx);
 
         return new GenerationResponse(generation.getId(), generation.getGenerationStatus());
     }
@@ -100,38 +169,59 @@ public class GenerationServiceImpl implements GenerationService {
     }
 
     @Async("aiExecutor")
-    void runPipelineAsync(
+    public void runPipelineAsync(
             Generation generation,
-            GenerateImageRequest request,
+            GenerationContext context,
             CreditTransaction tx
-    ) throws Exception {
+    ) {
+        UUID genId = generation.getId();
 
         try {
             generation.setGenerationStatus(GenerationStatus.PROCESSING);
             generationRepository.save(generation);
 
-//            GenerationContext context =
-//                    new GenerationContext(
-//                            generation.getId(),
-//                            request.getPrompt(),
-//                            request.getImageUrl()
-//                    );
+            progressService.broadcast(genId, GenerationStepName.INITIALIZING);
 
-            GenerationContext context = null;
-            generationExecutor.execute(context);
+            log.info("[GenerationService] Pipeline START — generationId: {}", genId);
 
+            // Wykonaj pipeline — każdy Step aktualizuje context.currentStep
+            // Broadcastujemy po każdym kroku przez hook w execute
+            tikTokAdPipeline.execute(context, step ->
+                    progressService.broadcast(genId, step, step.getProgressPercent(), step.getDisplayMessage())
+            );
+
+            // SAVING
+            progressService.broadcast(genId, GenerationStepName.SAVING);
+            context.updateProgress(GenerationStepName.SAVING,
+                    GenerationStepName.SAVING.getProgressPercent(),
+                    GenerationStepName.SAVING.getDisplayMessage());
+
+            generation.setVideoUrl(context.getFinalVideoUrl());
             generation.setGenerationStatus(GenerationStatus.DONE);
             generation.setFinishedAt(LocalDateTime.now());
 
+            updateUserLastGeneration(generation.getUser().getId());
             creditService.confirm(tx.getId());
+
+            progressService.broadcast(genId, GenerationStepName.DONE);
+
+            log.info("[GenerationService] Pipeline DONE — generationId: {}, url: {}",
+                    genId, context.getFinalVideoUrl());
+
         } catch (Exception e) {
+            log.error("[GenerationService] Pipeline FAILED — generationId: {}, error: {}",
+                    genId, e.getMessage(), e);
+
             generation.setGenerationStatus(GenerationStatus.FAILED);
             generation.setErrorMessage(e.getMessage());
 
             creditService.refund(tx.getId());
-        }
+            progressService.broadcast(genId, GenerationStepName.FAILED,
+                    0, "Generacja nieudana: " + e.getMessage());
 
-        generationRepository.save(generation);
+        } finally {
+            generationRepository.save(generation);
+        }
     }
 
     @Async("aiExecutor")
@@ -154,9 +244,9 @@ public class GenerationServiceImpl implements GenerationService {
             generation.setGenerationStatus(GenerationStatus.DONE);
             generation.setFinishedAt(LocalDateTime.now());
 
-            AssetDTO asset = assetService.createAsset(generation.getUser().getEmail(), AssetType.IMAGE, imageBytes, generationId);
-            generation.setImageUrl(asset.getUrl());
-            System.out.println(asset.getUrl());
+//            AssetDTO asset = assetService.createAsset(generation.getUser().getEmail(), AssetType.IMAGE, imageBytes, generationId);
+//            generation.setImageUrl(asset.getUrl());
+//            System.out.println(asset.getUrl());
             creditService.confirm(tx.getId());
         } catch (Exception e) {
             generation.setGenerationStatus(GenerationStatus.FAILED);
@@ -332,5 +422,68 @@ public class GenerationServiceImpl implements GenerationService {
                     "Please wait before starting another generation."
             );
         }
+    }
+
+    private List<Asset> resolveUserAssets(List<UUID> assetIds, User user) {
+        if (assetIds == null || assetIds.isEmpty()) {
+            return List.of();
+        }
+
+        List<Asset> assets = assetRepository.findAllById(assetIds);
+
+        assets.forEach(asset -> {
+            if (!asset.getUser().getId().equals(user.getId())) {
+                throw new AccessDeniedException(
+                        "Asset " + asset.getId() + " is not user's asset"
+                );
+            }
+        });
+
+        return assets;
+    }
+
+    private GenerationContext buildContext(
+            Generation generation,
+            TikTokAdRequest request,
+            UserPlan userPlan,
+            List<Asset> userAssets,
+            User user
+    ) {
+        Asset userMusicAsset = userAssets.stream()
+                .filter(a -> a.getType() == AssetType.MUSIC)
+                .findFirst()
+                .orElse(null);
+
+        Asset userVoiceAsset = userAssets.stream()
+                .filter(a -> a.getType() == AssetType.VOICE)
+                .findFirst()
+                .orElse(null);
+
+        List<Asset> userImageAssets = userAssets.stream()
+                .filter(a -> a.getType() == AssetType.IMAGE)
+                .toList();
+
+        PlanDefinition planDefinition = planDefinitionRepository.findById(userPlan.getPlanType())
+                .orElseThrow();
+
+        return GenerationContext.builder()
+                .generationId(generation.getId())
+                .userId(user.getId())
+                .prompt(request.getPrompt())
+                .planType(userPlan.getPlanType())
+                .watermarkEnabled(planDefinition.isWatermark())
+                .userInputAssets(userAssets)
+                .userMusicAsset(userMusicAsset)
+                .userVoiceAsset(userVoiceAsset)
+                .userImageAssets(userImageAssets)
+                .build();
+    }
+
+    @Transactional
+    protected void updateUserLastGeneration(UUID userId) {
+        userRepository.findById(userId).ifPresent(user -> {
+            user.setLastGeneration(LocalDateTime.now());
+            userRepository.save(user);
+        });
     }
 }

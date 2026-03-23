@@ -17,63 +17,69 @@ import java.util.Map;
 
 /**
  * OpenAiService — klient do OpenAI REST API.
- *
+ * <p>
  * Dwie operacje:
- *   1. generateScript()  — GPT-4o chat completion → ScriptResult (JSON)
- *   2. generateTts()     — gpt-4o-mini-tts → byte[] MP3
- *
+ * 1. generateScript()  — GPT-4o chat completion → ScriptResult (JSON)
+ * 2. generateTts()     — gpt-4o-mini-tts → byte[] MP3
+ * <p>
  * Oba mają @Retry(name = "openAi") — Resilience4j ponawia przy 429/503.
  * Konfiguracja retry w application.properties (resilience4j.retry.instances.openAi.*).
  */
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class OpenAiService {
 
-    @Qualifier("openAiWebClient")
     private final WebClient webClient;
 
     private final OpenAiProperties properties;
     private final ObjectMapper objectMapper;
+
+    public OpenAiService(@Qualifier("openAiWebClient") WebClient webClient, OpenAiProperties properties, ObjectMapper objectMapper) {
+        this.webClient = webClient;
+        this.properties = properties;
+        this.objectMapper = objectMapper;
+    }
 
     // =========================================================================
     // SYSTEM PROMPT — serce jakości reklam
     // =========================================================================
 
     private static final String TIKTOK_AD_SYSTEM_PROMPT = """
-            Jesteś ekspertem od reklam TikTok dla e-commerce.
-            Tworzysz scenariusze reklam wideo 15-30 sekund w formacie 9:16.
-            
-            ZASADY:
-            - Hook w pierwszych 2 sekundach (zatrzymuje scrollowanie)
-            - Energetyczny, bezpośredni język (Gen Z / Millennial)
-            - Maksymalnie 3-4 sceny (każda 4-8 sekund)
-            - CTA na końcu (konkretne: "Kup teraz", "Link w bio", "Sprawdź opis")
-            - Narracja max 60 słów (TTS musi się zmieścić)
-            - Prompty obrazów: po angielsku, szczegółowe, zawsze "9:16 vertical format"
-            - Prompty ruchu: opisuj ruch kamery lub obiektu (zoom, pan, slow motion)
-            
-            ZAWSZE odpowiadaj WYŁĄCZNIE poprawnym JSON bez żadnego markdown, komentarzy ani preambuły.
-            
-            Schemat JSON:
+        You are an expert TikTok ad creator for e-commerce brands.
+        You create high-energy, scroll-stopping video ad scripts in 9:16 format.
+        
+        RULES:
+        - Hook in the first 2 seconds — make it impossible to scroll past
+        - Raw, punchy, direct language — Gen Z / Millennial energy
+        - Maximum 3-4 scenes (4-8 seconds each)
+        - Strong CTA at the end ("Shop now", "Link in bio", "Check description")
+        - Narration max 60 words (must fit TTS)
+        - Image prompts: detailed English, cinematic, always include "9:16 vertical format"
+        - Motion prompts: describe aggressive camera movement (whip pan, fast zoom, slow-mo drop)
+        - Style: ENERGETIC — fast cuts, dynamic angles, street/urban energy
+        - Music vibe reference in motion prompts: phonk, trap, aggressive bass drops
+        
+        ALWAYS respond ONLY with valid JSON, no markdown, no comments, no preamble.
+        
+        JSON schema:
+        {
+          "narration": "string — full narration for TTS (in English or user's language)",
+          "scenes": [
             {
-              "narration": "string — pełna narracja do TTS (po polsku lub języku usera)",
-              "scenes": [
-                {
-                  "index": 0,
-                  "imagePrompt": "string — szczegółowy prompt po angielsku dla image AI",
-                  "motionPrompt": "string — opis ruchu po angielsku dla video AI",
-                  "durationMs": 5000,
-                  "subtitleText": "string — fragment narracji tej sceny"
-                }
-              ],
-              "style": "string — styl wizualny (energetic/minimal/luxury/ugc/cinematic)",
-              "targetAudience": "string — grupa docelowa",
-              "hook": "string — pierwsze zdanie (hook)",
-              "callToAction": "string — CTA",
-              "totalDurationMs": 20000
+              "index": 0,
+              "imagePrompt": "string — detailed English prompt for image AI, 9:16 vertical format",
+              "motionPrompt": "string — aggressive camera movement description in English",
+              "durationMs": 5000,
+              "subtitleText": "string — this scene's narration fragment"
             }
-            """;
+          ],
+          "style": "string — visual style (energetic/cinematic/ugc/luxury/minimal)",
+          "targetAudience": "string — target audience",
+          "hook": "string — opening hook line",
+          "callToAction": "string — CTA",
+          "totalDurationMs": 20000
+        }
+        """;
 
     // =========================================================================
     // CHAT COMPLETION → ScriptResult
