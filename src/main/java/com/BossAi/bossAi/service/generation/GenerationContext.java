@@ -2,8 +2,13 @@ package com.BossAi.bossAi.service.generation;
 
 import com.BossAi.bossAi.entity.Asset;
 import com.BossAi.bossAi.entity.PlanType;
+import com.BossAi.bossAi.entity.VideoStyle;
+import com.BossAi.bossAi.service.director.DirectorPlan;
 import com.BossAi.bossAi.service.generation.context.SceneAsset;
 import com.BossAi.bossAi.service.generation.context.ScriptResult;
+import com.BossAi.bossAi.service.style.StyleConfig;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -181,6 +186,12 @@ public class GenerationContext {
      * Komunikat do wyświetlenia userowi (np. "Generuję sceny (2/3)...").
      */
     private String progressMessage;
+
+    private StyleConfig styleConfig;
+
+    private VideoStyle style;
+
+    private DirectorPlan directorPlan;
 
     // -------------------------------------------------------------------------
     // METODY POMOCNICZE

@@ -6,6 +6,9 @@ import com.BossAi.bossAi.entity.AssetType;
 import com.BossAi.bossAi.service.AssetService;
 import com.BossAi.bossAi.service.StorageService;
 import com.BossAi.bossAi.service.SubtitleService;
+import com.BossAi.bossAi.service.director.Cut;
+import com.BossAi.bossAi.service.director.DirectorPlan;
+import com.BossAi.bossAi.service.director.SceneDirection;
 import com.BossAi.bossAi.service.generation.GenerationContext;
 import com.BossAi.bossAi.service.generation.GenerationStepName;
 import com.BossAi.bossAi.service.generation.context.SceneAsset;
@@ -80,8 +83,14 @@ public class RenderStep implements GenerationStep {
         Files.createDirectories(workDir);
 
         // Faza 1 — concat klipów
-        Path concatFile   = writeConcatFile(context, workDir);
-        Path concatOutput = workDir.resolve("temp_concat.mp4");
+
+        List<Path> clips = buildClipsFromDirector(context, workDir);
+
+        Path concatFile = writeConcatFileFromClips(clips, workDir);
+        Path concatOutput  = workDir.resolve("temp_concat.mp4");
+
+//        Path concatFile   = writeConcatFile(context, workDir);
+//        Path concatOutput = workDir.resolve("temp_concat.mp4");
         runConcat(concatFile, concatOutput);
         log.info("[RenderStep] Concat DONE → {}", concatOutput);
 
@@ -115,6 +124,42 @@ public class RenderStep implements GenerationStep {
 
         // Cleanup plików tymczasowych (nie finalnego)
         cleanup(concatOutput, concatFile);
+    }
+
+
+    private List<Path> buildClipsFromDirector(GenerationContext context, Path workDir) throws Exception {
+
+        ArrayList<Path> allClips = new ArrayList<>();
+
+        for (SceneAsset scene : context.getScenes()) {
+            SceneDirection direction = context.getDirectorPlan()
+                    .getScenes()
+                    .stream()
+                    .filter(d -> d.getSceneIndex() == scene.getIndex())
+                    .findFirst()
+                    .orElseThrow();
+
+            List<Path> sceneClips = splitScene(scene, direction, workDir);
+
+            allClips.addAll(sceneClips);
+        }
+
+        log.info("[RenderStep] Generated {} clips from director plan", allClips.size());
+        return allClips;
+    }
+
+    private Path writeConcatFileFromClips(List<Path> clips, Path workDir) throws Exception {
+
+        List<String> lines = clips.stream()
+                .map(p -> "file '" + p.toString() + "'")
+                .collect(Collectors.toList());
+
+        Path concatFile = workDir.resolve("concat.txt");
+        Files.write(concatFile, lines);
+
+        log.debug("[RenderStep] concat clips:\n{}", String.join("\n", lines));
+
+        return concatFile;
     }
 
     // =========================================================================
@@ -382,5 +427,50 @@ public class RenderStep implements GenerationStep {
                 log.warn("[RenderStep] Nie udało się usunąć temp pliku: {}", path);
             }
         }
+    }
+
+    private List<Path> splitScene(SceneAsset scene, SceneDirection direction, Path workDir) throws Exception {
+
+        ArrayList<Path> clips = new ArrayList<>();
+
+        for (int i = 0; i < direction.getCuts().size(); i++) {
+            var cut = direction.getCuts().get(1);
+
+            String filename = String.format(
+                    "scene_%02d_cut_%02d_%s.mp4",
+                    scene.getIndex(),
+                    i,
+                    UUID.randomUUID()
+            );
+
+            Path output = workDir.resolve(filename);
+
+            runCutCommand(
+                    scene.getVideoLocalPath(),
+                    cut.getStartMs(),
+                    cut.getEndMs(),
+                    output
+            );
+
+            clips.add(output);
+        }
+        return clips;
+    }
+
+    private void runCutCommand(String input, int startMs, int endMs, Path output) throws Exception {
+        double startSec = startMs / 1000.0;
+        double durationSec = (endMs - startMs) / 1000.0;
+
+        List<String> cmd = List.of(
+                ffmpegProperties.getBinary().getPath(),
+                "-y",
+                "-ss", String.valueOf(startSec),
+                "-i", input,
+                "-t", String.valueOf(durationSec),
+                "-c", "copy",
+                output.toString()
+        );
+
+        runCommand(cmd, "cut");
     }
 }

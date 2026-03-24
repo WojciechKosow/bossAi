@@ -14,17 +14,7 @@ import org.springframework.web.bind.annotation.*;
 import java.util.List;
 import java.util.UUID;
 
-/**
- * GenerationController — API dla pipeline TikTok Ad.
- *
- * POST /api/generations/tiktok-ad   → inicjuje pełny pipeline
- * GET  /api/generations/{id}        → status + wynik generacji
- * GET  /api/generations/me          → ostatnie N generacji usera
- * GET  /api/generations/me/all      → wszystkie generacje usera
- *
- * Stare endpointy /image i /video są zachowane dla kompatybilności
- * ale oznaczone jako @Deprecated — zostaną usunięte w v2.
- */
+
 @RestController
 @RequestMapping("/api/generations")
 @RequiredArgsConstructor
@@ -32,11 +22,6 @@ public class GenerationController {
 
     private final GenerationService generationService;
 
-    /**
-     * Główny endpoint — inicjuje pełny pipeline TikTok Ad.
-     * Zwraca natychmiast z generationId i statusem PENDING.
-     * Frontend polluje /{id} lub SSE /{id}/progress (Faza 2).
-     */
     @PostMapping(value = "/tiktok-ad", consumes = {MediaType.MULTIPART_FORM_DATA_VALUE, MediaType.APPLICATION_JSON_VALUE})
     public ResponseEntity<GenerationResponse> generateTikTokAd(
             @Valid @ModelAttribute TikTokAdRequest request,

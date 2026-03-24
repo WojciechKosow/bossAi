@@ -1,5 +1,8 @@
 package com.BossAi.bossAi.request;
 
+import com.BossAi.bossAi.entity.VideoStyle;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 import lombok.AllArgsConstructor;
@@ -22,4 +25,7 @@ public class TikTokAdRequest {
     private List<UUID> assetIds;
 
     private MultipartFile musicFile;
+
+    @Enumerated(EnumType.STRING)
+    private VideoStyle style;
 }

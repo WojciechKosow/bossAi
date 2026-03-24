@@ -54,10 +54,7 @@ public class OpenAiService {
         - Maximum 3-4 scenes (4-8 seconds each)
         - Strong CTA at the end ("Shop now", "Link in bio", "Check description")
         - Narration max 60 words (must fit TTS)
-        - Image prompts: detailed English, cinematic, always include "9:16 vertical format"
-        - Motion prompts: describe aggressive camera movement (whip pan, fast zoom, slow-mo drop)
-        - Style: ENERGETIC — fast cuts, dynamic angles, street/urban energy
-        - Music vibe reference in motion prompts: phonk, trap, aggressive bass drops
+        - Image prompts: detailed English, always include "9:16 vertical format"
         
         ALWAYS respond ONLY with valid JSON, no markdown, no comments, no preamble.
         
@@ -68,7 +65,7 @@ public class OpenAiService {
             {
               "index": 0,
               "imagePrompt": "string — detailed English prompt for image AI, 9:16 vertical format",
-              "motionPrompt": "string — aggressive camera movement description in English",
+              "motionPrompt": "string — description in English",
               "durationMs": 5000,
               "subtitleText": "string — this scene's narration fragment"
             }

@@ -13,6 +13,8 @@ import com.BossAi.bossAi.response.GenerationResponse;
 import com.BossAi.bossAi.service.generation.GenerationContext;
 import com.BossAi.bossAi.service.generation.GenerationExecutor;
 import com.BossAi.bossAi.service.generation.GenerationStepName;
+import com.BossAi.bossAi.service.style.StyleConfig;
+import com.BossAi.bossAi.service.style.StyleService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
@@ -50,6 +52,7 @@ public class GenerationServiceImpl implements GenerationService {
     private final PlanDefinitionRepository planDefinitionRepository;
     private final AssetService assetService;
     private final FfmpegProperties ffmpegProperties;
+    private final StyleService styleService;
 
 
     private static final int MAX_ACTIVE_GENERATIONS = 1;
@@ -466,6 +469,8 @@ public class GenerationServiceImpl implements GenerationService {
         PlanDefinition planDefinition = planDefinitionRepository.findById(userPlan.getPlanType())
                 .orElseThrow();
 
+        StyleConfig styleConfig = styleService.getConfig(request.getStyle());
+
         return GenerationContext.builder()
                 .generationId(generation.getId())
                 .userId(user.getId())
@@ -476,6 +481,8 @@ public class GenerationServiceImpl implements GenerationService {
                 .userMusicAsset(userMusicAsset)
                 .userVoiceAsset(userVoiceAsset)
                 .userImageAssets(userImageAssets)
+                .styleConfig(styleConfig)
+                .style(request.getStyle())
                 .build();
     }
 

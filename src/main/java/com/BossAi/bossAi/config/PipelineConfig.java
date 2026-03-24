@@ -45,6 +45,7 @@ public class PipelineConfig {
     private final VideoStep  videoStep;
     private final MusicStep  musicStep;
     private final RenderStep renderStep;
+    private final DirectorStep directorStep;
 
     @Value("${pipeline.stub:false}")
     private boolean stubMode;
@@ -55,11 +56,11 @@ public class PipelineConfig {
     @Bean
     public TikTokAdPipeline tikTokAdPipeline(Executor aiExecutor) {
         if (stubMode) {
-            log.warn("⚠️  STUB MODE AKTYWNY — pipeline nie wywołuje zewnętrznych API");
+            log.warn("=== STUB MODE IS ACTIVE ===");
             return new StubTikTokAdPipeline(renderStep, aiExecutor, tempDir);
         }
         return new RealTikTokAdPipeline(
-                scriptStep, imageStep, voiceStep,
+                scriptStep, directorStep, imageStep, voiceStep,
                 videoStep, musicStep, renderStep, aiExecutor
         );
     }
@@ -93,6 +94,7 @@ public class PipelineConfig {
     public static class RealTikTokAdPipeline extends TikTokAdPipeline {
 
         private final ScriptStep scriptStep;
+        private final DirectorStep directorStep;
         private final ImageStep  imageStep;
         private final VoiceStep  voiceStep;
         private final VideoStep  videoStep;
@@ -101,9 +103,9 @@ public class PipelineConfig {
         private final Executor   executor;
 
         public RealTikTokAdPipeline(
-                ScriptStep s, ImageStep i, VoiceStep vo,
+                ScriptStep s, DirectorStep d, ImageStep i, VoiceStep vo,
                 VideoStep vi, MusicStep m, RenderStep r, Executor e) {
-            this.scriptStep = s; this.imageStep = i;
+            this.scriptStep = s; this.directorStep = d; this.imageStep = i;
             this.voiceStep  = vo; this.videoStep = vi;
             this.musicStep  = m; this.renderStep = r;
             this.executor   = e;
@@ -116,6 +118,11 @@ public class PipelineConfig {
             log.info("[Pipeline {}] → SCRIPT", context.getGenerationId());
             callback.onStep(GenerationStepName.SCRIPT);
             scriptStep.execute(context);
+
+            // 1.5 - DIRECTOR
+            log.info("[Pipeline {}] -> DIRECTOR", context.getGenerationId());
+            callback.onStep(GenerationStepName.SCRIPT);
+            directorStep.execute(context);
 
             // 2 — IMAGE
             log.info("[Pipeline {}] → IMAGE", context.getGenerationId());

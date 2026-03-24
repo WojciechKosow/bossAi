@@ -72,10 +72,12 @@ public class ScriptStep implements GenerationStep {
     private String buildEnrichedPrompt(GenerationContext context) {
         StringBuilder sb = new StringBuilder(context.getPrompt());
 
+        sb.append(context.getStyleConfig().getPromptInstructions());
+
         if (!context.getUserImageAssets().isEmpty()) {
-            sb.append("\n\nUser dostarczył ")
+            sb.append("\n\nUser has provided ")
                     .append(context.getUserImageAssets().size())
-                    .append(" zdjęcie(a) produktu — uwzględnij ich styl przy generowaniu promptów scen.");
+                    .append(" photo(a) of product — notice that style while generating.");
         }
 
         if (context.hasUserVoice()) {
@@ -83,7 +85,7 @@ public class ScriptStep implements GenerationStep {
         }
 
         if (context.hasUserMusic()) {
-            sb.append("\n\nUser dostarczył własną muzykę — scenariusz powinien być energetyczny i pasować do podkładu muzycznego.");
+            sb.append("\n\nUser dostarczył własną muzykę — scenariusz powinien pasować do podkładu muzycznego.");
         }
 
         return sb.toString();
