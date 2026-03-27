@@ -6,5 +6,9 @@ public enum EffectType {
     ZOOM_OUT,
     SHAKE,
     FAST_ZOOM,
-    SLOW_MOTION
+    SLOW_MOTION,
+    /** Ken Burns — panorama od lewej do prawej */
+    PAN_LEFT,
+    /** Ken Burns — panorama od prawej do lewej */
+    PAN_RIGHT
 }
