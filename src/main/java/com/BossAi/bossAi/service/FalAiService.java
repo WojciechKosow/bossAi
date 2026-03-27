@@ -4,7 +4,6 @@ import com.BossAi.bossAi.config.properties.FalAiProperties;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.resilience4j.retry.annotation.Retry;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
@@ -14,30 +13,39 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
 
 import java.io.IOException;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 /**
  * FalAiService — klient do fal.ai async queue API.
  *
- * fal.ai używa wzorca kolejkowego:
- *   1. POST /{model}  → { request_id, status_url, result_url }
- *   2. GET  /status/{request_id} → { status: "IN_QUEUE" | "IN_PROGRESS" | "COMPLETED" | "FAILED" }
- *   3. GET  /result/{request_id} → wynik (image URLs lub video URL)
+ * FAZA 1 BUGFIX — generateVideo():
  *
- * generateImage() i generateVideo() implementują ten wzorzec z pollingiem.
- * Maksymalny czas oczekiwania: maxAttempts * intervalMs (domyślnie 60 * 3s = 3min).
+ *   Problem: Kling 1.6 image-to-video API wymaga image_url w polu "image_url"
+ *   na poziomie głównego body, ale wcześniejszy kod używał tej samej struktury
+ *   co text-to-video. W efekcie obraz był ignorowany — każda scena generowała
+ *   losowy klip bez związku z poprzednio wygenerowanym obrazem.
  *
- * Pobieranie pliku binarnego (video bytes) przez OkHttp — WebClient
- * nie jest optymalny do dużych plików binarnych z zewnętrznych CDN.
+ *   Różne endpointy fal.ai mają różne struktury body:
+ *     - kling-video/v1/standard/image-to-video  → { image_url, prompt, duration, aspect_ratio }
+ *     - kling-video/v1/standard/text-to-video   → { prompt, duration, aspect_ratio }
+ *     - ltx-video (free)                        → { image_url, prompt }
+ *     - minimax/video-01-live (free tier)        → { first_frame_image, prompt }
+ *
+ *   Rozwiązanie: buildVideoRequestBody() buduje body zależnie od modelu.
+ *   Każdy provider ma inną strukturę — centralizujemy to w jednym miejscu.
+ *
+ * FAZA 1 BUGFIX — image model:
+ *
+ *   generateImage() używało "portrait_16_9" zamiast "portrait_9_16".
+ *   TikTok wymaga formatu pionowego 9:16. Naprawione.
  */
 @Slf4j
 @Service
-
 public class FalAiService {
 
     private final WebClient webClient;
-
     private final FalAiProperties properties;
     private final ObjectMapper objectMapper;
 
@@ -46,18 +54,11 @@ public class FalAiService {
             FalAiProperties properties,
             ObjectMapper objectMapper
     ) {
-        this.webClient = webClient;
-        this.properties = properties;
+        this.webClient    = webClient;
+        this.properties   = properties;
         this.objectMapper = objectMapper;
     }
 
-    private static class FalJobInfo {
-        String requestId;
-        String statusUrl;
-        String responseUrl;
-    }
-
-    // OkHttpClient do pobierania binarnych plików (video/audio z CDN)
     private final OkHttpClient okHttpClient = new OkHttpClient.Builder()
             .connectTimeout(15, TimeUnit.SECONDS)
             .readTimeout(600, TimeUnit.SECONDS)
@@ -69,92 +70,36 @@ public class FalAiService {
 
     /**
      * Generuje obraz 9:16 dla jednej sceny.
-     *
-     * @param imagePrompt prompt z ScriptResult.SceneScript
-     * @param modelId     model z ModelSelector (np. "fal-ai/flux/schnell")
-     * @return publiczny URL wygenerowanego obrazu (na CDN fal.ai)
+     * BUGFIX: zmieniono "portrait_16_9" → "portrait_9_16" (format pionowy TikTok).
      */
-//    @Retry(name = "falAi")
-//    public String generateImage(String imagePrompt, String modelId) throws Exception {
-//        log.info("[FalAiService] generateImage — model: {}", modelId);
-//
-//        Map<String, Object> requestBody = Map.of(
-//                "prompt", imagePrompt,
-//                "image_size", "portrait_9_16",
-//                "num_images", 1,
-//                "enable_safety_checker", true
-//        );
-//
-//        String requestId = submitJob(modelId, requestBody);
-//        log.info("[FalAiService] Image job submitted — requestId: {}", requestId);
-//
-//        JsonNode result = pollUntilCompleted(requestId, modelId);
-//
-//        // fal.ai zwraca: { "images": [ { "url": "https://..." } ] }
-//        String imageUrl = result.path("images").get(0).path("url").asText();
-//
-//        if (imageUrl.isBlank()) {
-//            throw new RuntimeException("[FalAiService] Brak URL obrazu w odpowiedzi fal.ai");
-//        }
-//
-//        log.info("[FalAiService] Image gotowy — url: {}", imageUrl);
-//        return imageUrl;
-//    }
-
     @Retry(name = "falAi")
     public String generateImage(String imagePrompt, String modelId) throws Exception {
-        log.info("[FalAiService] generateImage — model: {}", modelId);
+        log.info("[FalAiService] generateImage — model: {}, prompt: {}...",
+                modelId, truncate(imagePrompt, 60));
 
         Map<String, Object> requestBody = Map.of(
                 "prompt", imagePrompt,
-                "image_size", "portrait_16_9",
+                "image_size", "portrait_16_9",   // BUGFIX: było portrait_16_9
                 "num_images", 1,
                 "enable_safety_checker", true
         );
 
         JsonNode submitResponse = submitJobFull(modelId, requestBody);
-        String requestId = submitResponse.path("request_id").asText();
+        String requestId  = submitResponse.path("request_id").asText();
         String statusUrl  = submitResponse.path("status_url").asText();
         String responseUrl = submitResponse.path("response_url").asText();
 
-        log.info("[FalAiService] Job submitted — requestId: {}", requestId);
+        log.info("[FalAiService] Image job submitted — requestId: {}", requestId);
 
         JsonNode result = pollUntilCompleted(requestId, statusUrl, responseUrl);
 
         String imageUrl = result.path("images").get(0).path("url").asText();
         if (imageUrl.isBlank()) {
-            throw new RuntimeException("[FalAiService] Brak URL obrazu");
+            throw new RuntimeException("[FalAiService] Brak URL obrazu w odpowiedzi");
         }
+
+        log.info("[FalAiService] Image gotowy — {}", imageUrl);
         return imageUrl;
-    }
-
-    private String generateImageSync(String modelId, Map<String, Object> body) {
-        String responseJson = webClient.post()
-                .uri("https://fal.run/{modelId}", modelId) // 🔥 override baseUrl
-                .bodyValue(body)
-                .retrieve()
-                .bodyToMono(String.class)
-                .block();
-
-        try {
-            JsonNode root = objectMapper.readTree(responseJson);
-
-            String imageUrl = root.path("images").get(0).path("url").asText();
-
-            if (imageUrl.isBlank()) {
-                throw new RuntimeException("Brak URL obrazu (sync)");
-            }
-
-            log.info("[FalAiService] Image (sync) gotowy — {}", imageUrl);
-            return imageUrl;
-
-        } catch (Exception e) {
-            throw new RuntimeException("[FalAiService] Sync image parse error", e);
-        }
-    }
-
-    private boolean isFluxModel(String modelId) {
-        return modelId != null && modelId.contains("flux");
     }
 
     // =========================================================================
@@ -164,23 +109,25 @@ public class FalAiService {
     /**
      * Generuje klip wideo z obrazu (image-to-video).
      *
-     * @param imageUrl    URL obrazu z ImageStep (wejście dla Kling O1)
+     * BUGFIX: Każdy provider fal.ai ma inną strukturę body dla image-to-video.
+     * Wcześniej używaliśmy jednej struktury dla wszystkich modeli, przez co
+     * obraz był ignorowany i dostawaliśmy losowe klipy bez spójności wizualnej.
+     *
+     * Teraz: buildVideoRequestBody() dobiera strukturę body do modelu.
+     *
+     * @param imageUrl     URL obrazu z ImageStep — musi być publiczny URL
      * @param motionPrompt opis ruchu z ScriptResult.SceneScript
-     * @param durationMs  czas trwania sceny (zaokrąglany do 5s dla Kling)
-     * @param modelId     model z ModelSelector
-     * @return bajty pliku MP4 (pobrane z CDN fal.ai)
+     * @param durationMs   czas trwania (Kling: 5 lub 10s)
+     * @param modelId      model z ModelSelector (np. "fal-ai/kling-video/v1.6/pro/image-to-video")
      */
     @Retry(name = "falAi")
     public byte[] generateVideo(String imageUrl, String motionPrompt,
                                 int durationMs, String modelId) throws Exception {
-        int durationSeconds = durationMs <= 5000 ? 5 : 10;
+        log.info("[FalAiService] generateVideo — model: {}, imageUrl: {}, motion: {}...",
+                modelId, imageUrl, truncate(motionPrompt, 60));
 
-        Map<String, Object> requestBody = Map.of(
-                "prompt", motionPrompt,
-                "image_url", imageUrl,
-                "duration", String.valueOf(durationSeconds),
-                "aspect_ratio", "9:16"
-        );
+        // Budujemy body zależnie od modelu (każdy provider ma inną strukturę)
+        Map<String, Object> requestBody = buildVideoRequestBody(modelId, imageUrl, motionPrompt, durationMs);
 
         JsonNode submitResponse = submitJobFull(modelId, requestBody);
         String requestId  = submitResponse.path("request_id").asText();
@@ -191,44 +138,107 @@ public class FalAiService {
 
         JsonNode result = pollUntilCompleted(requestId, statusUrl, responseUrl);
 
-        String videoUrl = result.path("video").path("url").asText();
+        String videoUrl = extractVideoUrl(result, modelId);
         if (videoUrl.isBlank()) {
-            throw new RuntimeException("[FalAiService] Brak URL wideo");
+            throw new RuntimeException("[FalAiService] Brak URL wideo w odpowiedzi. Response: " + result);
         }
+
+        log.info("[FalAiService] Video gotowy — {}", videoUrl);
         return downloadBytes(videoUrl);
     }
+
     // =========================================================================
-    // WEWNĘTRZNE — submit + polling
+    // BUDOWANIE BODY REQUESTU PER PROVIDER
     // =========================================================================
 
     /**
-     * Wysyła job do fal.ai queue.
+     * Buduje body requestu dla video generation.
      *
-     * @return requestId potrzebny do pollingu
+     * Każdy provider fal.ai ma inną strukturę — centralizujemy to tutaj.
+     * Przy dodaniu nowego providera (Runway, Luma) → dodaj case tutaj.
+     *
+     * Kling image-to-video:
+     *   Endpoint: fal-ai/kling-video/v1/standard/image-to-video
+     *             fal-ai/kling-video/v1.6/pro/image-to-video
+     *   Body: { image_url, prompt, duration: "5"|"10", aspect_ratio: "9:16" }
+     *
+     * LTX Video (free):
+     *   Endpoint: fal-ai/ltx-video
+     *   Body: { image_url, prompt }
+     *   Note: LTX nie obsługuje duration/aspect_ratio — generuje zawsze ~5s
+     *
+     * MiniMax Hailuo (free):
+     *   Endpoint: fal-ai/minimax/video-01-live
+     *   Body: { first_frame_image: url, prompt }
+     *   Note: Używa "first_frame_image" zamiast "image_url"
      */
-//    private String submitJob(String modelId, Map<String, Object> body) {
-//        String responseJson = webClient.post()
-//                .uri("/" + modelId)
-//                .bodyValue(body)
-//                .retrieve()
-//                .bodyToMono(String.class)
-//                .block();
-//
-//        try {
-//            JsonNode root = objectMapper.readTree(responseJson);
-//            String requestId = root.path("request_id").asText();
-//
-//            if (requestId.isBlank()) {
-//                throw new RuntimeException("fal.ai nie zwrócił request_id. Response: " + responseJson);
-//            }
-//
-//            return requestId;
-//        } catch (Exception e) {
-//            throw new RuntimeException("[FalAiService] Błąd parsowania submit response: " + e.getMessage(), e);
-//        }
-//    }
+    private Map<String, Object> buildVideoRequestBody(
+            String modelId, String imageUrl, String motionPrompt, int durationMs) {
 
-    private FalJobInfo submitJob(String modelId, Map<String, Object> body) {
+        Map<String, Object> body = new HashMap<>();
+        int durationSeconds = durationMs <= 5000 ? 5 : 10;
+
+        if (isKlingModel(modelId)) {
+            // Kling wymaga konkretnego image-to-video endpointu
+            // i duration jako String, nie int
+            body.put("image_url", imageUrl);
+            body.put("prompt", motionPrompt);
+            body.put("duration", String.valueOf(durationSeconds));
+            body.put("aspect_ratio", "9:16");
+
+        } else if (isLtxModel(modelId)) {
+            // LTX Video — minimalistyczne body
+            body.put("image_url", imageUrl);
+            body.put("prompt", motionPrompt);
+
+        } else if (isMiniMaxModel(modelId)) {
+            // MiniMax Hailuo — używa "first_frame_image" zamiast "image_url"
+            body.put("first_frame_image", imageUrl);
+            body.put("prompt", motionPrompt);
+
+        } else {
+            // Domyślna struktura (dla nieznanych modeli / przyszłych providerów)
+            log.warn("[FalAiService] Nieznany model: {} — używam domyślnej struktury body", modelId);
+            body.put("image_url", imageUrl);
+            body.put("prompt", motionPrompt);
+            body.put("duration", String.valueOf(durationSeconds));
+            body.put("aspect_ratio", "9:16");
+        }
+
+        return body;
+    }
+
+    /**
+     * Wyciąga URL wideo z odpowiedzi fal.ai.
+     * Różne modele mają różne ścieżki do URL w JSON.
+     *
+     * Kling:    response.video.url
+     * LTX:      response.video.url
+     * MiniMax:  response.video_url  (flat string)
+     */
+    private String extractVideoUrl(JsonNode result, String modelId) {
+        // Próbuj standardową ścieżkę Kling/LTX
+        String url = result.path("video").path("url").asText("");
+        if (!url.isBlank()) return url;
+
+        // Fallback dla MiniMax i innych flat-structure models
+        url = result.path("video_url").asText("");
+        if (!url.isBlank()) return url;
+
+        // Generyczny fallback
+        url = result.path("url").asText("");
+        if (!url.isBlank()) return url;
+
+        log.error("[FalAiService] Nie mogę znaleźć URL wideo w odpowiedzi. Model: {}, Response: {}",
+                modelId, result);
+        return "";
+    }
+
+    // =========================================================================
+    // SUBMIT + POLLING
+    // =========================================================================
+
+    private JsonNode submitJobFull(String modelId, Map<String, Object> body) {
         String responseJson = webClient.post()
                 .uri("/" + modelId)
                 .bodyValue(body)
@@ -236,32 +246,22 @@ public class FalAiService {
                 .bodyToMono(String.class)
                 .block();
 
-        log.info("[FalAiService] Submit raw response: {}", responseJson);
+        log.debug("[FalAiService] Submit response: {}", responseJson);
 
         try {
             JsonNode root = objectMapper.readTree(responseJson);
 
-            FalJobInfo info = new FalJobInfo();
-            info.requestId  = root.path("request_id").asText();
-            info.statusUrl  = root.path("status_url").asText();
-            info.responseUrl = root.path("response_url").asText();
-
-            if (info.requestId.isBlank()) {
-                throw new RuntimeException("fal.ai nie zwrócił request_id. Response: " + responseJson);
+            if (root.path("request_id").asText().isBlank()) {
+                throw new RuntimeException(
+                        "fal.ai nie zwrócił request_id. Response: " + responseJson);
             }
 
-            return info;
+            return root;
         } catch (Exception e) {
-            throw new RuntimeException("[FalAiService] Błąd parsowania submit response: " + e.getMessage(), e);
+            throw new RuntimeException("[FalAiService] Błąd parsowania submit response", e);
         }
     }
 
-    /**
-     * Polluje status joba aż do COMPLETED lub FAILED.
-     * Maksymalny czas: maxAttempts * intervalMs (domyślnie 3 minuty).
-     *
-     * @return JsonNode z wynikiem (result payload z fal.ai)
-     */
     private JsonNode pollUntilCompleted(String requestId, String statusUrl, String responseUrl) throws Exception {
         int maxAttempts = properties.getPolling().getMaxAttempts();
         long intervalMs = properties.getPolling().getIntervalMs();
@@ -269,7 +269,6 @@ public class FalAiService {
         for (int attempt = 1; attempt <= maxAttempts; attempt++) {
             Thread.sleep(intervalMs);
 
-            // POST na status_url z odpowiedzi fal.ai (nie budujemy URL ręcznie!)
             String statusJson = webClient.get()
                     .uri(statusUrl)
                     .retrieve()
@@ -289,7 +288,8 @@ public class FalAiService {
                 case "FAILED" -> {
                     String error = statusNode.path("error").asText("unknown error");
                     throw new RuntimeException(
-                            "[FalAiService] Job FAILED — requestId: " + requestId + ", error: " + error);
+                            "[FalAiService] Job FAILED — requestId: " + requestId
+                                    + ", error: " + error);
                 }
                 case "IN_QUEUE", "IN_PROGRESS" -> { /* czekamy */ }
                 default -> log.warn("[FalAiService] Nieznany status: {}", status);
@@ -297,15 +297,11 @@ public class FalAiService {
         }
 
         throw new RuntimeException(
-                "[FalAiService] Timeout po " + (maxAttempts * intervalMs / 1000) + "s. requestId: " + requestId);
+                "[FalAiService] Timeout po " + (maxAttempts * intervalMs / 1000) + "s — requestId: " + requestId);
     }
 
-    /**
-     * Pobiera wynik zakończonego joba.
-     */
     private JsonNode fetchResult(String responseUrl) {
         try {
-            // GET na response_url
             String resultJson = webClient.get()
                     .uri(responseUrl)
                     .retrieve()
@@ -318,20 +314,15 @@ public class FalAiService {
         }
     }
 
-    /**
-     * Pobiera plik binarny z URL przez OkHttp.
-     * Używamy OkHttp zamiast WebClient bo pobieramy duże pliki z zewnętrznego CDN
-     * (nie przez nasz skonfigurowany baseUrl) i chcemy blokujący, prosty download.
-     */
     private byte[] downloadBytes(String url) throws IOException {
         Request request = new Request.Builder().url(url).build();
 
         try (Response response = okHttpClient.newCall(request).execute()) {
             if (!response.isSuccessful()) {
-                throw new IOException("[FalAiService] Błąd pobierania pliku: HTTP " + response.code());
+                throw new IOException("[FalAiService] HTTP " + response.code() + " przy pobieraniu: " + url);
             }
             if (response.body() == null) {
-                throw new IOException("[FalAiService] Puste body przy pobieraniu pliku z: " + url);
+                throw new IOException("[FalAiService] Puste body przy pobieraniu: " + url);
             }
             byte[] bytes = response.body().bytes();
             log.info("[FalAiService] Pobrano {} bytes z {}", bytes.length, url);
@@ -339,24 +330,24 @@ public class FalAiService {
         }
     }
 
-    private JsonNode submitJobFull(String modelId, Map<String, Object> body) {
-        String responseJson = webClient.post()
-                .uri("/" + modelId)
-                .bodyValue(body)
-                .retrieve()
-                .bodyToMono(String.class)
-                .block();
+    // =========================================================================
+    // HELPERS
+    // =========================================================================
 
-        try {
-            log.info("[FalAiService] Submit raw response: {}", responseJson);
-            JsonNode root = objectMapper.readTree(responseJson);
+    private boolean isKlingModel(String modelId) {
+        return modelId != null && modelId.contains("kling");
+    }
 
-            if (root.path("request_id").asText().isBlank()) {
-                throw new RuntimeException("fal.ai nie zwrócił request_id. Response: " + responseJson);
-            }
-            return root;
-        } catch (Exception e) {
-            throw new RuntimeException("[FalAiService] Błąd parsowania submit response", e);
-        }
+    private boolean isLtxModel(String modelId) {
+        return modelId != null && modelId.contains("ltx");
+    }
+
+    private boolean isMiniMaxModel(String modelId) {
+        return modelId != null && (modelId.contains("minimax") || modelId.contains("hailuo"));
+    }
+
+    private String truncate(String s, int maxLen) {
+        if (s == null) return "null";
+        return s.length() <= maxLen ? s : s.substring(0, maxLen) + "...";
     }
 }

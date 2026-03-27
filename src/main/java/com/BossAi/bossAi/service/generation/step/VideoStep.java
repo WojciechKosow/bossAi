@@ -9,6 +9,7 @@ import com.BossAi.bossAi.service.generation.GenerationContext;
 import com.BossAi.bossAi.service.generation.GenerationStepName;
 import com.BossAi.bossAi.service.generation.ModelSelector;
 import com.BossAi.bossAi.service.generation.context.SceneAsset;
+import com.BossAi.bossAi.service.generation.context.ScriptResult;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -18,18 +19,26 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
- * VideoStep — animuje każdy obraz sceny do klipu wideo przez fal.ai.
+ * VideoStep v2 — mixed media pipeline.
  *
- * Wymaga: ImageStep musi być wykonany przed VideoStep
- *         (każda scena musi mieć wypełnione imageUrl).
+ * FAZA 2 zmiany:
  *
- * Input:  context.scenes[].imageUrl, context.scenes[].motionPrompt,
- *         context.scenes[].durationMs, context.planType
- * Output: context.scenes[].videoLocalPath (ścieżka do pliku MP4 per scena)
+ *   Mixed media: nie każda scena jest animowanym video przez fal.ai.
+ *   GPT-4o decyduje (przez mediaAssignments w ScriptResult) które sceny
+ *   potrzebują animacji (VIDEO) a które mogą być statycznym obrazem (IMAGE).
  *
- * Biegnie równolegle z VoiceStep (patrz PipelineConfig).
+ *   VIDEO scena → fal.ai Kling/LTX (drogie, dynamiczne, używamy dla hook + CTA)
+ *   IMAGE scena → ImageToClipStep (FFmpeg loop, $0, używamy dla treści)
+ *
+ *   Limit: max 2 sceny VIDEO. Enforce tutaj jako safety check jeśli GPT
+ *   wygeneruje za dużo VIDEO scen (co oszczędza koszt przy błędzie promptu).
+ *
+ *   Fallback: jeśli mediaAssignments null/empty (stary format) → używamy
+ *   starego zachowania (pierwsze + ostatnie = VIDEO, reszta = IMAGE).
  */
 @Slf4j
 @Service
@@ -40,6 +49,10 @@ public class VideoStep implements GenerationStep {
     private final StorageService storageService;
     private final AssetService assetService;
     private final ModelSelector modelSelector;
+    private final ImageToClipStep imageToClipStep;
+
+    /** Maksymalna liczba scen VIDEO — safety cap niezależnie od GPT output */
+    private static final int MAX_VIDEO_SCENES = 2;
 
     @Value("${ffmpeg.temp.dir:/tmp/bossai/render}")
     private String tempDir;
@@ -47,7 +60,7 @@ public class VideoStep implements GenerationStep {
     @Override
     public void execute(GenerationContext context) throws Exception {
         List<SceneAsset> scenes = context.getScenes();
-        String modelId = modelSelector.videoModel(context.getPlanType());
+        String modelId          = modelSelector.videoModel(context.getPlanType());
 
         log.info("[VideoStep] START — {} scen, model: {}, generationId: {}",
                 scenes.size(), modelId, context.getGenerationId());
@@ -55,58 +68,137 @@ public class VideoStep implements GenerationStep {
         // Walidacja — każda scena musi mieć imageUrl z ImageStep
         for (SceneAsset scene : scenes) {
             if (scene.getImageUrl() == null || scene.getImageUrl().isBlank()) {
-                throw new IllegalStateException(
-                        "[VideoStep] Scena " + scene.getIndex() + " nie ma imageUrl — ImageStep musiał się nie wykonać");
+                throw new IllegalStateException("[VideoStep] Scena " + scene.getIndex()
+                        + " nie ma imageUrl — ImageStep musiał się nie wykonać");
             }
         }
 
-        Path workingDir = getWorkingDir(context);
-        Files.createDirectories(workingDir);
+        Path workDir = getWorkingDir(context);
+        Files.createDirectories(workDir);
 
+        // Ustal które sceny są VIDEO (animowane) a które IMAGE (statyczne)
+        Set<Integer> videoSceneIndices = resolveVideoSceneIndices(context);
+
+        log.info("[VideoStep] Mixed media plan: VIDEO sceny={}, IMAGE sceny={}",
+                videoSceneIndices,
+                scenes.stream()
+                        .map(SceneAsset::getIndex)
+                        .filter(i -> !videoSceneIndices.contains(i))
+                        .collect(Collectors.toList()));
+
+        // Przetwarzaj każdą scenę
+        int videoCount = 0;
         for (int i = 0; i < scenes.size(); i++) {
             SceneAsset scene = scenes.get(i);
+            boolean isVideo  = videoSceneIndices.contains(scene.getIndex());
 
             context.updateProgress(
                     GenerationStepName.VIDEO,
                     GenerationStepName.VIDEO.getProgressPercent(),
-                    String.format("Generuję wideo sceny %d/%d...", i + 1, scenes.size())
+                    String.format("%s scenę %d/%d...",
+                            isVideo ? "Animuję" : "Konwertuję", i + 1, scenes.size())
             );
 
-            log.info("[VideoStep] Scena {}/{} — imageUrl: {}, motion: {}",
-                    i + 1, scenes.size(), scene.getImageUrl(), scene.getMotionPrompt());
-
-            // Generuj klip przez fal.ai — Resilience4j retry w FalAiService
-            byte[] videoBytes = falAiService.generateVideo(
-                    scene.getImageUrl(),
-                    scene.getMotionPrompt(),
-                    scene.getDurationMs(),
-                    modelId
-            );
-
-            // Zapisz klip do katalogu roboczego FFmpeg
-            String filename = String.format("scene_%02d_%s.mp4", i, context.getGenerationId());
-            Path videoPath = workingDir.resolve(filename);
-            Files.write(videoPath, videoBytes);
-            scene.setVideoLocalPath(videoPath.toString());
-
-            // Zapisz jako Asset w bazie
-
-
-
-            assetService.createAsset(
-                    context.getUserId(),
-                    AssetType.VIDEO,
-                    AssetSource.AI_GENERATED,
-                    videoBytes,
-                    "video/scenes/" + filename,
-                    context.getGenerationId()
-            );
-
-            log.info("[VideoStep] Scena {}/{} DONE — {} bytes → {}",
-                    i + 1, scenes.size(), videoBytes.length, videoPath);
+            if (isVideo) {
+                processVideoScene(scene, modelId, workDir, context);
+                videoCount++;
+            } else {
+                processImageScene(scene, workDir);
+            }
         }
 
-        log.info("[VideoStep] DONE — wszystkie {} klipy wygenerowane i zapisane", scenes.size());
+        log.info("[VideoStep] DONE — {} scen VIDEO (API), {} scen IMAGE (FFmpeg)",
+                videoCount, scenes.size() - videoCount);
+    }
+
+    // =========================================================================
+    // PRZETWARZANIE SCEN
+    // =========================================================================
+
+    /** Animuje scenę przez fal.ai (drogi, dynamiczny) */
+    private void processVideoScene(SceneAsset scene, String modelId,
+                                   Path workDir, GenerationContext context) throws Exception {
+        log.info("[VideoStep] VIDEO scena {} — fal.ai animation", scene.getIndex());
+
+        byte[] videoBytes = falAiService.generateVideo(
+                scene.getImageUrl(),
+                scene.getMotionPrompt(),
+                scene.getDurationMs(),
+                modelId
+        );
+
+        String filename = String.format("scene_%02d_%s.mp4", scene.getIndex(), context.getGenerationId());
+        Path videoPath  = workDir.resolve(filename);
+        Files.write(videoPath, videoBytes);
+        scene.setVideoLocalPath(videoPath.toString());
+
+        assetService.createAsset(
+                context.getUserId(),
+                AssetType.VIDEO,
+                AssetSource.AI_GENERATED,
+                videoBytes,
+                "video/scenes/" + filename,
+                context.getGenerationId()
+        );
+
+        log.info("[VideoStep] VIDEO scena {} DONE — {} bytes → {}",
+                scene.getIndex(), videoBytes.length, videoPath);
+    }
+
+    /** Konwertuje obraz do MP4 przez FFmpeg loop (tani, $0) */
+    private void processImageScene(SceneAsset scene, Path workDir) throws Exception {
+        log.info("[VideoStep] IMAGE scena {} — FFmpeg Ken Burns", scene.getIndex());
+
+        String clipPath = imageToClipStep.convertImageToClip(scene, workDir);
+        scene.setVideoLocalPath(clipPath);
+
+        log.info("[VideoStep] IMAGE scena {} DONE → {}", scene.getIndex(), clipPath);
+    }
+
+    // =========================================================================
+    // RESOLVING VIDEO SCENE INDICES
+    // =========================================================================
+
+    /**
+     * Ustala które sceny mają być animowane przez fal.ai.
+     *
+     * Priorytet:
+     *   1. mediaAssignments z ScriptResult (GPT-4o decyzja) — jeśli dostępne
+     *   2. Fallback: scena 0 (hook) + ostatnia (CTA)
+     *   Safety cap: max MAX_VIDEO_SCENES niezależnie od źródła
+     */
+    private Set<Integer> resolveVideoSceneIndices(GenerationContext context) {
+        List<ScriptResult.MediaAssignment> assignments = context.getScript().mediaAssignments();
+
+        if (assignments != null && !assignments.isEmpty()) {
+            // Używamy GPT-4o decyzji, ale limitujemy do MAX_VIDEO_SCENES
+            List<Integer> videoIndices = assignments.stream()
+                    .filter(ScriptResult.MediaAssignment::isVideo)
+                    .map(ScriptResult.MediaAssignment::sceneIndex)
+                    .sorted()
+                    .collect(Collectors.toList());
+
+            if (videoIndices.size() > MAX_VIDEO_SCENES) {
+                log.warn("[VideoStep] GPT-4o wybrał {} VIDEO scen — ograniczam do {} (hook + CTA)",
+                        videoIndices.size(), MAX_VIDEO_SCENES);
+                // Zawsze bierz pierwszą (hook) i ostatnią (CTA) z listy video scen
+                videoIndices = List.of(videoIndices.get(0), videoIndices.get(videoIndices.size() - 1));
+            }
+
+            log.info("[VideoStep] Używam GPT mediaAssignments: VIDEO sceny = {}", videoIndices);
+            return Set.copyOf(videoIndices);
+        }
+
+        // Fallback: scena 0 (hook) + ostatnia scena (CTA)
+        List<SceneAsset> scenes = context.getScenes();
+        int lastIndex = scenes.stream()
+                .mapToInt(SceneAsset::getIndex)
+                .max()
+                .orElse(0);
+
+        Set<Integer> fallback = Set.of(0, lastIndex);
+        log.info("[VideoStep] Brak mediaAssignments — fallback VIDEO sceny = {}", fallback);
+        return fallback;
     }
 
     private Path getWorkingDir(GenerationContext context) {

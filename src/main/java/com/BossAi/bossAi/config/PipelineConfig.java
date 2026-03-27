@@ -192,34 +192,34 @@ public class PipelineConfig {
             log.info("[StubPipeline] → SCRIPT (fake)");
             Thread.sleep(300);
 
-            ScriptResult fakeScript = new ScriptResult(
-                    "Zmęczony szukaniem idealnych sneakersów? Nike Air Max to Twój wybór. Kup teraz!",
-                    List.of(
-                            new ScriptResult.SceneScript(0,
-                                    "Nike Air Max sneakers on white background, 9:16 vertical",
-                                    "slow zoom in", 5000,
-                                    "Zmęczony szukaniem?"),
-                            new ScriptResult.SceneScript(1,
-                                    "Young person wearing Nike sneakers, city, energy, 9:16 vertical",
-                                    "dynamic pan right", 5000,
-                                    "Nike Air Max — Twój wybór!")
-                    ),
-                    "energetic", "young adults 18-30",
-                    "Zmęczony szukaniem idealnych sneakersów?",
-                    "Kup teraz!", 10000
-            );
+//            ScriptResult fakeScript = new ScriptResult(
+//                    "Zmęczony szukaniem idealnych sneakersów? Nike Air Max to Twój wybór. Kup teraz!",
+//                    List.of(
+//                            new ScriptResult.SceneScript(0,
+//                                    "Nike Air Max sneakers on white background, 9:16 vertical",
+//                                    "slow zoom in", 5000,
+//                                    "Zmęczony szukaniem?"),
+//                            new ScriptResult.SceneScript(1,
+//                                    "Young person wearing Nike sneakers, city, energy, 9:16 vertical",
+//                                    "dynamic pan right", 5000,
+//                                    "Nike Air Max — Twój wybór!")
+//                    ),
+//                    "energetic", "young adults 18-30",
+//                    "Zmęczony szukaniem idealnych sneakersów?",
+//                    "Kup teraz!", 10000
+//            );
 
-            context.setScript(fakeScript);
-            context.setScenes(List.of(
-                    SceneAsset.builder().index(0)
-                            .imagePrompt(fakeScript.scenes().get(0).imagePrompt())
-                            .motionPrompt(fakeScript.scenes().get(0).motionPrompt())
-                            .durationMs(5000).subtitleText("Zmęczony szukaniem?").build(),
-                    SceneAsset.builder().index(1)
-                            .imagePrompt(fakeScript.scenes().get(1).imagePrompt())
-                            .motionPrompt(fakeScript.scenes().get(1).motionPrompt())
-                            .durationMs(5000).subtitleText("Nike Air Max — Twój wybór!").build()
-            ));
+//            context.setScript(fakeScript);
+//            context.setScenes(List.of(
+//                    SceneAsset.builder().index(0)
+//                            .imagePrompt(fakeScript.scenes().get(0).imagePrompt())
+//                            .motionPrompt(fakeScript.scenes().get(0).motionPrompt())
+//                            .durationMs(5000).subtitleText("Zmęczony szukaniem?").build(),
+//                    SceneAsset.builder().index(1)
+//                            .imagePrompt(fakeScript.scenes().get(1).imagePrompt())
+//                            .motionPrompt(fakeScript.scenes().get(1).motionPrompt())
+//                            .durationMs(5000).subtitleText("Nike Air Max — Twój wybór!").build()
+//            ));
 
             // --- IMAGE (pomiń — stub video nie potrzebuje obrazów) ---
             callback.onStep(GenerationStepName.IMAGE);
