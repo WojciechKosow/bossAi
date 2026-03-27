@@ -216,7 +216,7 @@ public class PipelineConfig {
 //                            .motionPrompt(fakeScript.scenes().get(0).motionPrompt())
 //                            .durationMs(5000).subtitleText("Zmęczony szukaniem?").build(),
 //                    SceneAsset.builder().index(1)
-//                            .imagePrompt(fakeScript.scenes().get(1).imagePrompt())
+//                             .imagePrompt(fakeScript.scenes().get(1).imagePrompt())
 //                            .motionPrompt(fakeScript.scenes().get(1).motionPrompt())
 //                            .durationMs(5000).subtitleText("Nike Air Max — Twój wybór!").build()
 //            ));
