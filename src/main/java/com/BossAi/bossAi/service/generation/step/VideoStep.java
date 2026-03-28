@@ -196,7 +196,8 @@ public class VideoStep implements GenerationStep {
                 .max()
                 .orElse(0);
 
-        Set<Integer> fallback = Set.of(0, lastIndex);
+        // Set.of(0, 0) crashes — handle single scene case
+        Set<Integer> fallback = lastIndex == 0 ? Set.of(0) : Set.of(0, lastIndex);
         log.info("[VideoStep] Brak mediaAssignments — fallback VIDEO sceny = {}", fallback);
         return fallback;
     }
