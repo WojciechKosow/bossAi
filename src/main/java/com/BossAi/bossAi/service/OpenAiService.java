@@ -439,6 +439,9 @@ public class OpenAiService {
 
             validateScriptResult(result);
 
+            // Normalize: auto-correct VIDEO scene durations to match Kling API minimum
+            result = normalizeScriptResult(result);
+
             log.info("[OpenAiService] ScriptResult OK \u2014 {} scen, {}ms, {} overlays, contentType: {}",
                     result.scenes().size(),
                     result.totalDurationMs(),
@@ -467,24 +470,9 @@ public class OpenAiService {
             if (scene.imagePrompt() == null || scene.imagePrompt().isBlank()) {
                 throw new RuntimeException("ScriptResult: scena " + scene.index() + " bez imagePrompt");
             }
-            if (scene.durationMs() < 2000) {
+            if (scene.durationMs() < 1000) {
                 throw new RuntimeException("ScriptResult: scena " + scene.index()
-                        + " ma durationMs=" + scene.durationMs() + " \u2014 minimum 2000ms");
-            }
-        }
-
-        // Enforce minimum durationMs for VIDEO scenes (Kling API minimum = 5s)
-        if (result.mediaAssignments() != null) {
-            for (ScriptResult.MediaAssignment ma : result.mediaAssignments()) {
-                if (ma.isVideo()) {
-                    ScriptResult.SceneScript scene = result.scenes().stream()
-                            .filter(s -> s.index() == ma.sceneIndex())
-                            .findFirst().orElse(null);
-                    if (scene != null && scene.durationMs() < 5000) {
-                        log.warn("[OpenAiService] VIDEO scena {} ma durationMs={} < 5000 \u2014 Kling API wymaga minimum 5s",
-                                scene.index(), scene.durationMs());
-                    }
-                }
+                        + " ma durationMs=" + scene.durationMs() + " \u2014 minimum 1000ms");
             }
         }
 
@@ -493,8 +481,68 @@ public class OpenAiService {
                     .filter(ScriptResult.MediaAssignment::isVideo)
                     .count();
             if (videoCount > 3) {
-                log.warn("[OpenAiService] Zbyt duzo scen VIDEO ({}) \u2014 RenderStep ograniczy do 2", videoCount);
+                log.warn("[OpenAiService] Zbyt duzo scen VIDEO ({}) \u2014 VideoStep ograniczy do 2", videoCount);
             }
         }
+    }
+
+    /**
+     * Normalizuje ScriptResult po walidacji:
+     *   - VIDEO sceny: durationMs < 5000 → 5000 (Kling API minimum)
+     *   - IMAGE sceny: durationMs < 3000 → 3000 (zbyt krótkie dla Ken Burns)
+     *   - Przelicza totalDurationMs
+     *
+     * ScriptResult to immutable record — tworzymy nową instancję z poprawionymi wartościami.
+     */
+    private ScriptResult normalizeScriptResult(ScriptResult result) {
+        java.util.Set<Integer> videoSceneIndices = new java.util.HashSet<>();
+        if (result.mediaAssignments() != null) {
+            for (ScriptResult.MediaAssignment ma : result.mediaAssignments()) {
+                if (ma.isVideo()) {
+                    videoSceneIndices.add(ma.sceneIndex());
+                }
+            }
+        }
+
+        boolean needsFix = false;
+        List<ScriptResult.SceneScript> fixedScenes = new java.util.ArrayList<>();
+
+        for (ScriptResult.SceneScript scene : result.scenes()) {
+            boolean isVideo = videoSceneIndices.contains(scene.index());
+            int correctedDuration = scene.durationMs();
+
+            if (isVideo && correctedDuration < 5000) {
+                log.warn("[OpenAiService] Normalizacja: VIDEO scena {} durationMs {} → 5000",
+                        scene.index(), correctedDuration);
+                correctedDuration = 5000;
+                needsFix = true;
+            } else if (!isVideo && correctedDuration < 3000) {
+                log.warn("[OpenAiService] Normalizacja: IMAGE scena {} durationMs {} → 3000",
+                        scene.index(), correctedDuration);
+                correctedDuration = 3000;
+                needsFix = true;
+            }
+
+            if (correctedDuration != scene.durationMs()) {
+                fixedScenes.add(new ScriptResult.SceneScript(
+                        scene.index(), scene.imagePrompt(), scene.motionPrompt(),
+                        correctedDuration, scene.subtitleText()));
+            } else {
+                fixedScenes.add(scene);
+            }
+        }
+
+        if (!needsFix) return result;
+
+        // Przelicz totalDurationMs
+        int newTotal = fixedScenes.stream().mapToInt(ScriptResult.SceneScript::durationMs).sum();
+        log.info("[OpenAiService] Normalizacja: totalDurationMs {} → {}", result.totalDurationMs(), newTotal);
+
+        return new ScriptResult(
+                result.narration(), fixedScenes, result.style(), result.targetAudience(),
+                result.hook(), result.callToAction(), newTotal,
+                result.overlays(), result.mediaAssignments(), result.contentType(),
+                result.musicDirections()
+        );
     }
 }
