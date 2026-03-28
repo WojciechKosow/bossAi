@@ -7,10 +7,14 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.resilience4j.retry.annotation.Retry;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.core.io.ByteArrayResource;
 import org.springframework.http.MediaType;
+import org.springframework.http.client.MultipartBodyBuilder;
 import org.springframework.stereotype.Service;
+import org.springframework.web.reactive.function.BodyInserters;
 import org.springframework.web.reactive.function.client.WebClient;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -417,6 +421,80 @@ public class OpenAiService {
 
         log.info("[OpenAiService] TTS gotowy \u2014 {} bytes", audioBytes.length);
         return audioBytes;
+    }
+
+    // =========================================================================
+    // WHISPER — WORD-LEVEL TIMESTAMPS
+    // =========================================================================
+
+    /**
+     * Transkrybuje audio (MP3) przez Whisper API z dokładnymi timestampami per słowo.
+     *
+     * Endpoint: POST /audio/transcriptions
+     * Model: whisper-1
+     * response_format: verbose_json
+     * timestamp_granularities[]: word
+     *
+     * Zwraca listę WordTiming (word, startMs, endMs) zsynchronizowaną z faktycznym TTS.
+     * Używane przez RenderStep do word-by-word subtitle rendering.
+     */
+    public List<SubtitleService.WordTiming> transcribeWordTimestamps(byte[] audioBytes) {
+        log.info("[OpenAiService] Whisper word timestamps — {} bytes audio", audioBytes.length);
+
+        try {
+            MultipartBodyBuilder builder = new MultipartBodyBuilder();
+            builder.part("file", new ByteArrayResource(audioBytes) {
+                @Override
+                public String getFilename() {
+                    return "speech.mp3";
+                }
+            }).contentType(MediaType.APPLICATION_OCTET_STREAM);
+            builder.part("model", "whisper-1");
+            builder.part("response_format", "verbose_json");
+            builder.part("timestamp_granularities[]", "word");
+
+            String response = webClient.post()
+                    .uri("/audio/transcriptions")
+                    .contentType(MediaType.MULTIPART_FORM_DATA)
+                    .body(BodyInserters.fromMultipartData(builder.build()))
+                    .retrieve()
+                    .bodyToMono(String.class)
+                    .block();
+
+            JsonNode root = objectMapper.readTree(response);
+            JsonNode wordsNode = root.path("words");
+
+            if (wordsNode.isMissingNode() || !wordsNode.isArray() || wordsNode.isEmpty()) {
+                log.warn("[OpenAiService] Whisper nie zwrócił words — fallback do estimated timings");
+                return List.of();
+            }
+
+            List<SubtitleService.WordTiming> timings = new ArrayList<>();
+            for (JsonNode wordNode : wordsNode) {
+                String word = wordNode.path("word").asText("").trim();
+                double startSec = wordNode.path("start").asDouble(0);
+                double endSec = wordNode.path("end").asDouble(0);
+
+                if (!word.isEmpty() && endSec > startSec) {
+                    timings.add(new SubtitleService.WordTiming(
+                            word,
+                            (int) (startSec * 1000),
+                            (int) (endSec * 1000)
+                    ));
+                }
+            }
+
+            log.info("[OpenAiService] Whisper OK — {} słów z timestampami, ostatnie słowo kończy się na {}ms",
+                    timings.size(),
+                    timings.isEmpty() ? 0 : timings.get(timings.size() - 1).endMs());
+
+            return timings;
+
+        } catch (Exception e) {
+            log.warn("[OpenAiService] Whisper transcription failed — fallback do estimated timings: {}",
+                    e.getMessage());
+            return List.of();
+        }
     }
 
     // =========================================================================

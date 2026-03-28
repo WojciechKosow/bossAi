@@ -180,8 +180,15 @@ public class RenderStep implements GenerationStep {
         boolean hasMusic    = context.getMusicLocalPath() != null;
         boolean hasOverlays = hasOverlays(context);
 
-        // Generuj word-by-word timings
-        List<SubtitleService.WordTiming> wordTimings = subtitleService.generateWordTimings(context.getScript());
+        // Word-by-word timings: preferuj Whisper (real timestamps), fallback do estimated
+        List<SubtitleService.WordTiming> wordTimings;
+        if (context.getWordTimings() != null && !context.getWordTimings().isEmpty()) {
+            wordTimings = context.getWordTimings();
+            log.info("[RenderStep] Używam Whisper word timings — {} słów", wordTimings.size());
+        } else {
+            wordTimings = subtitleService.generateWordTimings(context.getScript());
+            log.info("[RenderStep] Używam estimated word timings — {} słów", wordTimings.size());
+        }
         boolean useWordByWord = !wordTimings.isEmpty();
 
         // Fallback: SRT file jeśli word-by-word nie zadziałał

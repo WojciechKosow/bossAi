@@ -5,6 +5,7 @@ import com.BossAi.bossAi.entity.AssetType;
 import com.BossAi.bossAi.service.AssetService;
 import com.BossAi.bossAi.service.OpenAiService;
 import com.BossAi.bossAi.service.StorageService;
+import com.BossAi.bossAi.service.SubtitleService;
 import com.BossAi.bossAi.service.generation.GenerationContext;
 import com.BossAi.bossAi.service.generation.GenerationStepName;
 import lombok.RequiredArgsConstructor;
@@ -61,6 +62,23 @@ public class VoiceStep implements GenerationStep {
         }
 
         context.setVoiceLocalPath(voiceLocalPath);
+
+        // Transkrybuj TTS audio przez Whisper — word-level timestamps
+        // Wynik zapisany w context.wordTimings, RenderStep użyje ich do subtitle sync
+        if (!context.hasUserVoice()) {
+            try {
+                byte[] audioBytes = Files.readAllBytes(Path.of(voiceLocalPath));
+                List<SubtitleService.WordTiming> timings = openAiService.transcribeWordTimestamps(audioBytes);
+                if (!timings.isEmpty()) {
+                    context.setWordTimings(timings);
+                    log.info("[VoiceStep] Whisper word timings OK — {} słów", timings.size());
+                } else {
+                    log.warn("[VoiceStep] Whisper zwrócił 0 słów — RenderStep użyje estimated timings");
+                }
+            } catch (Exception e) {
+                log.warn("[VoiceStep] Whisper transcription failed — fallback: {}", e.getMessage());
+            }
+        }
 
         log.info("[VoiceStep] DONE — voiceLocalPath: {}", voiceLocalPath);
     }

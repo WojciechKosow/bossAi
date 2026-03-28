@@ -3,6 +3,7 @@ package com.BossAi.bossAi.service.generation;
 import com.BossAi.bossAi.entity.Asset;
 import com.BossAi.bossAi.entity.PlanType;
 import com.BossAi.bossAi.entity.VideoStyle;
+import com.BossAi.bossAi.service.SubtitleService;
 import com.BossAi.bossAi.service.director.DirectorPlan;
 import com.BossAi.bossAi.service.generation.context.SceneAsset;
 import com.BossAi.bossAi.service.generation.context.ScriptResult;
@@ -141,6 +142,14 @@ public class GenerationContext {
      * Używana przez RenderStep.
      */
     private String voiceLocalPath;
+
+    /**
+     * Dokładne timestampy per słowo z Whisper transcription.
+     * Jeśli dostępne, RenderStep używa ich zamiast szacunkowych z SubtitleService.
+     * Null/puste = fallback do szacunkowych timingów.
+     */
+    @Builder.Default
+    private List<SubtitleService.WordTiming> wordTimings = new ArrayList<>();
 
     // -------------------------------------------------------------------------
     // WYNIKI MUSICSTEP
