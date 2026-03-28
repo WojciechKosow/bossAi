@@ -8,40 +8,82 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * SubtitleService — generuje plik SRT z narracji TikTok Ad.
+ * SubtitleService — generuje napisy word-by-word + fallback SRT.
  *
- * Dwa tryby:
+ * FAZA 3 — word-by-word subtitles:
+ *   generateWordTimings() rozbija subtitleText kazdej sceny na osobne slowa
+ *   z timingiem (startMs/endMs per word). RenderStep renderuje kazde slowo
+ *   jako osobny FFmpeg drawtext z enable='between(t, start, end)'.
  *
- *   1. Per-scena (rekomendowany) — każda SceneScript.subtitleText
- *      dostaje własny blok SRT z timingiem wynikającym z durationMs sceny.
- *      Napisy są zsynchronizowane ze scenami wideo.
- *
- *   2. Word-split — rozbija całą narrację na słowa i dystrybuuje
- *      równomiernie po czasie (fallback jeśli sceny nie mają subtitleText).
- *
- * Format SRT:
- *   1
- *   00:00:00,000 --> 00:00:04,000
- *   Tekst napisu
- *
- *   2
- *   00:00:04,000 --> 00:00:08,000
- *   Tekst napisu
- *
- * FFmpeg: -vf subtitles=subtitles.srt:force_style='FontSize=24,PrimaryColour=&Hffffff'
+ *   Fallback: generateSrt() — klasyczny plik SRT (per-scena lub word-split).
  */
 @Slf4j
 @Service
 public class SubtitleService {
 
+    public record WordTiming(
+            String word,
+            int startMs,
+            int endMs
+    ) {}
+
     /**
-     * Generuje zawartość pliku SRT na podstawie scenariusza.
-     * Preferuje subtitleText per scena jeśli dostępne.
-     *
-     * @param script     wynik ScriptStep
-     * @param offsetMs   opóźnienie startowe (ms) — zwykle 0
-     * @return string gotowy do zapisu jako .srt
+     * Generuje liste slow z timingiem word-by-word.
+     * Kazda scena ma subtitleText rozbijany na slowa dystrybuowane rownomiernie.
      */
+    public List<WordTiming> generateWordTimings(ScriptResult script) {
+        List<WordTiming> timings = new ArrayList<>();
+        int sceneStartMs = 0;
+
+        for (ScriptResult.SceneScript scene : script.scenes()) {
+            String text = scene.subtitleText();
+            if (text == null || text.isBlank()) {
+                sceneStartMs += scene.durationMs();
+                continue;
+            }
+
+            String[] words = text.trim().split("\\s+");
+            if (words.length == 0) {
+                sceneStartMs += scene.durationMs();
+                continue;
+            }
+
+            int usableDuration = (int) (scene.durationMs() * 0.90);
+            int msPerWord = Math.max(250, Math.min(800, usableDuration / words.length));
+
+            int totalWordsMs = msPerWord * words.length;
+            if (totalWordsMs > usableDuration) {
+                msPerWord = Math.max(250, usableDuration / words.length);
+            }
+
+            int wordOffset = sceneStartMs + 150;
+
+            for (String word : words) {
+                int wordStart = wordOffset;
+                int wordEnd = wordStart + msPerWord;
+
+                if (wordEnd > sceneStartMs + scene.durationMs()) {
+                    wordEnd = sceneStartMs + scene.durationMs();
+                }
+
+                if (wordEnd > wordStart) {
+                    timings.add(new WordTiming(word, wordStart, wordEnd));
+                }
+
+                wordOffset = wordEnd;
+            }
+
+            sceneStartMs += scene.durationMs();
+        }
+
+        log.info("[SubtitleService] Word-by-word: {} slow z timingiem", timings.size());
+        return timings;
+    }
+
+    // =========================================================================
+    // FALLBACK — klasyczny SRT
+    // =========================================================================
+
     public String generateSrt(ScriptResult script, int offsetMs) {
         List<ScriptResult.SceneScript> scenes = script.scenes();
 
@@ -49,18 +91,14 @@ public class SubtitleService {
                 .anyMatch(s -> s.subtitleText() != null && !s.subtitleText().isBlank());
 
         if (hasSubtitleText) {
-            log.info("[SubtitleService] Tryb per-scena — {} bloków SRT", scenes.size());
+            log.info("[SubtitleService] SRT fallback: tryb per-scena — {} blokow", scenes.size());
             return generatePerSceneSrt(scenes, offsetMs);
         } else {
-            log.info("[SubtitleService] Tryb word-split — narracja: {} znaków",
+            log.info("[SubtitleService] SRT fallback: tryb word-split — {} znakow",
                     script.narration().length());
             return generateWordSplitSrt(script.narration(), script.totalDurationMs(), offsetMs);
         }
     }
-
-    // -------------------------------------------------------------------------
-    // TRYB 1 — per scena
-    // -------------------------------------------------------------------------
 
     private String generatePerSceneSrt(List<ScriptResult.SceneScript> scenes, int offsetMs) {
         StringBuilder srt = new StringBuilder();
@@ -91,15 +129,10 @@ public class SubtitleService {
         return srt.toString().trim();
     }
 
-    // -------------------------------------------------------------------------
-    // TRYB 2 — word-split z równomiernym podziałem
-    // -------------------------------------------------------------------------
-
     private String generateWordSplitSrt(String narration, int totalDurationMs, int offsetMs) {
         String[] words = narration.trim().split("\\s+");
         if (words.length == 0) return "";
 
-        // Grupujemy po ~5 słów per blok napisu
         int wordsPerBlock = 5;
         List<String> blocks = groupWords(words, wordsPerBlock);
 
@@ -150,10 +183,6 @@ public class SubtitleService {
 
         return blocks;
     }
-
-    // -------------------------------------------------------------------------
-    // FORMAT TIMESTAMP — HH:MM:SS,mmm
-    // -------------------------------------------------------------------------
 
     private String formatTimestamp(int totalMs) {
         int ms      = totalMs % 1000;
