@@ -19,6 +19,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 /**
  * ImageToClipStep — konwertuje statyczny obraz (PNG/JPG) do klipu MP4.
@@ -142,10 +143,10 @@ public class ImageToClipStep {
         // zoom_step = 0.2 / totalFrames (ale nie więcej niż 0.002 żeby nie było za szybko)
         double zoomStep = Math.min(0.2 / Math.max(totalFrames, 1), 0.002);
 
-        String zoompan = String.format(
+        String zoompan = String.format(Locale.US,
                 "zoompan=z='min(zoom+%.6f,1.2)':d=%d:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=1080x1920:fps=30",
                 zoomStep, totalFrames
-        );
+        );;
 
         // scale przed zoompan żeby mieć pewność że wejście jest odpowiednie
         String vf = "scale=1080:1920:force_original_aspect_ratio=increase," +
@@ -164,7 +165,7 @@ public class ImageToClipStep {
         cmd.addAll(List.of("-loop", "1"));
         cmd.addAll(List.of("-i", input.toString()));
         cmd.addAll(List.of("-vf", vf));
-        cmd.addAll(List.of("-t", String.format("%.3f", durationSec)));
+        cmd.addAll(List.of("-t", String.format(Locale.US, "%.3f", durationSec)));
         cmd.addAll(List.of("-c:v", "libx264"));
         cmd.addAll(List.of("-preset", "fast"));
         cmd.addAll(List.of("-crf", "23"));
