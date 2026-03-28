@@ -11,6 +11,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.reactive.ReactorClientHttpConnector;
 import org.springframework.web.reactive.function.client.ExchangeFilterFunction;
+import org.springframework.web.reactive.function.client.ExchangeStrategies;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Mono;
 import reactor.netty.http.client.HttpClient;
@@ -45,12 +46,19 @@ public class WebClientConfig {
                 openAiProperties.getTimeout().getRead()
         );
 
+        // TTS responses can be large (>256KB for 40-75s narration)
+        // Default WebClient limit is 256KB — increase to 16MB
+        ExchangeStrategies strategies = ExchangeStrategies.builder()
+                .codecs(cfg -> cfg.defaultCodecs().maxInMemorySize(16 * 1024 * 1024))
+                .build();
+
         return WebClient.builder()
                 .baseUrl(openAiProperties.getApi().getBaseUrl())
                 .defaultHeader(HttpHeaders.AUTHORIZATION,
                         "Bearer " + openAiProperties.getApi().getKey())
                 .defaultHeader(HttpHeaders.CONTENT_TYPE,
                         MediaType.APPLICATION_JSON_VALUE)
+                .exchangeStrategies(strategies)
                 .clientConnector(new ReactorClientHttpConnector(httpClient))
                 .filter(logErrorResponse("OpenAI"))
                 .build();
