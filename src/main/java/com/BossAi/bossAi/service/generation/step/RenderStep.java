@@ -25,28 +25,19 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
 /**
  * RenderStep v3 — word-by-word subtitles + dynamic music volume.
  *
- * FAZA 3 zmiany:
+ * KLUCZOWA ZASADA: ZAWSZE używaj f() dla wartości double przekazywanych do FFmpeg
+ * — zarówno w filter_complex_script jak i w argumentach cmdline (-ss, -t, itp.).
  *
- *   1. Word-by-word subtitles — zamiast SRT burn-in, każde słowo narracji
- *      jest osobnym FFmpeg drawtext z enable='between(t, start, end)'.
- *      Słowa pojawiają się jedno po drugim synchronicznie z TTS.
- *      Fallback: jeśli word-by-word zawiedzie, SRT burn-in (jak v2).
- *
- *   2. Dynamic music volume — zamiast stałego volume=0.25, muzyka zmienia
- *      głośność per scena na podstawie musicDirections z ScriptResult.
- *      GPT-4o decyduje o głośności: narrator mówi → ciszej, pauzy → głośniej.
- *
- *   3. Filter complex pipeline v3:
- *      [0:v] → word drawtext chain → overlay chain → [vout]
- *      [1:a]volume=1.0[voice]
- *      [2:a]volume='..dynamic expression..'[music]
- *      [voice][music]amix[audio]
+ * String.valueOf(double) na polskim Windows daje "3,240" zamiast "3.240",
+ * co powoduje błąd FFmpeg "No such filter: '3.240'" — FFmpeg widzi wartość
+ * po przecinku jako osobny token i próbuje zinterpretować go jako nazwę filtra.
  */
 @Slf4j
 @Service
@@ -60,12 +51,12 @@ public class RenderStep implements GenerationStep {
     private final OverlayEngine overlayEngine;
 
     // Word-by-word subtitle config
-    private static final int WORD_FONT_SIZE = 48;
-    private static final String WORD_FONT_COLOR = "white";
+    private static final int    WORD_FONT_SIZE    = 48;
+    private static final String WORD_FONT_COLOR   = "white";
     private static final String WORD_BORDER_COLOR = "black";
-    private static final int WORD_BORDER_WIDTH = 4;
-    private static final String WORD_FONT = "Arial";
-    private static final double WORD_FADE_IN = 0.08;  // 80ms pop-in
+    private static final int    WORD_BORDER_WIDTH = 4;
+    private static final String WORD_FONT         = "Arial";
+    private static final double WORD_FADE_IN      = 0.08;  // 80ms pop-in
 
     @Override
     public void execute(GenerationContext context) throws Exception {
@@ -86,9 +77,9 @@ public class RenderStep implements GenerationStep {
         Files.createDirectories(workDir);
 
         // Faza 1 — concat klipów
-        List<Path> clips      = buildClipsSequential(context, workDir);
-        Path concatFile       = writeConcatFile(clips, workDir);
-        Path concatOutput     = workDir.resolve("temp_concat.mp4");
+        List<Path> clips  = buildClipsSequential(context, workDir);
+        Path concatFile   = writeConcatFile(clips, workDir);
+        Path concatOutput = workDir.resolve("temp_concat.mp4");
         runConcat(concatFile, concatOutput);
         log.info("[RenderStep] Concat DONE → {} klipów", clips.size());
 
@@ -209,13 +200,22 @@ public class RenderStep implements GenerationStep {
             cmd.addAll(List.of("-i", context.getMusicLocalPath()));
         }
 
-        // Buduj filter_complex i zapisz do pliku — unika problemów z quoting na Windows
+        // Buduj filter_complex i zapisz do pliku.
+        // W pliku filter_complex_script przecinki NIE są escapowane backslashem.
         String filterComplex = buildFilterComplex(
                 context, hasMusic, hasOverlays, useWordByWord, wordTimings, srtFile);
         Path filterScript = workDir.resolve("filter_complex.txt");
         Files.writeString(filterScript, filterComplex);
-        log.info("[RenderStep] filter_complex_script saved — {} chars → {}", filterComplex.length(), filterScript);
-        cmd.addAll(List.of("-filter_complex_script", filterScript.toString()));
+
+        log.info("[RenderStep] filter_complex.txt written to: {}", filterScript);
+
+        // Loguj pierwsze 500 znaków filter_complex dla diagnostyki
+        log.info("[RenderStep] filter_complex_script ({} chars, preview):\n{}",
+                filterComplex.length(),
+                filterComplex.substring(0, Math.min(500, filterComplex.length())));
+
+        // Nowa składnia FFmpeg (stara -filter_complex_script jest deprecated)
+        cmd.addAll(List.of("-/filter_complex", filterScript.toString()));
 
         // Map
         cmd.addAll(List.of("-map", "[vout]"));
@@ -237,11 +237,8 @@ public class RenderStep implements GenerationStep {
     }
 
     /**
-     * Buduje kompletny filter_complex:
-     *
-     *   1. Audio: voice + dynamic music volume (jeśli muzyka)
-     *   2. Video: word-by-word drawtext chain (lub SRT fallback)
-     *   3. Video: overlay chain (jeśli overlays)
+     * Buduje kompletny filter_complex zapisywany do pliku.
+     * Przecinki wewnątrz wyrażeń FFmpeg są zwykłymi przecinkami (nie \,).
      */
     private String buildFilterComplex(
             GenerationContext context,
@@ -263,18 +260,14 @@ public class RenderStep implements GenerationStep {
 
         // === VIDEO: word-by-word subtitles lub SRT fallback ===
         if (useWordByWord) {
-            // Word-by-word → chain drawtext filters
             String afterWordsLabel = hasOverlays ? "[worded]" : "[vout]";
             String wordChain = buildWordByWordFilter(wordTimings, "[0:v]", afterWordsLabel);
             fc.append(wordChain);
         } else if (srtFile != null) {
-            // SRT fallback
             String afterSrtLabel = hasOverlays ? "[subtitled]" : "[vout]";
             fc.append(buildSrtFilter(srtFile, "[0:v]", afterSrtLabel));
         } else {
-            // Brak napisów — video przechodzi dalej
             if (hasOverlays) {
-                // Potrzebujemy label — kopiuj input
                 fc.append("[0:v]null[subtitled];");
             }
         }
@@ -303,18 +296,6 @@ public class RenderStep implements GenerationStep {
     // WORD-BY-WORD DRAWTEXT CHAIN
     // =========================================================================
 
-    /**
-     * Buduje chain drawtext filtrów — jedno słowo = jeden drawtext.
-     *
-     * Każde słowo:
-     *   drawtext=text='word':fontsize=28:fontcolor=white:bordercolor=black:borderw=3:
-     *   x=(W-tw)/2:y=(H*0.82):
-     *   enable='between(t,startSec,endSec)':
-     *   alpha='if(lt(t,startSec+0.08),min(1,(t-startSec)/0.08),1)'
-     *
-     * Pozycja: BOTTOM CENTER (y=82% — nad przyciskami UI TikToka)
-     * Animacja: szybki pop-in (80ms fade), brak fade-out (ostre cięcie → następne słowo)
-     */
     private String buildWordByWordFilter(
             List<SubtitleService.WordTiming> words,
             String inputLabel,
@@ -330,14 +311,13 @@ public class RenderStep implements GenerationStep {
             String currentOutput = (i == words.size() - 1) ? outputLabel : "[w" + i + "]";
 
             double startSec = wt.startMs() / 1000.0;
-            double endSec = wt.endMs() / 1000.0;
+            double endSec   = wt.endMs()   / 1000.0;
 
             String escapedWord = escapeDrawtext(wt.word());
 
-            // Pop-in alpha: szybki fade 80ms, potem stały
-            // Commas escaped with backslash for filter_complex_script syntax
-            String alpha = String.format(
-                    "if(lt(t\\,%s)\\,min(1\\,(t-%s)/%s)\\,1)",
+            // Zwykłe przecinki — plik, nie cmdline
+            String alpha = String.format(Locale.US,
+                    "if(lt(t,%s),min(1,(t-%s)/%s),1)",
                     f(startSec + WORD_FADE_IN), f(startSec), f(WORD_FADE_IN)
             );
 
@@ -352,7 +332,7 @@ public class RenderStep implements GenerationStep {
                     .append("shadowcolor=black@0.6:shadowx=2:shadowy=2:")
                     .append("x=(W-tw)/2:")
                     .append("y=(H*0.82):")
-                    .append("enable='between(t\\,").append(f(startSec)).append("\\,").append(f(endSec)).append(")':")
+                    .append("enable='between(t,").append(f(startSec)).append(",").append(f(endSec)).append(")':")
                     .append("alpha='").append(alpha).append("'")
                     .append(currentOutput);
 
@@ -373,15 +353,6 @@ public class RenderStep implements GenerationStep {
     // DYNAMIC MUSIC VOLUME
     // =========================================================================
 
-    /**
-     * Buduje FFmpeg volume filter z dynamiczną głośnością per scena.
-     *
-     * Jeśli musicDirections dostępne:
-     *   volume='if(between(t,0,3),0.45, if(between(t,3,8),0.12, ...))'
-     *
-     * Jeśli brak musicDirections:
-     *   volume=0.25 (stała głośność jak dotychczas)
-     */
     private String buildDynamicMusicVolume(GenerationContext context) {
         List<ScriptResult.MusicDirection> directions = context.getScript().musicDirections();
 
@@ -390,7 +361,6 @@ public class RenderStep implements GenerationStep {
             return "volume=0.25";
         }
 
-        // Oblicz czasy startu/końca per scena
         List<ScriptResult.SceneScript> scenes = context.getScript().scenes();
         int[] sceneStartMs = new int[scenes.size()];
         int currentMs = 0;
@@ -399,8 +369,9 @@ public class RenderStep implements GenerationStep {
             currentMs += scenes.get(i).durationMs();
         }
 
-        // Buduj nested if expression
         StringBuilder expr = new StringBuilder("volume='");
+        int writtenDirections = 0;
+
         for (int i = 0; i < directions.size(); i++) {
             ScriptResult.MusicDirection dir = directions.get(i);
             int idx = dir.sceneIndex();
@@ -408,57 +379,51 @@ public class RenderStep implements GenerationStep {
             if (idx < 0 || idx >= scenes.size()) continue;
 
             double startSec = sceneStartMs[idx] / 1000.0;
-            double endSec = (sceneStartMs[idx] + scenes.get(idx).durationMs()) / 1000.0;
-            double vol = Math.max(0.0, Math.min(1.0, dir.volume()));
+            double endSec   = (sceneStartMs[idx] + scenes.get(idx).durationMs()) / 1000.0;
+            double vol      = Math.max(0.0, Math.min(1.0, dir.volume()));
 
-            // Obsługa fade in/out w obrębie sceny
+            writtenDirections++;
+
             if (dir.fadeInMs() > 0 || dir.fadeOutMs() > 0) {
-                double fadeInSec = dir.fadeInMs() / 1000.0;
+                double fadeInSec  = dir.fadeInMs()  / 1000.0;
                 double fadeOutSec = dir.fadeOutMs() / 1000.0;
 
-                // volume ramps: fade in → steady → fade out
-                // Używamy prostego if/between z linear interpolation
                 expr.append("if(between(t,").append(f(startSec)).append(",").append(f(endSec)).append("),");
 
                 if (fadeInSec > 0 && fadeOutSec > 0) {
-                    // fade in + fade out
                     expr.append("if(lt(t,").append(f(startSec + fadeInSec)).append("),")
                             .append(f(vol)).append("*(t-").append(f(startSec)).append(")/").append(f(fadeInSec))
                             .append(",if(gt(t,").append(f(endSec - fadeOutSec)).append("),")
                             .append(f(vol)).append("*(").append(f(endSec)).append("-t)/").append(f(fadeOutSec))
                             .append(",").append(f(vol)).append("))");
                 } else if (fadeInSec > 0) {
-                    // fade in only
                     expr.append("if(lt(t,").append(f(startSec + fadeInSec)).append("),")
                             .append(f(vol)).append("*(t-").append(f(startSec)).append(")/").append(f(fadeInSec))
                             .append(",").append(f(vol)).append(")");
                 } else {
-                    // fade out only
                     expr.append("if(gt(t,").append(f(endSec - fadeOutSec)).append("),")
                             .append(f(vol)).append("*(").append(f(endSec)).append("-t)/").append(f(fadeOutSec))
                             .append(",").append(f(vol)).append(")");
                 }
 
                 expr.append(",");
+
             } else {
-                // Stały volume dla tej sceny
                 expr.append("if(between(t,").append(f(startSec)).append(",").append(f(endSec)).append("),")
                         .append(f(vol)).append(",");
             }
         }
 
-        // Default volume dla segmentów bez musicDirection
         expr.append("0.20");
 
-        // Zamknij wszystkie if-y
-        for (int i = 0; i < directions.size(); i++) {
+        for (int i = 0; i < writtenDirections; i++) {
             expr.append(")");
         }
 
         expr.append("'");
 
-        log.info("[RenderStep] Dynamic music volume: {} directions, expr length: {}",
-                directions.size(), expr.length());
+        log.info("[RenderStep] Dynamic music volume: {} directions ({} written), expr length: {}",
+                directions.size(), writtenDirections, expr.length());
 
         return expr.toString();
     }
@@ -523,7 +488,7 @@ public class RenderStep implements GenerationStep {
         List<Path> clips = new ArrayList<>();
 
         for (int i = 0; i < direction.getCuts().size(); i++) {
-            Cut cut       = direction.getCuts().get(i);
+            Cut cut        = direction.getCuts().get(i);
             int durationMs = cut.getEndMs() - cut.getStartMs();
 
             if (durationMs <= 0) {
@@ -551,11 +516,15 @@ public class RenderStep implements GenerationStep {
         List<String> cmd = new ArrayList<>();
         cmd.add(ffmpegProperties.getBinary().getPath());
         cmd.add("-y");
-        cmd.addAll(List.of("-ss", String.valueOf(startSec)));
+        // FIX: używamy f() zamiast String.valueOf(double).
+        // String.valueOf(3.24) na polskim Windows → "3,240" (z przecinkiem).
+        // FFmpeg nie rozumie przecinka jako separatora dziesiętnego w argumentach
+        // cmdline i traktuje ",240" jako osobny argument — stąd błąd "No such filter".
+        cmd.addAll(List.of("-ss", f(startSec)));
         cmd.addAll(List.of("-i", input));
         if (filter != null) cmd.addAll(List.of("-vf", filter));
         cmd.addAll(List.of(
-                "-t", String.valueOf(durationSec),
+                "-t", f(durationSec),
                 "-c:v", "libx264", "-preset", "fast", "-crf", "23",
                 "-c:a", "aac",
                 output.toString()
@@ -573,6 +542,8 @@ public class RenderStep implements GenerationStep {
             case SHAKE       -> "crop=iw:ih:x='10*sin(2*PI*t*3)':y='10*cos(2*PI*t*2)'";
             case SLOW_MOTION -> "setpts=1.5*PTS";
             case NONE        -> null;
+            case PAN_LEFT    -> null;
+            case PAN_RIGHT   -> null;
         };
     }
 
@@ -623,20 +594,28 @@ public class RenderStep implements GenerationStep {
     }
 
     /**
-     * Escapuje tekst dla FFmpeg drawtext (wewnątrz filter_complex).
-     * W filter_complex przecinki i backslashe mają specjalne znaczenie.
+     * Escapuje tekst słowa dla FFmpeg drawtext.
+     *   \  → \\   backslash (pierwszy!)
+     *   '  → \'   apostrof
+     *   :  → \:   separator opcji drawtext
+     *   %  → %%   znak formatowania drawtext
      */
     private String escapeDrawtext(String text) {
         if (text == null) return "";
+
         return text
                 .replace("\\", "\\\\")
-                .replace("'", "\\'")
-                .replace(":", "\\:")
-                .replace("%", "%%");
+                .replace("'",  "''")
+                .replace(":",  "\\:")
+                .replace("%",  "%%");
     }
 
+    /**
+     * JEDYNA metoda konwersji double → String dla FFmpeg.
+     * Locale.US gwarantuje kropkę dziesiętną niezależnie od ustawień systemowych.
+     */
     private String f(double value) {
-        return String.format(java.util.Locale.US, "%.3f", value);
+        return String.format(Locale.US, "%.3f", value);
     }
 
     private void runCommand(List<String> cmd, String phase) throws Exception {

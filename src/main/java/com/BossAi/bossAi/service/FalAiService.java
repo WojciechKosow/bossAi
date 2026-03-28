@@ -79,7 +79,7 @@ public class FalAiService {
 
         Map<String, Object> requestBody = Map.of(
                 "prompt", imagePrompt,
-                "image_size", "portrait_9_16",   // 9:16 vertical for TikTok
+                "image_size", "portrait_16_9",   // 9:16 vertical for TikTok
                 "num_images", 1,
                 "enable_safety_checker", true
         );

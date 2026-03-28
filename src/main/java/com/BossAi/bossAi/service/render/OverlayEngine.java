@@ -4,69 +4,66 @@ import com.BossAi.bossAi.service.generation.context.ScriptResult;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
-import java.util.ArrayList;
 import java.util.List;
 
 /**
  * OverlayEngine — buduje FFmpeg drawtext filtry z listy TextOverlay.
- *
+ * <p>
  * FAZA 2 — serce dynamicznego tekstu.
- *
+ * <p>
  * Każdy TextOverlay z ScriptResult.overlays[] jest zamieniany na jeden
  * FFmpeg drawtext filter z:
- *   - enable='between(t, startSec, endSec)'  — timing
- *   - x, y                                   — pozycja (TOP/CENTER/BOTTOM)
- *   - fontsize, fontcolor, shadowcolor       — styl (HOOK/BODY/FACT/CTA)
- *   - alpha expression                       — animacja (FADE/SLIDE_IN/POP)
- *
+ * - enable='between(t,startSec,endSec)'    — timing
+ * - x, y                                   — pozycja (TOP/CENTER/BOTTOM)
+ * - fontsize, fontcolor, shadowcolor        — styl (HOOK/BODY/FACT/CTA)
+ * - alpha expression                        — animacja (FADE/SLIDE_IN/POP)
+ * <p>
  * Wszystkie overlay filtry są łączone w jeden filter_complex chain:
- *   [0:v]drawtext=...[v1];[v1]drawtext=...[v2];[v2]drawtext=...[vout]
- *
+ * [0:v]drawtext=...[v1];[v1]drawtext=...[v2];[v2]drawtext=...[vout]
+ * <p>
  * ANIMACJE przez FFmpeg expressions:
- *
- *   FADE:
- *     alpha='if(lt(t,startSec+fadeDur), (t-startSec)/fadeDur,
- *             if(gt(t,endSec-fadeDur), (endSec-t)/fadeDur, 1))'
- *     Fade in przez 0.3s, fade out przez 0.3s.
- *
- *   SLIDE_IN:
- *     x='if(lt(t,startSec+slideDur), W + (desired_x - W) * ((t-startSec)/slideDur), desired_x)'
- *     Wjedź z prawej strony przez 0.25s.
- *
- *   POP:
- *     Kombinacja FADE + chwilowe powiększenie (emulowane przez fontsize expression).
- *     FFmpeg nie obsługuje natywnego scale per-drawtext, więc POP = szybki FADE in 0.15s.
- *
- *   NONE:
- *     Brak animacji — tekst pojawia się natychmiast.
- *
- * UWAGA na escapowanie w FFmpeg:
- *   Dwukropki (:) w filter_complex muszą być escapowane jako \\:
- *   Apostrofy (') w wartościach muszą być escapowane jako \'
- *   Backslashe muszą być podwójnie escapowane
- *   Ta klasa obsługuje to automatycznie przez escapeText() i escapeFilter().
+ * <p>
+ * FADE:
+ * alpha='if(lt(t,startSec+fadeDur),(t-startSec)/fadeDur,
+ * if(gt(t,endSec-fadeDur),(endSec-t)/fadeDur,1))'
+ * Fade in przez 0.3s, fade out przez 0.3s.
+ * <p>
+ * SLIDE_IN:
+ * alpha jak FADE (slide robi się przez x expression — osobny).
+ * <p>
+ * POP:
+ * Szybki fade in 0.15s, bez fade out.
+ * <p>
+ * NONE:
+ * Brak animacji — tekst pojawia się natychmiast.
+ * <p>
+ * UWAGA na escapowanie:
+ * Ten plik generuje fragmenty filter_complex zapisywane do pliku
+ * (filter_complex_script). W pliku przecinki wewnątrz wyrażeń FFmpeg
+ * (between, if, lt, gt, min, max) NIE są escapowane backslashem.
+ * Backslash przed przecinkiem jest wymagany tylko w argumencie cmdline.
  */
 @Slf4j
 @Component
 public class OverlayEngine {
 
-    // Domyślne czcionki — Arial jest dostępny na Ubuntu/Linux
-    private static final String FONT_BOLD   = "Arial";
+    // Domyślne czcionki
+    private static final String FONT_BOLD = "Arial";
     private static final String FONT_REGULAR = "Arial";
 
     // Czasy animacji w sekundach
-    private static final double FADE_DURATION  = 0.3;
+    private static final double FADE_DURATION = 0.3;
     private static final double SLIDE_DURATION = 0.25;
-    private static final double POP_DURATION   = 0.15;
+    private static final double POP_DURATION = 0.15;
 
     /**
      * Buduje kompletny video filter string z listy overlays.
      *
-     * @param overlays  lista TextOverlay z ScriptResult
-     * @param inputLabel label wejściowy (np. "[0:v]" lub "[subtitled]")
+     * @param overlays    lista TextOverlay z ScriptResult
+     * @param inputLabel  label wejściowy (np. "[0:v]" lub "[worded]")
      * @param outputLabel label wyjściowy (np. "[vout]")
-     * @return filter_complex string gotowy do przekazania do FFmpeg -filter_complex
-     *         lub null jeśli overlays jest puste
+     * @return filter_complex string gotowy do pliku filter_complex_script,
+     * lub null jeśli overlays jest puste/nieprawidłowe
      */
     public String buildOverlayFilter(
             List<ScriptResult.TextOverlay> overlays,
@@ -78,7 +75,7 @@ public class OverlayEngine {
             return null;
         }
 
-        // Filtruj overlaye z nieprawidłowym timingiem
+        // Filtruj overlaye z nieprawidłowym timingiem lub pustym tekstem
         List<ScriptResult.TextOverlay> valid = overlays.stream()
                 .filter(o -> o.endMs() > o.startMs())
                 .filter(o -> o.text() != null && !o.text().isBlank())
@@ -105,7 +102,6 @@ public class OverlayEngine {
                     .append(drawtextFilter)
                     .append(currentOutput);
 
-            // Separator między filtrami (nie po ostatnim)
             if (i < valid.size() - 1) {
                 filterChain.append(";");
             }
@@ -130,18 +126,18 @@ public class OverlayEngine {
         PositionConfig position = resolvePosition(overlay, style.fontSize);
 
         double startSec = overlay.startMs() / 1000.0;
-        double endSec   = overlay.endMs()   / 1000.0;
+        double endSec = overlay.endMs() / 1000.0;
 
         StringBuilder sb = new StringBuilder();
 
-        // Tekst (musi być escapowany)
+        // Tekst — musi być prawidłowo escapowany
         sb.append("text='").append(escapeText(overlay.text())).append("':");
 
         // Font
         sb.append("font='").append(overlay.bold() ? FONT_BOLD : FONT_REGULAR).append("':");
         sb.append("fontsize=").append(style.fontSize).append(":");
 
-        // Kolory + outline (tekst zawsze widoczny na każdym tle)
+        // Kolory + outline
         sb.append("fontcolor=").append(style.fontColor).append(":");
         sb.append("bordercolor=").append(style.borderColor).append(":");
         sb.append("borderw=").append(style.borderWidth).append(":");
@@ -152,10 +148,10 @@ public class OverlayEngine {
         sb.append("x=").append(position.x).append(":");
         sb.append("y=").append(position.y).append(":");
 
-        // Timing — kiedy overlay jest widoczny
+        // Timing — zwykłe przecinki (plik, nie cmdline)
         sb.append("enable='between(t,").append(f(startSec)).append(",").append(f(endSec)).append(")':");
 
-        // Animacja — alpha expression
+        // Animacja — alpha expression (zwykłe przecinki)
         String alphaExpr = buildAlphaExpression(overlay.animation(), startSec, endSec);
         sb.append("alpha='").append(alphaExpr).append("'");
 
@@ -171,30 +167,30 @@ public class OverlayEngine {
             String fontColor,
             String borderColor,
             int borderWidth
-    ) {}
+    ) {
+    }
 
     private StyleConfig resolveStyle(ScriptResult.TextOverlay overlay) {
-        // Użyj fontSize z overlay jeśli jest ustawiony (GPT-4o decyduje)
         int fs = overlay.fontSize() > 0 ? overlay.fontSize() : defaultFontSize(overlay.style());
 
         return switch (overlay.style() != null ? overlay.style().toUpperCase() : "BODY") {
             case "HOOK" -> new StyleConfig(fs, "white", "black", 4);
-            case "CTA"  -> new StyleConfig(fs, "#FFD700", "black", 4); // złoty CTA
+            case "CTA" -> new StyleConfig(fs, "0xFFD700", "black", 4);
             case "FACT" -> new StyleConfig(fs, "white@0.9", "black", 3);
             case "LIST_ITEM" -> new StyleConfig(fs, "white", "black", 4);
-            default          -> new StyleConfig(fs, "white", "black", 3); // BODY
+            default -> new StyleConfig(fs, "white", "black", 3); // BODY, WATERMARK
         };
     }
 
     private int defaultFontSize(String style) {
         if (style == null) return 36;
         return switch (style.toUpperCase()) {
-            case "HOOK"      -> 52;
-            case "CTA"       -> 44;
+            case "HOOK" -> 52;
+            case "CTA" -> 44;
             case "LIST_ITEM" -> 38;
-            case "BODY"      -> 36;
-            case "FACT"      -> 26;
-            default          -> 36;
+            case "BODY" -> 36;
+            case "FACT" -> 26;
+            default -> 36;
         };
     }
 
@@ -202,32 +198,32 @@ public class OverlayEngine {
     // POSITION CONFIG
     // =========================================================================
 
-    private record PositionConfig(String x, String y) {}
+    private record PositionConfig(String x, String y) {
+    }
 
     /**
      * Oblicza pozycję X, Y dla drawtext.
-     *
+     * <p>
      * FFmpeg drawtext expressions:
-     *   W = szerokość wideo (1080)
-     *   H = wysokość wideo (1920)
-     *   tw = text width (automatycznie wyliczone przez FFmpeg)
-     *   th = text height
-     *
+     * W  = szerokość wideo
+     * H  = wysokość wideo
+     * tw = text width (wyliczone automatycznie przez FFmpeg)
+     * th = text height
+     * <p>
      * Centrowanie X: x=(W-tw)/2
      * TOP:    y = H * 0.10
      * CENTER: y = (H-th)/2
      * BOTTOM: y = H * 0.80
      */
     private PositionConfig resolvePosition(ScriptResult.TextOverlay overlay, int fontSize) {
-        // X: zawsze wyśrodkowany + marginesy boczne (tekst nie wychodzi za ekran)
         String x = "(W-tw)/2";
 
-        // Y: zależy od position
         String y = switch (overlay.position() != null ? overlay.position().toUpperCase() : "CENTER") {
-            case "TOP"    -> "(H*0.10)";
+            case "TOP" -> "(H*0.10)";
+            case "TOP_RIGHT" -> "(H*0.05)";   // watermark — blisko górnej krawędzi
             case "CENTER" -> "((H-th)/2)";
             case "BOTTOM" -> "(H*0.80)";
-            default       -> "((H-th)/2)";
+            default -> "((H-th)/2)";
         };
 
         return new PositionConfig(x, y);
@@ -239,11 +235,13 @@ public class OverlayEngine {
 
     /**
      * Buduje FFmpeg alpha expression dla animacji.
-     *
-     * FADE:     fade in przez FADE_DURATION + fade out przez FADE_DURATION
-     * SLIDE_IN: alpha jak FADE (slide robi się przez x expression — osobny)
-     * POP:      szybki fade in POP_DURATION, natychmiastowy fade out
-     * NONE:     stały alpha=1
+     * <p>
+     * Zwykłe przecinki — wyrażenie trafia do pliku filter_complex_script,
+     * nie do argumentu cmdline.
+     * <p>
+     * FADE / SLIDE_IN : fade in przez FADE_DURATION + fade out przez FADE_DURATION
+     * POP             : szybki fade in POP_DURATION, bez fade out
+     * NONE / default  : stały alpha=1
      */
     private String buildAlphaExpression(String animation, double startSec, double endSec) {
         if (animation == null) return "1";
@@ -253,20 +251,22 @@ public class OverlayEngine {
         return switch (animation.toUpperCase()) {
             case "FADE", "SLIDE_IN" -> {
                 double fadeDur = Math.min(FADE_DURATION, duration * 0.3);
+                // Zwykłe przecinki w if/lt/gt/min/max — jesteśmy w pliku
                 yield String.format(
+                        java.util.Locale.US,
                         "if(lt(t,%s),min(1,(t-%s)/%s),if(gt(t,%s),max(0,(%s-t)/%s),1))",
-                        f(startSec + fadeDur),  // przed fade-in końcem
-                        f(startSec),            // fade in start
-                        f(fadeDur),             // fade in duration
-                        f(endSec - fadeDur),    // fade out start
-                        f(endSec),              // fade out end
-                        f(fadeDur)              // fade out duration
+                        f(startSec + fadeDur),
+                        f(startSec),
+                        f(fadeDur),
+                        f(endSec - fadeDur),
+                        f(endSec),
+                        f(fadeDur)
                 );
             }
             case "POP" -> {
                 double popDur = Math.min(POP_DURATION, duration * 0.2);
-                // Szybki fade in, bez fade out
                 yield String.format(
+                        java.util.Locale.US,
                         "if(lt(t,%s),min(1,(t-%s)/%s),1)",
                         f(startSec + popDur),
                         f(startSec),
@@ -283,27 +283,30 @@ public class OverlayEngine {
 
     /**
      * Escapuje tekst dla FFmpeg drawtext.
-     *
-     * FFmpeg drawtext wymaga:
-     *   ' → \'   (apostrofy w tekście)
-     *   : → \:   (dwukropki w tekście)
-     *   \ → \\   (backslashe)
-     *   % → %%   (znaki procentu — inaczej traktowane jako format)
-     *   # → nie wymaga escapowania
-     *
-     * Kolejność ważna: najpierw backslashe, potem reszta.
+     * <p>
+     * Kolejność escapowania jest istotna — backslashe najpierw,
+     * żeby nie podwójnie escapować znaków dodanych w kolejnych krokach.
+     * <p>
+     * \  → \\   backslash (musi być pierwszy)
+     * '  → \'   apostrof — zamknąłby string text='...' przedwcześnie
+     * :  → \:   dwukropek — separator opcji drawtext
+     * %  → %%   procent — znak formatowania drawtext
      */
     private String escapeText(String text) {
         if (text == null) return "";
         return text
                 .replace("\\", "\\\\")
-                .replace("'", "’")
+                .replace("'",  "''")     // FIX: było replace("'", "'") — brak ucieczki!
                 .replace(":", "\\:")
                 .replace("%", "%%");
     }
 
-    /** Formatuje double do 3 miejsc po przecinku (dla FFmpeg expressions) */
+    /**
+     * Formatuje double do 3 miejsc po przecinku dla FFmpeg expressions.
+     * Locale.US gwarantuje kropkę dziesiętną (nie przecinek) niezależnie
+     * od ustawień systemowych — KLUCZOWE na Windows z polskim locale.
+     */
     private String f(double value) {
-        return String.format("%.3f", value);
+        return String.format(java.util.Locale.US, "%.3f", value);
     }
 }
