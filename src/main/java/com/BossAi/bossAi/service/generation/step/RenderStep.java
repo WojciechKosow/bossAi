@@ -29,41 +29,24 @@ import java.util.UUID;
 import java.util.stream.Collectors;
 
 /**
- * RenderStep v2 — scala wszystkie assety z dynamicznymi tekstowymi overlayami.
+ * RenderStep v3 — word-by-word subtitles + dynamic music volume.
  *
- * FAZA 2 zmiany:
+ * FAZA 3 zmiany:
  *
- *   1. Integracja OverlayEngine — dynamiczny tekst FFmpeg drawtext zsynchronizowany
- *      z TTS. Nie jest to tekst "przyklejony" do obrazu (jak w ImageStep), ale
- *      nakładka dodana przez FFmpeg w finalnym render passie.
+ *   1. Word-by-word subtitles — zamiast SRT burn-in, każde słowo narracji
+ *      jest osobnym FFmpeg drawtext z enable='between(t, start, end)'.
+ *      Słowa pojawiają się jedno po drugim synchronicznie z TTS.
+ *      Fallback: jeśli word-by-word zawiedzie, SRT burn-in (jak v2).
  *
- *   2. filter_complex pipeline v2:
- *      [0:v] → subtitles → overlays → [vout]
- *      Kolejność ważna: subtitles (SRT) najpierw, potem overlays (TextOverlay).
- *      Dzięki temu SRT jest "pod" overlayami — nie zakrywa hook/CTA tekstu.
+ *   2. Dynamic music volume — zamiast stałego volume=0.25, muzyka zmienia
+ *      głośność per scena na podstawie musicDirections z ScriptResult.
+ *      GPT-4o decyduje o głośności: narrator mówi → ciszej, pauzy → głośniej.
  *
- *   3. Obsługa braku overlays — fallback do samych SRT subtitles (jak v1).
- *
- *   4. Logowanie overlay count dla debugowania.
- *
- * Filter complex pipeline (pełny):
- *
- *   Z muzyką + overlays:
- *     [1:a]volume=1.0[voice];
- *     [2:a]volume=0.25[music];
- *     [voice][music]amix=inputs=2:duration=first[audio];
- *     [0:v]subtitles='sub.srt':force_style='...'[subtitled];
- *     [subtitled]drawtext=text='HOOK'...[ov0];
- *     [ov0]drawtext=text='#1 ChatGPT'...[ov1];
- *     [ov1]drawtext=text='Follow!'...[vout]
- *
- *   Bez muzyki, bez overlays (fallback):
- *     [0:v]subtitles='sub.srt':force_style='...'[vout]
- *
- *   Bez muzyki, z overlays:
- *     [0:v]subtitles='sub.srt'...[subtitled];
- *     [subtitled]drawtext=...[ov0];
- *     [ov0]drawtext=...[vout]
+ *   3. Filter complex pipeline v3:
+ *      [0:v] → word drawtext chain → overlay chain → [vout]
+ *      [1:a]volume=1.0[voice]
+ *      [2:a]volume='..dynamic expression..'[music]
+ *      [voice][music]amix[audio]
  */
 @Slf4j
 @Service
@@ -75,6 +58,14 @@ public class RenderStep implements GenerationStep {
     private final StorageService storageService;
     private final AssetService assetService;
     private final OverlayEngine overlayEngine;
+
+    // Word-by-word subtitle config
+    private static final int WORD_FONT_SIZE = 28;
+    private static final String WORD_FONT_COLOR = "white";
+    private static final String WORD_BORDER_COLOR = "black";
+    private static final int WORD_BORDER_WIDTH = 3;
+    private static final String WORD_FONT = "Arial";
+    private static final double WORD_FADE_IN = 0.08;  // 80ms pop-in
 
     @Override
     public void execute(GenerationContext context) throws Exception {
@@ -94,17 +85,16 @@ public class RenderStep implements GenerationStep {
         Path workDir = getWorkingDir(context);
         Files.createDirectories(workDir);
 
-        // Faza 1 — concat klipów (sekwencyjnie — z Fazy 1 bugfix)
+        // Faza 1 — concat klipów
         List<Path> clips      = buildClipsSequential(context, workDir);
         Path concatFile       = writeConcatFile(clips, workDir);
         Path concatOutput     = workDir.resolve("temp_concat.mp4");
         runConcat(concatFile, concatOutput);
         log.info("[RenderStep] Concat DONE → {} klipów", clips.size());
 
-        // Faza 2 + 3 + 4 — audio + subtitles + overlays + watermark → final.mp4
-        Path subtitleFile = writeSubtitleFile(context, workDir);
-        Path finalOutput  = workDir.resolve("final.mp4");
-        runFinalRender(concatOutput, subtitleFile, context, finalOutput);
+        // Faza 2+3+4 — word-by-word subtitles + overlays + dynamic audio → final.mp4
+        Path finalOutput = workDir.resolve("final.mp4");
+        runFinalRender(concatOutput, context, workDir, finalOutput);
         log.info("[RenderStep] Final render DONE → {}", finalOutput);
 
         // Zapisz
@@ -125,14 +115,14 @@ public class RenderStep implements GenerationStep {
         context.setFinalVideoLocalPath(finalOutput.toString());
         context.setFinalVideoUrl(finalUrl);
 
-        log.info("[RenderStep] DONE — finalUrl: {}, size: {:.2f} MB",
-                finalUrl, videoBytes.length / 1_048_576.0);
+        log.info("[RenderStep] DONE — finalUrl: {}, size: {} bytes",
+                finalUrl, videoBytes.length);
 
         cleanup(concatOutput, concatFile);
     }
 
     // =========================================================================
-    // CLIPS BUILDING — sekwencyjnie (Faza 1 bugfix zachowany)
+    // CLIPS BUILDING
     // =========================================================================
 
     private List<Path> buildClipsSequential(GenerationContext context, Path workDir) throws Exception {
@@ -177,25 +167,31 @@ public class RenderStep implements GenerationStep {
     }
 
     // =========================================================================
-    // FINAL RENDER — z overlay engine
+    // FINAL RENDER — word-by-word + overlays + dynamic audio
     // =========================================================================
-
-    private Path writeSubtitleFile(GenerationContext context, Path workDir) throws Exception {
-        String srtContent = subtitleService.generateSrt(context.getScript(), 0);
-        Path srtFile = workDir.resolve("subtitles.srt");
-        Files.writeString(srtFile, srtContent);
-        return srtFile;
-    }
 
     private void runFinalRender(
             Path concatVideo,
-            Path subtitleFile,
             GenerationContext context,
+            Path workDir,
             Path output
     ) throws Exception {
         FfmpegProperties.Output cfg = ffmpegProperties.getOutput();
         boolean hasMusic    = context.getMusicLocalPath() != null;
         boolean hasOverlays = hasOverlays(context);
+
+        // Generuj word-by-word timings
+        List<SubtitleService.WordTiming> wordTimings = subtitleService.generateWordTimings(context.getScript());
+        boolean useWordByWord = !wordTimings.isEmpty();
+
+        // Fallback: SRT file jeśli word-by-word nie zadziałał
+        Path srtFile = null;
+        if (!useWordByWord) {
+            log.warn("[RenderStep] Word-by-word puste — fallback do SRT");
+            String srtContent = subtitleService.generateSrt(context.getScript(), 0);
+            srtFile = workDir.resolve("subtitles.srt");
+            Files.writeString(srtFile, srtContent);
+        }
 
         List<String> cmd = new ArrayList<>();
         cmd.add(ffmpegProperties.getBinary().getPath());
@@ -206,8 +202,9 @@ public class RenderStep implements GenerationStep {
             cmd.addAll(List.of("-i", context.getMusicLocalPath()));
         }
 
-        // Buduj filter_complex — subtitles + overlays (+ audio jeśli muzyka)
-        String filterComplex = buildFilterComplex(subtitleFile, context, hasMusic, hasOverlays);
+        // Buduj filter_complex
+        String filterComplex = buildFilterComplex(
+                context, hasMusic, hasOverlays, useWordByWord, wordTimings, srtFile);
         cmd.addAll(List.of("-filter_complex", filterComplex));
 
         // Map
@@ -230,67 +227,240 @@ public class RenderStep implements GenerationStep {
     }
 
     /**
-     * Buduje kompletny filter_complex string.
+     * Buduje kompletny filter_complex:
      *
-     * Struktura:
-     *   1. Audio mix (jeśli muzyka)
-     *   2. Subtitles filter → [subtitled]
-     *   3. Overlay chain (jeśli overlays) → [vout]
-     *      Jeśli brak overlays → subtitles output = [vout]
-     *   4. Watermark (jeśli enabled) → dodany jako ostatni overlay
+     *   1. Audio: voice + dynamic music volume (jeśli muzyka)
+     *   2. Video: word-by-word drawtext chain (lub SRT fallback)
+     *   3. Video: overlay chain (jeśli overlays)
      */
     private String buildFilterComplex(
-            Path subtitleFile,
             GenerationContext context,
             boolean hasMusic,
-            boolean hasOverlays
+            boolean hasOverlays,
+            boolean useWordByWord,
+            List<SubtitleService.WordTiming> wordTimings,
+            Path srtFile
     ) {
         StringBuilder fc = new StringBuilder();
 
-        // Audio mix
+        // === AUDIO ===
         if (hasMusic) {
             fc.append("[1:a]volume=1.0[voice];");
-            fc.append("[2:a]volume=0.25[music];");
+            String musicVolumeFilter = buildDynamicMusicVolume(context);
+            fc.append("[2:a]").append(musicVolumeFilter).append("[music];");
             fc.append("[voice][music]amix=inputs=2:duration=first:dropout_transition=2[audio];");
         }
 
-        // Subtitles — output label zależy od tego czy są overlays po nim
-        String afterSubtitlesLabel = hasOverlays ? "[subtitled]" : "[vout]";
-        String subtitleFilter = buildSubtitleFilter(subtitleFile, context, "[0:v]", afterSubtitlesLabel);
-        fc.append(subtitleFilter);
+        // === VIDEO: word-by-word subtitles lub SRT fallback ===
+        if (useWordByWord) {
+            // Word-by-word → chain drawtext filters
+            String afterWordsLabel = hasOverlays ? "[worded]" : "[vout]";
+            String wordChain = buildWordByWordFilter(wordTimings, "[0:v]", afterWordsLabel);
+            fc.append(wordChain);
+        } else if (srtFile != null) {
+            // SRT fallback
+            String afterSrtLabel = hasOverlays ? "[subtitled]" : "[vout]";
+            fc.append(buildSrtFilter(srtFile, "[0:v]", afterSrtLabel));
+        } else {
+            // Brak napisów — video przechodzi dalej
+            if (hasOverlays) {
+                // Potrzebujemy label — kopiuj input
+                fc.append("[0:v]null[subtitled];");
+            }
+        }
 
-        // Overlays (jeśli są)
+        // === VIDEO: overlays ===
         if (hasOverlays) {
             List<ScriptResult.TextOverlay> overlays = getOverlaysWithWatermark(context);
-            String overlayFilter = overlayEngine.buildOverlayFilter(overlays, "[subtitled]", "[vout]");
+            String inputLabel = useWordByWord ? "[worded]" : "[subtitled]";
+            String overlayFilter = overlayEngine.buildOverlayFilter(overlays, inputLabel, "[vout]");
 
             if (overlayFilter != null) {
                 fc.append(";");
                 fc.append(overlayFilter);
             } else {
-                // Fallback — jeśli OverlayEngine zwrócił null, relabeluj subtitled → vout
-                // (To nie powinno się zdarzyć, ale zabezpieczamy się)
-                log.warn("[RenderStep] OverlayEngine zwrócił null — brak overlays w finalnym filmie");
-                // Zastąp [subtitled] → [vout] w już zbudowanym stringu
-                return fc.toString().replace("[subtitled]", "[vout]");
+                log.warn("[RenderStep] OverlayEngine zwrócił null — relabel do [vout]");
+                String currentFc = fc.toString();
+                String fromLabel = useWordByWord ? "[worded]" : "[subtitled]";
+                return currentFc.replace(fromLabel, "[vout]");
             }
         }
 
         return fc.toString();
     }
 
+    // =========================================================================
+    // WORD-BY-WORD DRAWTEXT CHAIN
+    // =========================================================================
+
     /**
-     * Buduje subtitles filter (SRT burn-in).
-     * Subtitles są zawsze — to jest fallback gdy overlays się nie wyrenderują.
-     * Pozycja: BOTTOM CENTER (nie zakrywa hook overlay który jest CENTER/TOP).
+     * Buduje chain drawtext filtrów — jedno słowo = jeden drawtext.
+     *
+     * Każde słowo:
+     *   drawtext=text='word':fontsize=28:fontcolor=white:bordercolor=black:borderw=3:
+     *   x=(W-tw)/2:y=(H*0.82):
+     *   enable='between(t,startSec,endSec)':
+     *   alpha='if(lt(t,startSec+0.08),min(1,(t-startSec)/0.08),1)'
+     *
+     * Pozycja: BOTTOM CENTER (y=82% — nad przyciskami UI TikToka)
+     * Animacja: szybki pop-in (80ms fade), brak fade-out (ostre cięcie → następne słowo)
      */
-    private String buildSubtitleFilter(Path subtitleFile, GenerationContext context,
-                                       String input, String output) {
+    private String buildWordByWordFilter(
+            List<SubtitleService.WordTiming> words,
+            String inputLabel,
+            String outputLabel
+    ) {
+        if (words.isEmpty()) return "";
+
+        StringBuilder chain = new StringBuilder();
+        String currentInput = inputLabel;
+
+        for (int i = 0; i < words.size(); i++) {
+            SubtitleService.WordTiming wt = words.get(i);
+            String currentOutput = (i == words.size() - 1) ? outputLabel : "[w" + i + "]";
+
+            double startSec = wt.startMs() / 1000.0;
+            double endSec = wt.endMs() / 1000.0;
+
+            String escapedWord = escapeDrawtext(wt.word());
+
+            // Pop-in alpha: szybki fade 80ms, potem stały
+            String alpha = String.format(
+                    "if(lt(t\\,%s)\\,min(1\\,(t-%s)/%s)\\,1)",
+                    f(startSec + WORD_FADE_IN), f(startSec), f(WORD_FADE_IN)
+            );
+
+            chain.append(currentInput)
+                    .append("drawtext=")
+                    .append("text='").append(escapedWord).append("':")
+                    .append("font='").append(WORD_FONT).append("':")
+                    .append("fontsize=").append(WORD_FONT_SIZE).append(":")
+                    .append("fontcolor=").append(WORD_FONT_COLOR).append(":")
+                    .append("bordercolor=").append(WORD_BORDER_COLOR).append(":")
+                    .append("borderw=").append(WORD_BORDER_WIDTH).append(":")
+                    .append("shadowcolor=black@0.6:shadowx=2:shadowy=2:")
+                    .append("x=(W-tw)/2:")
+                    .append("y=(H*0.82):")
+                    .append("enable='between(t\\,").append(f(startSec)).append("\\,").append(f(endSec)).append(")':") 
+                    .append("alpha='").append(alpha).append("'")
+                    .append(currentOutput);
+
+            if (i < words.size() - 1) {
+                chain.append(";");
+            }
+
+            currentInput = currentOutput;
+        }
+
+        log.info("[RenderStep] Word-by-word filter: {} drawtext nodes, {} chars",
+                words.size(), chain.length());
+
+        return chain.toString();
+    }
+
+    // =========================================================================
+    // DYNAMIC MUSIC VOLUME
+    // =========================================================================
+
+    /**
+     * Buduje FFmpeg volume filter z dynamiczną głośnością per scena.
+     *
+     * Jeśli musicDirections dostępne:
+     *   volume='if(between(t,0,3),0.45, if(between(t,3,8),0.12, ...))'
+     *
+     * Jeśli brak musicDirections:
+     *   volume=0.25 (stała głośność jak dotychczas)
+     */
+    private String buildDynamicMusicVolume(GenerationContext context) {
+        List<ScriptResult.MusicDirection> directions = context.getScript().musicDirections();
+
+        if (directions == null || directions.isEmpty()) {
+            log.info("[RenderStep] Brak musicDirections — stały volume=0.25");
+            return "volume=0.25";
+        }
+
+        // Oblicz czasy startu/końca per scena
+        List<ScriptResult.SceneScript> scenes = context.getScript().scenes();
+        int[] sceneStartMs = new int[scenes.size()];
+        int currentMs = 0;
+        for (int i = 0; i < scenes.size(); i++) {
+            sceneStartMs[i] = currentMs;
+            currentMs += scenes.get(i).durationMs();
+        }
+
+        // Buduj nested if expression
+        StringBuilder expr = new StringBuilder("volume='");
+        for (int i = 0; i < directions.size(); i++) {
+            ScriptResult.MusicDirection dir = directions.get(i);
+            int idx = dir.sceneIndex();
+
+            if (idx < 0 || idx >= scenes.size()) continue;
+
+            double startSec = sceneStartMs[idx] / 1000.0;
+            double endSec = (sceneStartMs[idx] + scenes.get(idx).durationMs()) / 1000.0;
+            double vol = Math.max(0.0, Math.min(1.0, dir.volume()));
+
+            // Obsługa fade in/out w obrębie sceny
+            if (dir.fadeInMs() > 0 || dir.fadeOutMs() > 0) {
+                double fadeInSec = dir.fadeInMs() / 1000.0;
+                double fadeOutSec = dir.fadeOutMs() / 1000.0;
+
+                // volume ramps: fade in → steady → fade out
+                // Używamy prostego if/between z linear interpolation
+                expr.append("if(between(t,").append(f(startSec)).append(",").append(f(endSec)).append("),");
+
+                if (fadeInSec > 0 && fadeOutSec > 0) {
+                    // fade in + fade out
+                    expr.append("if(lt(t,").append(f(startSec + fadeInSec)).append("),")
+                            .append(f(vol)).append("*(t-").append(f(startSec)).append(")/").append(f(fadeInSec))
+                            .append(",if(gt(t,").append(f(endSec - fadeOutSec)).append("),")
+                            .append(f(vol)).append("*(").append(f(endSec)).append("-t)/").append(f(fadeOutSec))
+                            .append(",").append(f(vol)).append("))");
+                } else if (fadeInSec > 0) {
+                    // fade in only
+                    expr.append("if(lt(t,").append(f(startSec + fadeInSec)).append("),")
+                            .append(f(vol)).append("*(t-").append(f(startSec)).append(")/").append(f(fadeInSec))
+                            .append(",").append(f(vol)).append(")");
+                } else {
+                    // fade out only
+                    expr.append("if(gt(t,").append(f(endSec - fadeOutSec)).append("),")
+                            .append(f(vol)).append("*(").append(f(endSec)).append("-t)/").append(f(fadeOutSec))
+                            .append(",").append(f(vol)).append(")");
+                }
+
+                expr.append(",");
+            } else {
+                // Stały volume dla tej sceny
+                expr.append("if(between(t,").append(f(startSec)).append(",").append(f(endSec)).append("),")
+                        .append(f(vol)).append(",");
+            }
+        }
+
+        // Default volume dla segmentów bez musicDirection
+        expr.append("0.20");
+
+        // Zamknij wszystkie if-y
+        for (int i = 0; i < directions.size(); i++) {
+            expr.append(")");
+        }
+
+        expr.append("'");
+
+        log.info("[RenderStep] Dynamic music volume: {} directions, expr length: {}",
+                directions.size(), expr.length());
+
+        return expr.toString();
+    }
+
+    // =========================================================================
+    // SRT FALLBACK
+    // =========================================================================
+
+    private String buildSrtFilter(Path subtitleFile, String input, String output) {
         String escapedSrt = subtitleFile.toString()
                 .replace("\\", "/")
                 .replace(":", "\\:");
 
-        // Mały font dla SRT — nie konkuruje z dużymi overlay tekstami
         String subtitleStyle =
                 "FontName=Arial," +
                         "FontSize=16," +
@@ -299,17 +469,18 @@ public class RenderStep implements GenerationStep {
                         "OutlineColour=&H00000000," +
                         "Outline=2," +
                         "Shadow=1," +
-                        "Alignment=2," +    // bottom center
-                        "MarginV=40";       // margines od dołu — nie zakrywa przycisków UI
+                        "Alignment=2," +
+                        "MarginV=40";
 
         return input + "subtitles='" + escapedSrt + "'"
                 + ":force_style='" + subtitleStyle + "'"
                 + output;
     }
 
-    /**
-     * Zwraca listę overlays + opcjonalny watermark jako ostatni overlay.
-     */
+    // =========================================================================
+    // OVERLAYS + WATERMARK
+    // =========================================================================
+
     private List<ScriptResult.TextOverlay> getOverlaysWithWatermark(GenerationContext context) {
         List<ScriptResult.TextOverlay> overlays = new ArrayList<>();
 
@@ -317,14 +488,13 @@ public class RenderStep implements GenerationStep {
             overlays.addAll(context.getScript().overlays());
         }
 
-        // Watermark jako TextOverlay przez cały czas trwania
         if (context.isWatermarkEnabled()) {
             overlays.add(new ScriptResult.TextOverlay(
                     "BossAI",
                     0,
                     context.getScript().totalDurationMs(),
-                    "TOP_RIGHT",   // specjalna pozycja — OverlayEngine obsługuje
-                    "WATERMARK",   // specjalny styl — OverlayEngine obsługuje
+                    "TOP_RIGHT",
+                    "WATERMARK",
                     "NONE",
                     24,
                     false
@@ -439,6 +609,23 @@ public class RenderStep implements GenerationStep {
             try { Files.deleteIfExists(path); }
             catch (Exception e) { log.warn("[RenderStep] Cleanup failed: {}", path); }
         }
+    }
+
+    /**
+     * Escapuje tekst dla FFmpeg drawtext (wewnątrz filter_complex).
+     * W filter_complex przecinki i backslashe mają specjalne znaczenie.
+     */
+    private String escapeDrawtext(String text) {
+        if (text == null) return "";
+        return text
+                .replace("\\", "\\\\")
+                .replace("'", "\\'")
+                .replace(":", "\\:")
+                .replace("%", "%%");
+    }
+
+    private String f(double value) {
+        return String.format("%.3f", value);
     }
 
     private void runCommand(List<String> cmd, String phase) throws Exception {
