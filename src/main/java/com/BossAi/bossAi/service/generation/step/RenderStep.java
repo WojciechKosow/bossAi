@@ -60,10 +60,10 @@ public class RenderStep implements GenerationStep {
     private final OverlayEngine overlayEngine;
 
     // Word-by-word subtitle config
-    private static final int WORD_FONT_SIZE = 28;
+    private static final int WORD_FONT_SIZE = 48;
     private static final String WORD_FONT_COLOR = "white";
     private static final String WORD_BORDER_COLOR = "black";
-    private static final int WORD_BORDER_WIDTH = 3;
+    private static final int WORD_BORDER_WIDTH = 4;
     private static final String WORD_FONT = "Arial";
     private static final double WORD_FADE_IN = 0.08;  // 80ms pop-in
 

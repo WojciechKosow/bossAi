@@ -136,16 +136,16 @@ public class OpenAiService {
 
         CONTENT TYPE: ADVERTISEMENT
         MANDATORY STRUCTURE:
-          Scene 0 [VIDEO, 3-4s]: PATTERN INTERRUPT \u2014 shocking/unexpected/controversial hook.
+          Scene 0 [VIDEO, 5s]: PATTERN INTERRUPT \u2014 shocking/unexpected/controversial hook.
             Image: product hero shot or problem visualization.
             Overlay HOOK: bold claim or question. Animation: POP.
-          Scene 1 [IMAGE, 4-6s]: AMPLIFY THE PAIN \u2014 make them feel the problem deeply.
+          Scene 1 [IMAGE, 5-7s]: AMPLIFY THE PAIN \u2014 make them feel the problem deeply.
             Image: person experiencing the problem.
             Overlay BODY: pain point statement. Animation: SLIDE_IN.
-          Scene 2 [IMAGE, 4-6s]: THE REVEAL \u2014 product as the obvious solution.
+          Scene 2 [IMAGE, 5-7s]: THE REVEAL \u2014 product as the obvious solution.
             Image: product in use, transformation.
             Overlay BODY: benefit statement. Animation: FADE.
-          Scene 3 [VIDEO, 3-4s]: SOCIAL PROOF + CTA \u2014 urgency, scarcity, action.
+          Scene 3 [VIDEO, 5s]: SOCIAL PROOF + CTA \u2014 urgency, scarcity, action.
             Image: happy customer or product result.
             Overlay CTA: "Shop now \u2014 link in bio". Animation: POP.
 
@@ -155,7 +155,8 @@ public class OpenAiService {
         - "[number] people are doing this wrong"
         - "This [product] changed everything"
         - "Tired of [pain]?"
-        Total duration: 15-30 seconds.
+        Total duration: 20-35 seconds.
+        VIDEO scenes MUST have durationMs=5000 (Kling API minimum is 5 seconds).
         """;
 
     private static final String EDUCATIONAL_STRUCTURE = """
@@ -171,14 +172,14 @@ public class OpenAiService {
         - Narration tone: "Okay so listen..." / "Here's the thing..." / "Most people don't know this but..."
 
         MANDATORY STRUCTURE:
-          Scene 0 [VIDEO, 3-4s]: HOOK \u2014 the scroll-stopper.
+          Scene 0 [VIDEO, 5s, durationMs=5000]: HOOK \u2014 the scroll-stopper.
             - Must create CURIOSITY GAP \u2014 viewer NEEDS to keep watching
             - Narration: 1 punchy sentence, max 8 words spoken
             - Overlay HOOK: bold topic title (e.g. "5 AI TOOLS YOU NEED"), CENTER, POP
             - Image: visually striking, related to topic, bold colors
             - Music: volume 0.40-0.50 (louder, energy), fadeOutMs 400
 
-          Scenes 1..N-1 [IMAGE, 5-8s each]: LIST ITEMS \u2014 one item per scene.
+          Scenes 1..N-1 [IMAGE, 6-8s each, durationMs=6000-8000]: LIST ITEMS \u2014 one item per scene.
             - Each scene = ONE point/item/fact
             - Narration: explain the item conversationally (2-3 short sentences)
             - subtitleText: EXACT words narrator says (will appear word-by-word)
@@ -191,7 +192,7 @@ public class OpenAiService {
             - Image: clear visual of the item (product screenshot, concept illustration, etc.)
             - Music: volume 0.10-0.15 (quiet, narrator is king), fadeInMs 200
 
-          Last scene [VIDEO, 4-5s]: SUMMARY + CTA
+          Last scene [VIDEO, 5s, durationMs=5000]: SUMMARY + CTA
             - Narration: quick recap + call to action ("Follow for more" / "Save this for later")
             - Overlay CTA: action text, CENTER, POP, fontSize 44, gold color
             - Image: energetic, positive, forward-looking
@@ -216,31 +217,40 @@ public class OpenAiService {
         - NO filler words, NO "um", NO "so basically" \u2014 every word earns its place
         - subtitleText per scene = EXACT narration for that scene (for word-by-word display)
 
-        Total duration: 35-75 seconds (5-8s per item + 3-4s hook + 4-5s outro).
+        Total duration: 40-75 seconds (6-8s per item + 5s hook + 5s outro).
+
+        CRITICAL RULES:
+        - VIDEO scenes (scene 0 and last scene) MUST have durationMs=5000 (API minimum is 5 seconds)
+        - You MUST generate exactly N+2 scenes. "Top 5" = 7 scenes, "3 tips" = 5 scenes, etc.
+        - If user doesn't specify N, default to 5 items = 7 scenes total
+        - NEVER generate fewer than 5 scenes for educational content
+        - mediaAssignments MUST have scene 0 as VIDEO, last scene as VIDEO, all others as IMAGE
         """;
 
     private static final String STORY_STRUCTURE = """
 
         CONTENT TYPE: STORY / NARRATIVE
         MANDATORY STRUCTURE:
-          Scene 0 [VIDEO, 3-4s]: HOOK \u2014 most dramatic/interesting moment (start in medias res).
+          Scene 0 [VIDEO, 5s, durationMs=5000]: HOOK \u2014 most dramatic/interesting moment (start in medias res).
           Scene 1 [IMAGE, 5-7s]: SETUP \u2014 context and character.
           Scenes 2..N-2 [IMAGE, 5-8s]: RISING ACTION \u2014 build tension, each scene escalates.
-          Scene N-1 [VIDEO, 4-5s]: CLIMAX + RESOLUTION \u2014 payoff + lesson learned.
+          Scene N-1 [VIDEO, 5s, durationMs=5000]: CLIMAX + RESOLUTION \u2014 payoff + lesson learned.
           Overlay style: minimal \u2014 only key emotional beats as FACT overlays.
         Total duration: 30-60 seconds.
+        VIDEO scenes MUST have durationMs=5000 (API minimum is 5 seconds).
         """;
 
     private static final String VIRAL_STRUCTURE = """
 
         CONTENT TYPE: VIRAL EDIT
         MANDATORY STRUCTURE:
-          Scene 0 [VIDEO, 2-3s]: ULTRA-FAST HOOK \u2014 most visually striking moment.
+          Scene 0 [VIDEO, 5s, durationMs=5000]: ULTRA-FAST HOOK \u2014 most visually striking moment.
             Overlay HOOK: 1-3 words max, massive font. Animation: POP.
           Scenes 1..N-2 [IMAGE, 2-4s each]: RAPID CONTENT \u2014 fast-paced facts or moments.
             Short FACT overlays, rhythm matches the beat.
-          Last scene [VIDEO, 2-3s]: LOOP-FRIENDLY OUTRO \u2014 ends where it could restart.
-        Total duration: 15-30 seconds. Fast pacing. Every scene under 4 seconds.
+          Last scene [VIDEO, 5s, durationMs=5000]: LOOP-FRIENDLY OUTRO \u2014 ends where it could restart.
+        Total duration: 15-30 seconds. Fast pacing.
+        VIDEO scenes MUST have durationMs=5000 (API minimum is 5 seconds).
         """;
 
     // =========================================================================
@@ -457,9 +467,24 @@ public class OpenAiService {
             if (scene.imagePrompt() == null || scene.imagePrompt().isBlank()) {
                 throw new RuntimeException("ScriptResult: scena " + scene.index() + " bez imagePrompt");
             }
-            if (scene.durationMs() < 1000) {
+            if (scene.durationMs() < 2000) {
                 throw new RuntimeException("ScriptResult: scena " + scene.index()
-                        + " ma durationMs=" + scene.durationMs() + " \u2014 minimum 1000ms");
+                        + " ma durationMs=" + scene.durationMs() + " \u2014 minimum 2000ms");
+            }
+        }
+
+        // Enforce minimum durationMs for VIDEO scenes (Kling API minimum = 5s)
+        if (result.mediaAssignments() != null) {
+            for (ScriptResult.MediaAssignment ma : result.mediaAssignments()) {
+                if (ma.isVideo()) {
+                    ScriptResult.SceneScript scene = result.scenes().stream()
+                            .filter(s -> s.index() == ma.sceneIndex())
+                            .findFirst().orElse(null);
+                    if (scene != null && scene.durationMs() < 5000) {
+                        log.warn("[OpenAiService] VIDEO scena {} ma durationMs={} < 5000 \u2014 Kling API wymaga minimum 5s",
+                                scene.index(), scene.durationMs());
+                    }
+                }
             }
         }
 

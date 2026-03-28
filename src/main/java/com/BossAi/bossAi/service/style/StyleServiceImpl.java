@@ -149,10 +149,10 @@ public class StyleServiceImpl implements StyleService {
     public StyleConfig educational() {
         return StyleConfig.builder()
                 .energyLevel("MEDIUM")
-                .pacing("FAST")
+                .pacing("MEDIUM")
                 .promptInstructions("""
                     STYLE: EDUCATIONAL
-                    
+
                     - Clear and informative
                     - Value-driven content
                     - Quick explanations
