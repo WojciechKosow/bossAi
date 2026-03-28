@@ -209,10 +209,13 @@ public class RenderStep implements GenerationStep {
             cmd.addAll(List.of("-i", context.getMusicLocalPath()));
         }
 
-        // Buduj filter_complex
+        // Buduj filter_complex i zapisz do pliku — unika problemów z quoting na Windows
         String filterComplex = buildFilterComplex(
                 context, hasMusic, hasOverlays, useWordByWord, wordTimings, srtFile);
-        cmd.addAll(List.of("-filter_complex", filterComplex));
+        Path filterScript = workDir.resolve("filter_complex.txt");
+        Files.writeString(filterScript, filterComplex);
+        log.info("[RenderStep] filter_complex_script saved — {} chars → {}", filterComplex.length(), filterScript);
+        cmd.addAll(List.of("-filter_complex_script", filterScript.toString()));
 
         // Map
         cmd.addAll(List.of("-map", "[vout]"));
@@ -332,6 +335,7 @@ public class RenderStep implements GenerationStep {
             String escapedWord = escapeDrawtext(wt.word());
 
             // Pop-in alpha: szybki fade 80ms, potem stały
+            // Commas escaped with backslash for filter_complex_script syntax
             String alpha = String.format(
                     "if(lt(t\\,%s)\\,min(1\\,(t-%s)/%s)\\,1)",
                     f(startSec + WORD_FADE_IN), f(startSec), f(WORD_FADE_IN)
@@ -348,7 +352,7 @@ public class RenderStep implements GenerationStep {
                     .append("shadowcolor=black@0.6:shadowx=2:shadowy=2:")
                     .append("x=(W-tw)/2:")
                     .append("y=(H*0.82):")
-                    .append("enable='between(t\\,").append(f(startSec)).append("\\,").append(f(endSec)).append(")':") 
+                    .append("enable='between(t\\,").append(f(startSec)).append("\\,").append(f(endSec)).append(")':")
                     .append("alpha='").append(alpha).append("'")
                     .append(currentOutput);
 
