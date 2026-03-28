@@ -74,9 +74,10 @@ public class DirectorStep implements GenerationStep {
             }
         }
 
-        // Krok 3: Efekty (zawsze po beat sync, żeby nie nadpisać zsynkowanych cuts)
+        // Krok 3: Efekty + przejścia między scenami
         String contentType = context.getScript() != null ? context.getScript().contentType() : null;
         effectAssigner.applyEffects(plan, context.getStyle(), contentType);
+        effectAssigner.applyTransitions(plan, context.getStyle(), contentType);
 
         // Krok 4: Zapisz do kontekstu — ZAWSZE, niezależnie od ścieżki powyżej
         context.setDirectorPlan(plan);
