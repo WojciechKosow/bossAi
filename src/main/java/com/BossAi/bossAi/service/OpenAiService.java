@@ -14,28 +14,6 @@ import org.springframework.web.reactive.function.client.WebClient;
 import java.util.List;
 import java.util.Map;
 
-/**
- * OpenAiService v2 — przebudowany prompt engine.
- *
- * FAZA 2 zmiany:
- *
- *   1. SYSTEM PROMPT — kompletna przebudowa.
- *      Poprzedni prompt generował "poprawne" skrypty ale nie wiralowe.
- *      Nowy wymusza:
- *        - contentType detection (AD / EDUCATIONAL / STORY / VIRAL)
- *        - Strukturę emocjonalną per contentType (hook/pain/solution/CTA dla AD,
- *          hook/list-items/summary/cta dla EDUCATIONAL, itd.)
- *        - mediaAssignments — GPT-4o decyduje które sceny są VIDEO (max 2)
- *        - TextOverlay z timingiem zsynchronizowanym z TTS (~150 wpm)
- *        - Dłuższe filmy: 30-90s dla EDUCATIONAL, 15-30s dla AD
- *
- *   2. Osobny system prompt per contentType — buildSystemPrompt(contentType)
- *      Każdy typ ma inne reguły struktury, inny overlay style, inny pacing.
- *
- *   3. TTS timing — GPT-4o oblicza startMs/endMs dla każdego overlay
- *      na podstawie tempa narracji (instrukcja: ~150 słów/min, ~400ms/słowo).
- *      Nie jest to perfekcyjne — Faza 3 doda WhisperTimestamp alignment.
- */
 @Slf4j
 @Service
 public class OpenAiService {
@@ -58,22 +36,18 @@ public class OpenAiService {
     // SYSTEM PROMPTS PER CONTENT TYPE
     // =========================================================================
 
-    /**
-     * Base system prompt — wspólne reguły dla wszystkich typów.
-     * Zawiera pełny JSON schema z nowymi polami Fazy 2.
-     */
     private static final String BASE_SYSTEM_PROMPT = """
         You are an expert short-form video content creator for TikTok, Instagram Reels, and YouTube Shorts.
         You create scroll-stopping, high-retention videos that feel native to the platform.
 
         PLATFORM RULES:
         - 9:16 vertical format ALWAYS
-        - First 2 seconds must stop the scroll — hook is everything
+        - First 2 seconds must stop the scroll \u2014 hook is everything
         - Pacing: fast cuts feel energetic, slower cuts feel authoritative
         - Image prompts: always English, always include "9:16 vertical format, photorealistic"
 
         MEDIA ASSIGNMENT RULES (CRITICAL FOR COST):
-        - MAX 2 scenes can be VIDEO type — always scene[0] (hook) and the last scene (CTA/outro)
+        - MAX 2 scenes can be VIDEO type \u2014 always scene[0] (hook) and the last scene (CTA/outro)
         - ALL other scenes MUST be IMAGE type
         - VIDEO scenes = animated clips (expensive, use for hook + CTA only)
         - IMAGE scenes = static photo displayed for durationMs (cheap, use for content)
@@ -91,7 +65,28 @@ public class OpenAiService {
         - BODY: fontSize 36, bold true, position TOP, animation SLIDE_IN
         - FACT: fontSize 26, bold false, position BOTTOM, animation FADE
         - CTA:  fontSize 44, bold true, position CENTER, animation POP
-        - LIST_ITEM: fontSize 38, bold true, position CENTER, animation SLIDE_IN
+        - LIST_ITEM: fontSize 38, bold true, position TOP, animation SLIDE_IN
+        - NUMBER: fontSize 72, bold true, position CENTER, animation POP
+
+        SUBTITLES (subtitleText per scene):
+        - subtitleText is the EXACT narration fragment spoken during this scene
+        - It will be displayed word-by-word on screen synchronized with TTS
+        - Keep sentences short: max 10-12 words per scene
+        - Use conversational, spoken language \u2014 NOT written/formal
+        - Each word will appear individually on screen as the narrator speaks
+
+        MUSIC DIRECTIONS (musicDirections array):
+        - Provide ONE musicDirection per scene
+        - volume: 0.0-1.0 \u2014 how loud background music should be during this scene
+        - fadeInMs: milliseconds to fade music in at scene start (0 = instant)
+        - fadeOutMs: milliseconds to fade music out at scene end (0 = instant)
+        - RULES:
+          - When narrator speaks intensely -> volume 0.10-0.15
+          - When narrator speaks calmly -> volume 0.15-0.25
+          - During pauses/transitions -> volume 0.35-0.50
+          - Hook scene (first) -> volume 0.40-0.50, fadeOutMs 300-500
+          - CTA scene (last) -> volume 0.35-0.45, fadeInMs 300
+          - NEVER set volume above 0.60 \u2014 music must never overpower voice
 
         ALWAYS respond ONLY with valid JSON matching the exact schema below.
         No markdown, no comments, no preamble, no explanation outside JSON.
@@ -124,6 +119,10 @@ public class OpenAiService {
             { "sceneIndex": 0, "mediaType": "VIDEO" },
             { "sceneIndex": 1, "mediaType": "IMAGE" }
           ],
+          "musicDirections": [
+            { "sceneIndex": 0, "volume": 0.45, "fadeInMs": 0, "fadeOutMs": 300 },
+            { "sceneIndex": 1, "volume": 0.12, "fadeInMs": 200, "fadeOutMs": 0 }
+          ],
           "contentType": "EDUCATIONAL",
           "style": "energetic",
           "targetAudience": "description",
@@ -137,18 +136,18 @@ public class OpenAiService {
 
         CONTENT TYPE: ADVERTISEMENT
         MANDATORY STRUCTURE:
-          Scene 0 [VIDEO, 3-4s]: PATTERN INTERRUPT — shocking/unexpected/controversial hook.
+          Scene 0 [VIDEO, 3-4s]: PATTERN INTERRUPT \u2014 shocking/unexpected/controversial hook.
             Image: product hero shot or problem visualization.
             Overlay HOOK: bold claim or question. Animation: POP.
-          Scene 1 [IMAGE, 4-6s]: AMPLIFY THE PAIN — make them feel the problem deeply.
+          Scene 1 [IMAGE, 4-6s]: AMPLIFY THE PAIN \u2014 make them feel the problem deeply.
             Image: person experiencing the problem.
             Overlay BODY: pain point statement. Animation: SLIDE_IN.
-          Scene 2 [IMAGE, 4-6s]: THE REVEAL — product as the obvious solution.
+          Scene 2 [IMAGE, 4-6s]: THE REVEAL \u2014 product as the obvious solution.
             Image: product in use, transformation.
             Overlay BODY: benefit statement. Animation: FADE.
-          Scene 3 [VIDEO, 3-4s]: SOCIAL PROOF + CTA — urgency, scarcity, action.
+          Scene 3 [VIDEO, 3-4s]: SOCIAL PROOF + CTA \u2014 urgency, scarcity, action.
             Image: happy customer or product result.
-            Overlay CTA: "Shop now — link in bio". Animation: POP.
+            Overlay CTA: "Shop now \u2014 link in bio". Animation: POP.
 
         HOOK PATTERNS (pick one, make it feel native):
         - "Did you know [shocking stat]?"
@@ -162,35 +161,73 @@ public class OpenAiService {
     private static final String EDUCATIONAL_STRUCTURE = """
 
         CONTENT TYPE: EDUCATIONAL / LIST VIDEO
+        This is the classic TikTok educational format \u2014 "Top 5", "3 things you didn't know",
+        "Did you know?", explainers, tips, facts. These videos DOMINATE TikTok engagement.
+
+        THE FEEL:
+        - Conversational, like a smart friend explaining something cool
+        - NOT a lecture, NOT a presentation \u2014 it's a CONVERSATION
+        - Energy: confident, slightly fast-paced, enthusiastic but not fake
+        - Narration tone: "Okay so listen..." / "Here's the thing..." / "Most people don't know this but..."
+
         MANDATORY STRUCTURE:
-          Scene 0 [VIDEO, 3-4s]: HOOK — bold title of the list/topic.
-            Overlay HOOK: "Top [N] [topic]" or "[topic] you need to know". Animation: POP.
-          Scenes 1..N-1 [IMAGE, 4-8s each]: LIST ITEMS — one item per scene.
-            Each scene: item name as Overlay LIST_ITEM (top), key fact as Overlay FACT (bottom).
-            Image: visual representation of the item.
-          Last scene [VIDEO, 4-5s]: SUMMARY + CTA — recap and follow for more.
-            Overlay CTA: "Follow for more [topic]". Animation: POP.
+          Scene 0 [VIDEO, 3-4s]: HOOK \u2014 the scroll-stopper.
+            - Must create CURIOSITY GAP \u2014 viewer NEEDS to keep watching
+            - Narration: 1 punchy sentence, max 8 words spoken
+            - Overlay HOOK: bold topic title (e.g. "5 AI TOOLS YOU NEED"), CENTER, POP
+            - Image: visually striking, related to topic, bold colors
+            - Music: volume 0.40-0.50 (louder, energy), fadeOutMs 400
 
-        SCENE COUNT: exactly N+2 scenes where N = number of list items.
-        For "Top 5" → 7 scenes (hook + 5 items + outro).
-        For "3 tips" → 5 scenes (hook + 3 tips + outro).
+          Scenes 1..N-1 [IMAGE, 5-8s each]: LIST ITEMS \u2014 one item per scene.
+            - Each scene = ONE point/item/fact
+            - Narration: explain the item conversationally (2-3 short sentences)
+            - subtitleText: EXACT words narrator says (will appear word-by-word)
+            - Overlay NUMBER: just the number "#1", "#2" etc. \u2014 fontSize 72, CENTER, POP
+              - appears at scene start, stays 1.5s then disappears
+            - Overlay LIST_ITEM: item name \u2014 fontSize 38, TOP, SLIDE_IN
+              - appears 300ms after scene start, stays until scene end - 500ms
+            - Overlay FACT: key fact/stat \u2014 fontSize 26, BOTTOM, FADE
+              - appears 1500ms after scene start, stays until scene end - 500ms
+            - Image: clear visual of the item (product screenshot, concept illustration, etc.)
+            - Music: volume 0.10-0.15 (quiet, narrator is king), fadeInMs 200
 
-        OVERLAY per list item scene:
-          - LIST_ITEM overlay: "#[N] [item name]", position TOP, startMs = scene start + 300ms
-          - FACT overlay: "[key fact or benefit]", position BOTTOM, startMs = scene start + 1000ms
+          Last scene [VIDEO, 4-5s]: SUMMARY + CTA
+            - Narration: quick recap + call to action ("Follow for more" / "Save this for later")
+            - Overlay CTA: action text, CENTER, POP, fontSize 44, gold color
+            - Image: energetic, positive, forward-looking
+            - Music: volume 0.35-0.45 (rises back up), fadeInMs 300
 
-        Total duration: 30-90 seconds (depends on list length, ~6s per item).
+        HOOK PATTERNS (pick one, adapt to topic):
+        - "5 [things] that will change [outcome]"
+        - "[Number] [topic] most people don't know about"
+        - "Stop scrolling if you [relate to audience]"
+        - "I tested [N] [things] \u2014 here's what actually works"
+        - "Nobody talks about these [topic]"
+        - "Here's what [experts/pros] use instead"
+
+        SCENE COUNT: exactly N+2 scenes (hook + N items + outro).
+        - "Top 5" -> 7 scenes, "3 tips" -> 5 scenes, "7 facts" -> 9 scenes
+        - If user doesn't specify N, default to 5 items (7 scenes total)
+
+        NARRATION RULES:
+        - Language: SAME language as user's prompt (if Polish prompt -> Polish narration)
+        - Conversational flow: hook -> "Alright, number one..." -> explain -> "Number two..." -> ... -> CTA
+        - Each item intro uses casual transition: "Okay number two", "Next up", "And finally"
+        - NO filler words, NO "um", NO "so basically" \u2014 every word earns its place
+        - subtitleText per scene = EXACT narration for that scene (for word-by-word display)
+
+        Total duration: 35-75 seconds (5-8s per item + 3-4s hook + 4-5s outro).
         """;
 
     private static final String STORY_STRUCTURE = """
 
         CONTENT TYPE: STORY / NARRATIVE
         MANDATORY STRUCTURE:
-          Scene 0 [VIDEO, 3-4s]: HOOK — most dramatic/interesting moment (start in medias res).
-          Scene 1 [IMAGE, 5-7s]: SETUP — context and character.
-          Scenes 2..N-2 [IMAGE, 5-8s]: RISING ACTION — build tension, each scene escalates.
-          Scene N-1 [VIDEO, 4-5s]: CLIMAX + RESOLUTION — payoff + lesson learned.
-          Overlay style: minimal — only key emotional beats as FACT overlays.
+          Scene 0 [VIDEO, 3-4s]: HOOK \u2014 most dramatic/interesting moment (start in medias res).
+          Scene 1 [IMAGE, 5-7s]: SETUP \u2014 context and character.
+          Scenes 2..N-2 [IMAGE, 5-8s]: RISING ACTION \u2014 build tension, each scene escalates.
+          Scene N-1 [VIDEO, 4-5s]: CLIMAX + RESOLUTION \u2014 payoff + lesson learned.
+          Overlay style: minimal \u2014 only key emotional beats as FACT overlays.
         Total duration: 30-60 seconds.
         """;
 
@@ -198,11 +235,11 @@ public class OpenAiService {
 
         CONTENT TYPE: VIRAL EDIT
         MANDATORY STRUCTURE:
-          Scene 0 [VIDEO, 2-3s]: ULTRA-FAST HOOK — most visually striking moment.
+          Scene 0 [VIDEO, 2-3s]: ULTRA-FAST HOOK \u2014 most visually striking moment.
             Overlay HOOK: 1-3 words max, massive font. Animation: POP.
-          Scenes 1..N-2 [IMAGE, 2-4s each]: RAPID CONTENT — fast-paced facts or moments.
+          Scenes 1..N-2 [IMAGE, 2-4s each]: RAPID CONTENT \u2014 fast-paced facts or moments.
             Short FACT overlays, rhythm matches the beat.
-          Last scene [VIDEO, 2-3s]: LOOP-FRIENDLY OUTRO — ends where it could restart.
+          Last scene [VIDEO, 2-3s]: LOOP-FRIENDLY OUTRO \u2014 ends where it could restart.
         Total duration: 15-30 seconds. Fast pacing. Every scene under 4 seconds.
         """;
 
@@ -210,11 +247,6 @@ public class OpenAiService {
     // CONTENT TYPE DETECTION
     // =========================================================================
 
-    /**
-     * Wykrywa typ contentu z promptu usera.
-     * Używamy osobnego GPT call żeby wykryć intent przed generacją scenariusza.
-     * Tani call — mały model, krótki prompt, szybko.
-     */
     public String detectContentType(String userPrompt) {
         log.info("[OpenAiService] Wykrywam content type...");
 
@@ -255,11 +287,10 @@ public class OpenAiService {
                     .path("message").path("content").asText()
                     .trim().toUpperCase();
 
-            // Sanitize — tylko znane wartości
             String type = switch (detected) {
                 case "AD", "EDUCATIONAL", "STORY", "VIRAL" -> detected;
                 default -> {
-                    log.warn("[OpenAiService] Nieznany content type '{}', używam EDUCATIONAL", detected);
+                    log.warn("[OpenAiService] Nieznany content type '{}', uzywam EDUCATIONAL", detected);
                     yield "EDUCATIONAL";
                 }
             };
@@ -269,7 +300,7 @@ public class OpenAiService {
 
         } catch (Exception e) {
             log.warn("[OpenAiService] Content type detection failed: {}", e.getMessage());
-            return "EDUCATIONAL"; // safe default
+            return "EDUCATIONAL";
         }
     }
 
@@ -277,22 +308,14 @@ public class OpenAiService {
     // SCRIPT GENERATION
     // =========================================================================
 
-    /**
-     * Generuje scenariusz TikTok — teraz z content type aware prompts.
-     * Wykrywa typ contentu, dobiera strukturę, generuje z pełnym JSON schema v2.
-     */
     @Retry(name = "openAi")
     public ScriptResult generateScript(String userPrompt) {
         String contentType = detectContentType(userPrompt);
         return generateScriptForContentType(userPrompt, contentType);
     }
 
-    /**
-     * Generuje scenariusz dla konkretnego content type.
-     * Używany też przez ScriptStep gdy contentType jest już znany z VideoStyle.
-     */
     public ScriptResult generateScriptForContentType(String userPrompt, String contentType) {
-        log.info("[OpenAiService] generateScript — model: {}, contentType: {}",
+        log.info("[OpenAiService] generateScript \u2014 model: {}, contentType: {}",
                 properties.getModel().getChat(), contentType);
 
         String systemPrompt = buildSystemPrompt(contentType);
@@ -317,9 +340,6 @@ public class OpenAiService {
         return parseScriptResult(rawJson);
     }
 
-    /**
-     * Buduje system prompt łącząc base + strukturę dla danego contentType.
-     */
     private String buildSystemPrompt(String contentType) {
         String structure = switch (contentType) {
             case "AD"          -> AD_STRUCTURE;
@@ -362,7 +382,7 @@ public class OpenAiService {
 
     @Retry(name = "openAi")
     public byte[] generateTts(String narration) {
-        log.info("[OpenAiService] generateTts — voice: {}, chars: {}",
+        log.info("[OpenAiService] generateTts \u2014 voice: {}, chars: {}",
                 properties.getModel().getTtsConfig().getVoice(), narration.length());
 
         Map<String, Object> requestBody = Map.of(
@@ -382,10 +402,10 @@ public class OpenAiService {
                 .block();
 
         if (audioBytes == null || audioBytes.length == 0) {
-            throw new RuntimeException("[OpenAiService] TTS zwrócił pusty plik");
+            throw new RuntimeException("[OpenAiService] TTS zwrocil pusty plik");
         }
 
-        log.info("[OpenAiService] TTS gotowy — {} bytes", audioBytes.length);
+        log.info("[OpenAiService] TTS gotowy \u2014 {} bytes", audioBytes.length);
         return audioBytes;
     }
 
@@ -409,7 +429,7 @@ public class OpenAiService {
 
             validateScriptResult(result);
 
-            log.info("[OpenAiService] ScriptResult OK — {} scen, {}ms, {} overlays, contentType: {}",
+            log.info("[OpenAiService] ScriptResult OK \u2014 {} scen, {}ms, {} overlays, contentType: {}",
                     result.scenes().size(),
                     result.totalDurationMs(),
                     result.overlays() != null ? result.overlays().size() : 0,
@@ -418,7 +438,7 @@ public class OpenAiService {
             return result;
 
         } catch (Exception e) {
-            throw new RuntimeException("[OpenAiService] Błąd parsowania ScriptResult: " + e.getMessage(), e);
+            throw new RuntimeException("[OpenAiService] Blad parsowania ScriptResult: " + e.getMessage(), e);
         }
     }
 
@@ -430,8 +450,8 @@ public class OpenAiService {
             throw new RuntimeException("ScriptResult: brak scen");
         }
         if (result.scenes().size() > 12) {
-            throw new RuntimeException("ScriptResult: za dużo scen ("
-                    + result.scenes().size() + ") — max 12");
+            throw new RuntimeException("ScriptResult: za duzo scen ("
+                    + result.scenes().size() + ") \u2014 max 12");
         }
         for (ScriptResult.SceneScript scene : result.scenes()) {
             if (scene.imagePrompt() == null || scene.imagePrompt().isBlank()) {
@@ -439,17 +459,16 @@ public class OpenAiService {
             }
             if (scene.durationMs() < 1000) {
                 throw new RuntimeException("ScriptResult: scena " + scene.index()
-                        + " ma durationMs=" + scene.durationMs() + " — minimum 1000ms");
+                        + " ma durationMs=" + scene.durationMs() + " \u2014 minimum 1000ms");
             }
         }
 
-        // Walidacja media assignments — max 2 VIDEO
         if (result.mediaAssignments() != null) {
             long videoCount = result.mediaAssignments().stream()
                     .filter(ScriptResult.MediaAssignment::isVideo)
                     .count();
             if (videoCount > 3) {
-                log.warn("[OpenAiService] Zbyt dużo scen VIDEO ({}) — RenderStep ograniczy do 2", videoCount);
+                log.warn("[OpenAiService] Zbyt duzo scen VIDEO ({}) \u2014 RenderStep ograniczy do 2", videoCount);
             }
         }
     }
