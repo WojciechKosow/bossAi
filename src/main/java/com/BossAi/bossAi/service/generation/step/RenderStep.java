@@ -313,7 +313,13 @@ public class RenderStep implements GenerationStep {
             double startSec = wt.startMs() / 1000.0;
             double endSec   = wt.endMs()   / 1000.0;
 
-            String escapedWord = escapeDrawtext(wt.word());
+            // Ensure minimum display time so words don't flash too fast
+            if ((endSec - startSec) * 1000 < MIN_WORD_DISPLAY_MS) {
+                endSec = startSec + MIN_WORD_DISPLAY_MS / 1000.0;
+            }
+
+            // UPPERCASE for TikTok style readability
+            String escapedWord = escapeDrawtext(wt.word().toUpperCase());
 
             // Zwykłe przecinki — plik, nie cmdline
             String alpha = String.format(Locale.US,
