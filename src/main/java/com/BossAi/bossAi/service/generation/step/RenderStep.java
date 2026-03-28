@@ -60,6 +60,14 @@ public class RenderStep implements GenerationStep {
     private static final double WORD_FADE_IN        = 0.06;   // 60ms pop-in
     private static final int    MIN_WORD_DISPLAY_MS = 150;     // min word visibility
 
+    // Word-by-word subtitle config
+    private static final int WORD_FONT_SIZE = 80;
+    private static final String WORD_FONT_COLOR = "white";
+    private static final String WORD_BORDER_COLOR = "black";
+    private static final int WORD_BORDER_WIDTH = 5;
+    private static final String WORD_FONT = "Arial";
+    private static final double WORD_FADE_IN = 0.06;  // 60ms pop-in
+    private static final int MIN_WORD_DISPLAY_MS = 150;
     @Override
     public void execute(GenerationContext context) throws Exception {
         context.updateProgress(
