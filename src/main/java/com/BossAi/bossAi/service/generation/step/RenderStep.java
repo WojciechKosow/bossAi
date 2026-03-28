@@ -30,14 +30,15 @@ import java.util.UUID;
 import java.util.stream.Collectors;
 
 /**
- * RenderStep v3 — word-by-word subtitles + dynamic music volume.
+ * RenderStep v4 — animated effects + scene transitions + word-by-word subtitles.
  *
- * KLUCZOWA ZASADA: ZAWSZE używaj f() dla wartości double przekazywanych do FFmpeg
- * — zarówno w filter_complex_script jak i w argumentach cmdline (-ss, -t, itp.).
+ * KLUCZOWA ZASADA: ZAWSZE używaj f() dla wartości double przekazywanych do FFmpeg.
  *
- * String.valueOf(double) na polskim Windows daje "3,240" zamiast "3.240",
- * co powoduje błąd FFmpeg "No such filter: '3.240'" — FFmpeg widzi wartość
- * po przecinku jako osobny token i próbuje zinterpretować go jako nazwę filtra.
+ * FAZA 4 zmiany:
+ *   1. Animated effects — ZOOM_IN/OUT/FAST_ZOOM progressive over duration.
+ *      PAN_LEFT/PAN_RIGHT Ken Burns. SHAKE improved.
+ *   2. Scene transitions — xfade between scenes (fade, fadewhite, dissolve).
+ *   3. Pipeline: per-scene concat → xfade transitions → final render.
  */
 @Slf4j
 @Service
@@ -50,13 +51,14 @@ public class RenderStep implements GenerationStep {
     private final AssetService assetService;
     private final OverlayEngine overlayEngine;
 
-    // Word-by-word subtitle config
-    private static final int    WORD_FONT_SIZE    = 48;
-    private static final String WORD_FONT_COLOR   = "white";
-    private static final String WORD_BORDER_COLOR = "black";
-    private static final int    WORD_BORDER_WIDTH = 4;
-    private static final String WORD_FONT         = "Arial";
-    private static final double WORD_FADE_IN      = 0.08;  // 80ms pop-in
+    // Word-by-word subtitle config — TikTok style (big, bold, centered)
+    private static final int    WORD_FONT_SIZE      = 80;
+    private static final String WORD_FONT_COLOR     = "white";
+    private static final String WORD_BORDER_COLOR   = "black";
+    private static final int    WORD_BORDER_WIDTH   = 5;
+    private static final String WORD_FONT           = "Arial";
+    private static final double WORD_FADE_IN        = 0.06;   // 60ms pop-in
+    private static final int    MIN_WORD_DISPLAY_MS = 150;     // min word visibility
 
     @Override
     public void execute(GenerationContext context) throws Exception {
@@ -76,14 +78,15 @@ public class RenderStep implements GenerationStep {
         Path workDir = getWorkingDir(context);
         Files.createDirectories(workDir);
 
-        // Faza 1 — concat klipów
-        List<Path> clips  = buildClipsSequential(context, workDir);
-        Path concatFile   = writeConcatFile(clips, workDir);
-        Path concatOutput = workDir.resolve("temp_concat.mp4");
-        runConcat(concatFile, concatOutput);
-        log.info("[RenderStep] Concat DONE → {} klipów", clips.size());
+        // Faza 1 — build per-scene videos (cut clips with effects → hard concat per scene)
+        List<SceneVideo> sceneVideos = buildSceneVideos(context, workDir);
+        log.info("[RenderStep] Scene videos DONE → {} scen", sceneVideos.size());
 
-        // Faza 2+3+4 — word-by-word subtitles + overlays + dynamic audio → final.mp4
+        // Faza 2 — join scenes with transitions (xfade)
+        Path concatOutput = joinScenesWithTransitions(sceneVideos, context, workDir);
+        log.info("[RenderStep] Transitions DONE → {}", concatOutput);
+
+        // Faza 3 — word-by-word subtitles + overlays + dynamic audio → final.mp4
         Path finalOutput = workDir.resolve("final.mp4");
         runFinalRender(concatOutput, context, workDir, finalOutput);
         log.info("[RenderStep] Final render DONE → {}", finalOutput);
@@ -108,16 +111,16 @@ public class RenderStep implements GenerationStep {
 
         log.info("[RenderStep] DONE — finalUrl: {}, size: {} bytes",
                 finalUrl, videoBytes.length);
-
-        cleanup(concatOutput, concatFile);
     }
 
     // =========================================================================
-    // CLIPS BUILDING
+    // SCENE VIDEO BUILDING (per-scene cut clips → concat)
     // =========================================================================
 
-    private List<Path> buildClipsSequential(GenerationContext context, Path workDir) throws Exception {
-        List<Path> allClips = new ArrayList<>();
+    private record SceneVideo(int sceneIndex, Path path, double durationSec) {}
+
+    private List<SceneVideo> buildSceneVideos(GenerationContext context, Path workDir) throws Exception {
+        List<SceneVideo> sceneVideos = new ArrayList<>();
 
         List<SceneAsset> sortedScenes = context.getScenes().stream()
                 .sorted((a, b) -> Integer.compare(a.getIndex(), b.getIndex()))
@@ -130,31 +133,139 @@ public class RenderStep implements GenerationStep {
                     .orElseThrow(() -> new IllegalStateException(
                             "[RenderStep] Brak SceneDirection dla sceny " + scene.getIndex()));
 
-            List<Path> sceneClips = splitScene(scene, direction, workDir);
-            allClips.addAll(sceneClips);
+            List<Path> cutClips = splitScene(scene, direction, workDir);
+            if (cutClips.isEmpty()) {
+                log.warn("[RenderStep] Scena {} — 0 clips, pomijam", scene.getIndex());
+                continue;
+            }
+
+            double sceneDuration = calculateSceneDuration(direction);
+            Path sceneVideo;
+            if (cutClips.size() == 1) {
+                sceneVideo = cutClips.get(0);
+            } else {
+                sceneVideo = concatClips(cutClips, workDir, "scene_" + scene.getIndex());
+            }
+            sceneVideos.add(new SceneVideo(scene.getIndex(), sceneVideo, sceneDuration));
         }
 
-        return allClips;
+        return sceneVideos;
     }
 
-    private Path writeConcatFile(List<Path> clips, Path workDir) throws Exception {
+    private double calculateSceneDuration(SceneDirection direction) {
+        double totalSec = 0;
+        for (Cut cut : direction.getCuts()) {
+            double cutDur = (cut.getEndMs() - cut.getStartMs()) / 1000.0;
+            if (cut.getEffect() == EffectType.SLOW_MOTION) cutDur *= 1.5;
+            totalSec += cutDur;
+        }
+        return totalSec;
+    }
+
+    private Path concatClips(List<Path> clips, Path workDir, String prefix) throws Exception {
         List<String> lines = clips.stream()
-                .map(p -> "file '" + p.toString() + "'")
+                .map(p -> "file '" + p.toString().replace("\\", "/") + "'")
                 .collect(Collectors.toList());
 
-        Path concatFile = workDir.resolve("concat.txt");
+        Path concatFile = workDir.resolve(prefix + "_concat.txt");
         Files.write(concatFile, lines);
-        return concatFile;
-    }
 
-    private void runConcat(Path concatFile, Path output) throws Exception {
+        Path output = workDir.resolve(prefix + "_merged.mp4");
         runCommand(List.of(
                 ffmpegProperties.getBinary().getPath(),
                 "-y", "-f", "concat", "-safe", "0",
                 "-i", concatFile.toString(),
                 "-c", "copy",
                 output.toString()
-        ), "concat");
+        ), "concat-" + prefix);
+        return output;
+    }
+
+    // =========================================================================
+    // SCENE TRANSITIONS (xfade between scenes)
+    // =========================================================================
+
+    private Path joinScenesWithTransitions(
+            List<SceneVideo> sceneVideos,
+            GenerationContext context,
+            Path workDir
+    ) throws Exception {
+        if (sceneVideos.size() <= 1) {
+            return sceneVideos.get(0).path();
+        }
+
+        List<SceneDirection> sceneDirections = context.getDirectorPlan().getScenes();
+        double transitionDur = getTransitionDuration(context);
+
+        // Hard cuts for styles that prefer them (UGC)
+        if (transitionDur <= 0) {
+            List<Path> paths = sceneVideos.stream().map(SceneVideo::path).collect(Collectors.toList());
+            return concatClips(paths, workDir, "all_scenes");
+        }
+
+        List<String> cmd = new ArrayList<>();
+        cmd.add(ffmpegProperties.getBinary().getPath());
+        cmd.add("-y");
+        for (SceneVideo sv : sceneVideos) {
+            cmd.addAll(List.of("-i", sv.path().toString()));
+        }
+
+        StringBuilder fc = new StringBuilder();
+        double cumulativeDuration = 0;
+
+        for (int i = 0; i < sceneVideos.size() - 1; i++) {
+            String inputA = (i == 0) ? "[0:v]" : "[v" + (i - 1) + "]";
+            String inputB = "[" + (i + 1) + ":v]";
+            String output = (i == sceneVideos.size() - 2) ? "[vout]" : "[v" + i + "]";
+
+            cumulativeDuration += sceneVideos.get(i).durationSec();
+            double offset = cumulativeDuration - (i + 1) * transitionDur;
+            if (offset < 0) offset = 0;
+
+            String transition = "fade";
+            if (i < sceneDirections.size()) {
+                String t = sceneDirections.get(i).getTransitionToNext();
+                if (t != null && !t.equals("cut") && !t.isEmpty()) {
+                    transition = t;
+                }
+            }
+
+            if (i > 0) fc.append(";");
+            fc.append(inputA).append(inputB)
+                    .append("xfade=transition=").append(transition)
+                    .append(":duration=").append(f(transitionDur))
+                    .append(":offset=").append(f(offset))
+                    .append(output);
+        }
+
+        Path filterScript = workDir.resolve("transition_filter.txt");
+        Files.writeString(filterScript, fc.toString());
+        cmd.addAll(List.of("-/filter_complex", filterScript.toString()));
+        cmd.addAll(List.of("-map", "[vout]", "-an"));
+        cmd.addAll(List.of("-c:v", "libx264", "-preset", "ultrafast", "-crf", "20"));
+
+        Path output = workDir.resolve("temp_concat.mp4");
+        cmd.add(output.toString());
+
+        log.info("[RenderStep] xfade: {} scenes, transition_dur={}, filter={} chars",
+                sceneVideos.size(), f(transitionDur), fc.length());
+        runCommand(cmd, "transitions");
+        return output;
+    }
+
+    private double getTransitionDuration(GenerationContext context) {
+        if (context.getStyle() == null) return 0.3;
+        return switch (context.getStyle()) {
+            case VIRAL_EDIT          -> 0.2;
+            case UGC_STYLE           -> 0.0;
+            case HIGH_CONVERTING_AD  -> 0.3;
+            case PRODUCT_SHOWCASE    -> 0.4;
+            case STORY_MODE          -> 0.3;
+            case CINEMATIC           -> 0.5;
+            case LUXURY_AD           -> 0.5;
+            case EDUCATIONAL         -> 0.3;
+            default                  -> 0.3;
+        };
     }
 
     // =========================================================================
@@ -313,15 +424,14 @@ public class RenderStep implements GenerationStep {
             double startSec = wt.startMs() / 1000.0;
             double endSec   = wt.endMs()   / 1000.0;
 
-            // Ensure minimum display time so words don't flash too fast
+            // Min display time — short Whisper words don't flash too fast
             if ((endSec - startSec) * 1000 < MIN_WORD_DISPLAY_MS) {
                 endSec = startSec + MIN_WORD_DISPLAY_MS / 1000.0;
             }
 
-            // UPPERCASE for TikTok style readability
+            // UPPERCASE for TikTok style
             String escapedWord = escapeDrawtext(wt.word().toUpperCase());
 
-            // Zwykłe przecinki — plik, nie cmdline
             String alpha = String.format(Locale.US,
                     "if(lt(t,%s),min(1,(t-%s)/%s),1)",
                     f(startSec + WORD_FADE_IN), f(startSec), f(WORD_FADE_IN)
@@ -337,7 +447,7 @@ public class RenderStep implements GenerationStep {
                     .append("borderw=").append(WORD_BORDER_WIDTH).append(":")
                     .append("shadowcolor=black@0.6:shadowx=2:shadowy=2:")
                     .append("x=(W-tw)/2:")
-                    .append("y=(H*0.82):")
+                    .append("y=(H*0.75):")
                     .append("enable='between(t,").append(f(startSec)).append(",").append(f(endSec)).append(")':")
                     .append("alpha='").append(alpha).append("'")
                     .append(currentOutput);
@@ -516,21 +626,28 @@ public class RenderStep implements GenerationStep {
 
     private void runCutWithEffect(String input, Cut cut, Path output) throws Exception {
         double startSec    = cut.getStartMs() / 1000.0;
-        double durationSec = (cut.getEndMs() - cut.getStartMs()) / 1000.0;
-        String filter      = buildEffectFilter(cut.getEffect(), durationSec);
+        double inputDurSec = (cut.getEndMs() - cut.getStartMs()) / 1000.0;
+        String filter      = buildEffectFilter(cut.getEffect(), inputDurSec);
+
+        // SLOW_MOTION extends output duration (1.5x PTS)
+        double outputDurSec = inputDurSec;
+        if (cut.getEffect() == EffectType.SLOW_MOTION) {
+            outputDurSec = inputDurSec * 1.5;
+        }
 
         List<String> cmd = new ArrayList<>();
         cmd.add(ffmpegProperties.getBinary().getPath());
         cmd.add("-y");
-        // FIX: używamy f() zamiast String.valueOf(double).
-        // String.valueOf(3.24) na polskim Windows → "3,240" (z przecinkiem).
-        // FFmpeg nie rozumie przecinka jako separatora dziesiętnego w argumentach
-        // cmdline i traktuje ",240" jako osobny argument — stąd błąd "No such filter".
         cmd.addAll(List.of("-ss", f(startSec)));
         cmd.addAll(List.of("-i", input));
-        if (filter != null) cmd.addAll(List.of("-vf", filter));
+        if (filter != null) {
+            // Write filter to file — avoids Windows quoting issues with expressions
+            Path filterFile = output.getParent().resolve(output.getFileName() + ".vf");
+            Files.writeString(filterFile, filter);
+            cmd.addAll(List.of("-filter_script:v", filterFile.toString()));
+        }
         cmd.addAll(List.of(
-                "-t", f(durationSec),
+                "-t", f(outputDurSec),
                 "-c:v", "libx264", "-preset", "fast", "-crf", "23",
                 "-c:a", "aac",
                 output.toString()
@@ -539,17 +656,40 @@ public class RenderStep implements GenerationStep {
         runCommand(cmd, "cut");
     }
 
+    /**
+     * Animated FFmpeg effect filters — time-based progressive animations.
+     * Uses 't' variable (seconds) for smooth motion over cut duration.
+     */
     private String buildEffectFilter(EffectType effect, double duration) {
         if (effect == null) return null;
+        String dur = f(duration);
         return switch (effect) {
-            case ZOOM_IN     -> "scale=iw*1.2:ih*1.2,crop=iw:ih";
-            case FAST_ZOOM   -> "scale=iw*1.4:ih*1.4,crop=iw:ih";
-            case ZOOM_OUT    -> "scale=iw*0.9:ih*0.9";
-            case SHAKE       -> "crop=iw:ih:x='10*sin(2*PI*t*3)':y='10*cos(2*PI*t*2)'";
+            // Progressive zoom IN to center (100% → 115%)
+            case ZOOM_IN -> String.format(Locale.US,
+                    "crop=w=iw/(1+0.15*t/%s):h=ih/(1+0.15*t/%s):x=(iw-iw/(1+0.15*t/%s))/2:y=(ih-ih/(1+0.15*t/%s))/2,scale=1080:1920:flags=lanczos",
+                    dur, dur, dur, dur);
+            // Progressive zoom OUT from center (115% → 100%)
+            case ZOOM_OUT -> String.format(Locale.US,
+                    "crop=w=iw/(1.15-0.15*t/%s):h=ih/(1.15-0.15*t/%s):x=(iw-iw/(1.15-0.15*t/%s))/2:y=(ih-ih/(1.15-0.15*t/%s))/2,scale=1080:1920:flags=lanczos",
+                    dur, dur, dur, dur);
+            // Aggressive fast zoom IN (100% → 130%)
+            case FAST_ZOOM -> String.format(Locale.US,
+                    "crop=w=iw/(1+0.3*t/%s):h=ih/(1+0.3*t/%s):x=(iw-iw/(1+0.3*t/%s))/2:y=(ih-ih/(1+0.3*t/%s))/2,scale=1080:1920:flags=lanczos",
+                    dur, dur, dur, dur);
+            // Ken Burns: pan left → right
+            case PAN_LEFT -> String.format(Locale.US,
+                    "scale=iw*1.2:-2,crop=w=iw/1.2:h=ih:x=(iw-iw/1.2)*t/%s:y=0,scale=1080:1920:flags=lanczos",
+                    dur);
+            // Ken Burns: pan right → left
+            case PAN_RIGHT -> String.format(Locale.US,
+                    "scale=iw*1.2:-2,crop=w=iw/1.2:h=ih:x=(iw-iw/1.2)*(1-t/%s):y=0,scale=1080:1920:flags=lanczos",
+                    dur);
+            // Camera shake — sinusoidal offset at 5Hz/4Hz
+            case SHAKE ->
+                    "crop=w=iw-20:h=ih-20:x=10+8*sin(2*PI*t*5):y=10+8*cos(2*PI*t*4),scale=1080:1920:flags=lanczos";
+            // Slow motion — 1.5x stretch
             case SLOW_MOTION -> "setpts=1.5*PTS";
-            case NONE        -> null;
-            case PAN_LEFT    -> null;
-            case PAN_RIGHT   -> null;
+            case NONE -> null;
         };
     }
 
