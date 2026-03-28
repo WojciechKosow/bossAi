@@ -59,13 +59,14 @@ public class RenderStep implements GenerationStep {
     private final AssetService assetService;
     private final OverlayEngine overlayEngine;
 
-    // Word-by-word subtitle config
-    private static final int WORD_FONT_SIZE = 48;
+    // Word-by-word subtitle config — TikTok style (big, bold, centered)
+    private static final int WORD_FONT_SIZE = 80;
     private static final String WORD_FONT_COLOR = "white";
     private static final String WORD_BORDER_COLOR = "black";
-    private static final int WORD_BORDER_WIDTH = 4;
+    private static final int WORD_BORDER_WIDTH = 5;
     private static final String WORD_FONT = "Arial";
-    private static final double WORD_FADE_IN = 0.08;  // 80ms pop-in
+    private static final double WORD_FADE_IN = 0.06;  // 60ms pop-in
+    private static final int MIN_WORD_DISPLAY_MS = 150; // minimum time a word is visible
 
     @Override
     public void execute(GenerationContext context) throws Exception {
@@ -307,13 +308,15 @@ public class RenderStep implements GenerationStep {
      * Buduje chain drawtext filtrów — jedno słowo = jeden drawtext.
      *
      * Każde słowo:
-     *   drawtext=text='word':fontsize=28:fontcolor=white:bordercolor=black:borderw=3:
+     *   drawtext=text='WORD':fontsize=80:fontcolor=white:bordercolor=black:borderw=5:
      *   x=(W-tw)/2:y=(H*0.82):
      *   enable='between(t,startSec,endSec)':
-     *   alpha='if(lt(t,startSec+0.08),min(1,(t-startSec)/0.08),1)'
+     *   alpha='if(lt(t,startSec+0.06),min(1,(t-startSec)/0.06),1)'
      *
      * Pozycja: BOTTOM CENTER (y=82% — nad przyciskami UI TikToka)
-     * Animacja: szybki pop-in (80ms fade), brak fade-out (ostre cięcie → następne słowo)
+     * Animacja: szybki pop-in (60ms fade), brak fade-out (ostre cięcie → następne słowo)
+     * Tekst: UPPERCASE dla lepszej czytelności na mobile
+     * Min display time: 150ms — krótsze słowa z Whisper nie znikają za szybko
      */
     private String buildWordByWordFilter(
             List<SubtitleService.WordTiming> words,
@@ -332,7 +335,13 @@ public class RenderStep implements GenerationStep {
             double startSec = wt.startMs() / 1000.0;
             double endSec = wt.endMs() / 1000.0;
 
-            String escapedWord = escapeDrawtext(wt.word());
+            // Ensure minimum display time so words don't flash too fast
+            if ((endSec - startSec) * 1000 < MIN_WORD_DISPLAY_MS) {
+                endSec = startSec + MIN_WORD_DISPLAY_MS / 1000.0;
+            }
+
+            // UPPERCASE for TikTok style readability
+            String escapedWord = escapeDrawtext(wt.word().toUpperCase());
 
             // Pop-in alpha: szybki fade 80ms, potem stały
             // Commas escaped with backslash for filter_complex_script syntax
@@ -351,7 +360,7 @@ public class RenderStep implements GenerationStep {
                     .append("borderw=").append(WORD_BORDER_WIDTH).append(":")
                     .append("shadowcolor=black@0.6:shadowx=2:shadowy=2:")
                     .append("x=(W-tw)/2:")
-                    .append("y=(H*0.82):")
+                    .append("y=(H*0.75):")
                     .append("enable='between(t\\,").append(f(startSec)).append("\\,").append(f(endSec)).append(")':")
                     .append("alpha='").append(alpha).append("'")
                     .append(currentOutput);
@@ -623,15 +632,24 @@ public class RenderStep implements GenerationStep {
     }
 
     /**
-     * Escapuje tekst dla FFmpeg drawtext (wewnątrz filter_complex).
-     * W filter_complex przecinki i backslashe mają specjalne znaczenie.
+     * Escapuje tekst dla FFmpeg drawtext (wewnątrz filter_complex_script).
+     *
+     * Tekst jest umieszczany w text='...', więc:
+     *   - apostrofy ' → zastępujemy Unicode RIGHT SINGLE QUOTATION MARK (U+2019)
+     *     (FFmpeg renderuje je identycznie, ale nie łamie parsera)
+     *   - dwukropki : → \: (separator opcji w drawtext)
+     *   - backslashe \ → \\\\ (escape w filter_complex)
+     *   - procenty % → %% (escape w drawtext)
+     *   - średniki ; → pomijamy (separator łańcuchów w filter_complex)
+     *   - przecinki w tekście nie muszą być escaped bo są wewnątrz single quotes
      */
     private String escapeDrawtext(String text) {
         if (text == null) return "";
         return text
                 .replace("\\", "\\\\")
-                .replace("'", "\\'")
+                .replace("'", "\u2019")
                 .replace(":", "\\:")
+                .replace(";", "")
                 .replace("%", "%%");
     }
 
