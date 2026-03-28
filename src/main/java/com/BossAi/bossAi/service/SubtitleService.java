@@ -48,12 +48,14 @@ public class SubtitleService {
                 continue;
             }
 
-            int usableDuration = (int) (scene.durationMs() * 0.90);
-            int msPerWord = Math.max(250, Math.min(800, usableDuration / words.length));
+            // TTS speaks at ~170 wpm = ~350ms per word. Use 70% of scene duration
+            // so words finish before scene ends, matching TTS pacing.
+            int usableDuration = (int) (scene.durationMs() * 0.70);
+            int msPerWord = Math.max(200, Math.min(500, usableDuration / words.length));
 
             int totalWordsMs = msPerWord * words.length;
             if (totalWordsMs > usableDuration) {
-                msPerWord = Math.max(250, usableDuration / words.length);
+                msPerWord = Math.max(200, usableDuration / words.length);
             }
 
             int wordOffset = sceneStartMs + 150;
