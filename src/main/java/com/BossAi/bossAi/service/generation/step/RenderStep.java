@@ -632,7 +632,7 @@ public class RenderStep implements GenerationStep {
     }
 
     private String f(double value) {
-        return String.format("%.3f", value);
+        return String.format(java.util.Locale.US, "%.3f", value);
     }
 
     private void runCommand(List<String> cmd, String phase) throws Exception {
