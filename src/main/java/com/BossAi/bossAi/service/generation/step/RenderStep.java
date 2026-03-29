@@ -60,14 +60,6 @@ public class RenderStep implements GenerationStep {
     private static final double WORD_FADE_IN        = 0.06;   // 60ms pop-in
     private static final int    MIN_WORD_DISPLAY_MS = 150;     // min word visibility
 
-    // Word-by-word subtitle config
-    private static final int WORD_FONT_SIZE = 80;
-    private static final String WORD_FONT_COLOR = "white";
-    private static final String WORD_BORDER_COLOR = "black";
-    private static final int WORD_BORDER_WIDTH = 5;
-    private static final String WORD_FONT = "Arial";
-    private static final double WORD_FADE_IN = 0.06;  // 60ms pop-in
-    private static final int MIN_WORD_DISPLAY_MS = 150;
     @Override
     public void execute(GenerationContext context) throws Exception {
         context.updateProgress(
@@ -432,9 +424,15 @@ public class RenderStep implements GenerationStep {
             double startSec = wt.startMs() / 1000.0;
             double endSec   = wt.endMs()   / 1000.0;
 
-            // Min display time — short Whisper words don't flash too fast
+            // Min display time — stretch short words but don't overlap next word
             if ((endSec - startSec) * 1000 < MIN_WORD_DISPLAY_MS) {
-                endSec = startSec + MIN_WORD_DISPLAY_MS / 1000.0;
+                double maxEnd = startSec + MIN_WORD_DISPLAY_MS / 1000.0;
+                // Clamp to next word's start to prevent overlap
+                if (i + 1 < words.size()) {
+                    double nextStart = words.get(i + 1).startMs() / 1000.0;
+                    maxEnd = Math.min(maxEnd, nextStart);
+                }
+                endSec = Math.max(endSec, maxEnd);
             }
 
             // UPPERCASE for TikTok style
@@ -759,8 +757,9 @@ public class RenderStep implements GenerationStep {
 
         return text
                 .replace("\\", "\\\\")
-                .replace("'",  "''")
+                .replace("'",  "\u2019")  // Unicode RIGHT SINGLE QUOTE — FFmpeg renders it, doesn't break parser
                 .replace(":",  "\\:")
+                .replace(";",  "")        // strip semicolons (filter chain separator)
                 .replace("%",  "%%");
     }
 
