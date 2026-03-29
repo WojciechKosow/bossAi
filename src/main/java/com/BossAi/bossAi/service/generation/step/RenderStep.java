@@ -31,14 +31,14 @@ import java.util.stream.Collectors;
 
 /**
  * RenderStep v4 — animated effects + scene transitions + word-by-word subtitles.
- *
+ * <p>
  * KLUCZOWA ZASADA: ZAWSZE używaj f() dla wartości double przekazywanych do FFmpeg.
- *
+ * <p>
  * FAZA 4 zmiany:
- *   1. Animated effects — ZOOM_IN/OUT/FAST_ZOOM progressive over duration.
- *      PAN_LEFT/PAN_RIGHT Ken Burns. SHAKE improved.
- *   2. Scene transitions — xfade between scenes (fade, fadewhite, dissolve).
- *   3. Pipeline: per-scene concat → xfade transitions → final render.
+ * 1. Animated effects — ZOOM_IN/OUT/FAST_ZOOM progressive over duration.
+ * PAN_LEFT/PAN_RIGHT Ken Burns. SHAKE improved.
+ * 2. Scene transitions — xfade between scenes (fade, fadewhite, dissolve).
+ * 3. Pipeline: per-scene concat → xfade transitions → final render.
  */
 @Slf4j
 @Service
@@ -52,13 +52,13 @@ public class RenderStep implements GenerationStep {
     private final OverlayEngine overlayEngine;
 
     // Word-by-word subtitle config — TikTok style (big, bold, centered)
-    private static final int    WORD_FONT_SIZE      = 80;
-    private static final String WORD_FONT_COLOR     = "white";
-    private static final String WORD_BORDER_COLOR   = "black";
-    private static final int    WORD_BORDER_WIDTH   = 5;
-    private static final String WORD_FONT           = "Arial";
-    private static final double WORD_FADE_IN        = 0.06;   // 60ms pop-in
-    private static final int    MIN_WORD_DISPLAY_MS = 150;     // min word visibility
+    private static final int WORD_FONT_SIZE = 80;
+    private static final String WORD_FONT_COLOR = "white";
+    private static final String WORD_BORDER_COLOR = "black";
+    private static final int WORD_BORDER_WIDTH = 5;
+    private static final String WORD_FONT = "Arial";
+    private static final double WORD_FADE_IN = 0.06;   // 60ms pop-in
+    private static final int MIN_WORD_DISPLAY_MS = 150;     // min word visibility
 
     @Override
     public void execute(GenerationContext context) throws Exception {
@@ -117,7 +117,8 @@ public class RenderStep implements GenerationStep {
     // SCENE VIDEO BUILDING (per-scene cut clips → concat)
     // =========================================================================
 
-    private record SceneVideo(int sceneIndex, Path path, double durationSec) {}
+    private record SceneVideo(int sceneIndex, Path path, double durationSec) {
+    }
 
     private List<SceneVideo> buildSceneVideos(GenerationContext context, Path workDir) throws Exception {
         List<SceneVideo> sceneVideos = new ArrayList<>();
@@ -256,15 +257,15 @@ public class RenderStep implements GenerationStep {
     private double getTransitionDuration(GenerationContext context) {
         if (context.getStyle() == null) return 0.3;
         return switch (context.getStyle()) {
-            case VIRAL_EDIT          -> 0.2;
-            case UGC_STYLE           -> 0.0;
-            case HIGH_CONVERTING_AD  -> 0.3;
-            case PRODUCT_SHOWCASE    -> 0.4;
-            case STORY_MODE          -> 0.3;
-            case CINEMATIC           -> 0.5;
-            case LUXURY_AD           -> 0.5;
-            case EDUCATIONAL         -> 0.3;
-            default                  -> 0.3;
+            case VIRAL_EDIT -> 0.2;
+            case UGC_STYLE -> 0.0;
+            case HIGH_CONVERTING_AD -> 0.3;
+            case PRODUCT_SHOWCASE -> 0.4;
+            case STORY_MODE -> 0.3;
+            case CINEMATIC -> 0.5;
+            case LUXURY_AD -> 0.5;
+            case EDUCATIONAL -> 0.3;
+            default -> 0.3;
         };
     }
 
@@ -279,7 +280,7 @@ public class RenderStep implements GenerationStep {
             Path output
     ) throws Exception {
         FfmpegProperties.Output cfg = ffmpegProperties.getOutput();
-        boolean hasMusic    = context.getMusicLocalPath() != null;
+        boolean hasMusic = context.getMusicLocalPath() != null;
         boolean hasOverlays = hasOverlays(context);
 
         // Word-by-word timings: preferuj Whisper (real timestamps), fallback do estimated
@@ -428,17 +429,11 @@ public class RenderStep implements GenerationStep {
             String currentOutput = (i == words.size() - 1) ? outputLabel : "[w" + i + "]";
 
             double startSec = wt.startMs() / 1000.0;
-            double endSec   = wt.endMs()   / 1000.0;
+            double endSec = wt.endMs() / 1000.0;
 
-            // Min display time — stretch short words but don't overlap next word
+            // Min display time — short Whisper words don't flash too fast
             if ((endSec - startSec) * 1000 < MIN_WORD_DISPLAY_MS) {
-                double maxEnd = startSec + MIN_WORD_DISPLAY_MS / 1000.0;
-                // Clamp to next word's start to prevent overlap
-                if (i + 1 < words.size()) {
-                    double nextStart = words.get(i + 1).startMs() / 1000.0;
-                    maxEnd = Math.min(maxEnd, nextStart);
-                }
-                endSec = Math.max(endSec, maxEnd);
+                endSec = startSec + MIN_WORD_DISPLAY_MS / 1000.0;
             }
 
             // UPPERCASE for TikTok style
@@ -511,13 +506,13 @@ public class RenderStep implements GenerationStep {
             if (idx < 0 || idx >= scenes.size()) continue;
 
             double startSec = sceneStartMs[idx] / 1000.0;
-            double endSec   = (sceneStartMs[idx] + scenes.get(idx).durationMs()) / 1000.0;
-            double vol      = Math.max(0.0, Math.min(1.0, dir.volume()));
+            double endSec = (sceneStartMs[idx] + scenes.get(idx).durationMs()) / 1000.0;
+            double vol = Math.max(0.0, Math.min(1.0, dir.volume()));
 
             writtenDirections++;
 
             if (dir.fadeInMs() > 0 || dir.fadeOutMs() > 0) {
-                double fadeInSec  = dir.fadeInMs()  / 1000.0;
+                double fadeInSec = dir.fadeInMs() / 1000.0;
                 double fadeOutSec = dir.fadeOutMs() / 1000.0;
 
                 expr.append("if(between(t,").append(f(startSec)).append(",").append(f(endSec)).append("),");
@@ -620,7 +615,7 @@ public class RenderStep implements GenerationStep {
         List<Path> clips = new ArrayList<>();
 
         for (int i = 0; i < direction.getCuts().size(); i++) {
-            Cut cut        = direction.getCuts().get(i);
+            Cut cut = direction.getCuts().get(i);
             int durationMs = cut.getEndMs() - cut.getStartMs();
 
             if (durationMs <= 0) {
@@ -641,9 +636,9 @@ public class RenderStep implements GenerationStep {
     }
 
     private void runCutWithEffect(String input, Cut cut, Path output) throws Exception {
-        double startSec    = cut.getStartMs() / 1000.0;
+        double startSec = cut.getStartMs() / 1000.0;
         double inputDurSec = (cut.getEndMs() - cut.getStartMs()) / 1000.0;
-        String filter      = buildEffectFilter(cut.getEffect(), inputDurSec);
+        String filter = buildEffectFilter(cut.getEffect(), inputDurSec);
 
         // SLOW_MOTION extends output duration (1.5x PTS)
         double outputDurSec = inputDurSec;
@@ -750,27 +745,29 @@ public class RenderStep implements GenerationStep {
 
     private void cleanup(Path... paths) {
         for (Path path : paths) {
-            try { Files.deleteIfExists(path); }
-            catch (Exception e) { log.warn("[RenderStep] Cleanup failed: {}", path); }
+            try {
+                Files.deleteIfExists(path);
+            } catch (Exception e) {
+                log.warn("[RenderStep] Cleanup failed: {}", path);
+            }
         }
     }
 
     /**
      * Escapuje tekst słowa dla FFmpeg drawtext.
-     *   \  → \\   backslash (pierwszy!)
-     *   '  → \'   apostrof
-     *   :  → \:   separator opcji drawtext
-     *   %  → %%   znak formatowania drawtext
+     * \  → \\   backslash (pierwszy!)
+     * '  → \'   apostrof
+     * :  → \:   separator opcji drawtext
+     * %  → %%   znak formatowania drawtext
      */
     private String escapeDrawtext(String text) {
         if (text == null) return "";
 
         return text
                 .replace("\\", "\\\\")
-                .replace("'",  "\u2019")  // Unicode RIGHT SINGLE QUOTE — FFmpeg renders it, doesn't break parser
-                .replace(":",  "\\:")
-                .replace(";",  "")        // strip semicolons (filter chain separator)
-                .replace("%",  "%%");
+                .replace("'", "''")
+                .replace(":", "\\:")
+                .replace("%", "%%");
     }
 
     /**
