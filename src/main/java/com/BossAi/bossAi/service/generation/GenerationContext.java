@@ -7,6 +7,7 @@ import com.BossAi.bossAi.service.SubtitleService;
 import com.BossAi.bossAi.service.director.DirectorPlan;
 import com.BossAi.bossAi.service.generation.context.SceneAsset;
 import com.BossAi.bossAi.service.generation.context.ScriptResult;
+import com.BossAi.bossAi.service.music.MusicAnalysisResult;
 import com.BossAi.bossAi.service.style.StyleConfig;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
@@ -160,6 +161,19 @@ public class GenerationContext {
      * Null = brak muzyki w finalnym filmie.
      */
     private String musicLocalPath;
+
+    /**
+     * Wynik analizy struktury muzyki (energy profile, segmenty, BPM).
+     * Null jeśli brak muzyki lub analiza nie powiodła się.
+     */
+    private MusicAnalysisResult musicAnalysis;
+
+    /**
+     * Offset startu muzyki w ms — od tego momentu muzyka zaczyna grać.
+     * Np. 43000 = zacznij od 43. sekundy muzyki (FFmpeg -ss).
+     * Obliczany przez MusicAlignmentService na podstawie analizy muzyki + scenariusza.
+     */
+    private int musicStartOffsetMs;
 
     // -------------------------------------------------------------------------
     // WYNIKI RENDERSTEP

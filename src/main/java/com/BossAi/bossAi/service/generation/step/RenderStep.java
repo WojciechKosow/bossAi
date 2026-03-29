@@ -308,6 +308,12 @@ public class RenderStep implements GenerationStep {
         cmd.addAll(List.of("-i", concatVideo.toString()));
         cmd.addAll(List.of("-i", context.getVoiceLocalPath()));
         if (hasMusic) {
+            // Seek into music at the optimal start offset (from MusicAlignmentService)
+            int musicOffsetMs = context.getMusicStartOffsetMs();
+            if (musicOffsetMs > 0) {
+                cmd.addAll(List.of("-ss", f(musicOffsetMs / 1000.0)));
+                log.info("[RenderStep] Music seek offset: {}ms ({}s)", musicOffsetMs, f(musicOffsetMs / 1000.0));
+            }
             cmd.addAll(List.of("-i", context.getMusicLocalPath()));
         }
 
@@ -482,6 +488,10 @@ public class RenderStep implements GenerationStep {
             log.info("[RenderStep] Brak musicDirections — stały volume=0.25");
             return "volume=0.25";
         }
+
+        boolean isAnalysisBased = context.getMusicAnalysis() != null;
+        log.info("[RenderStep] MusicDirections source: {}",
+                isAnalysisBased ? "MusicAnalysisService (analysis-based)" : "GPT (estimated)");
 
         List<ScriptResult.SceneScript> scenes = context.getScript().scenes();
         int[] sceneStartMs = new int[scenes.size()];
