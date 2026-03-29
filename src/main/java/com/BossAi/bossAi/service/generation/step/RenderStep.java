@@ -432,9 +432,15 @@ public class RenderStep implements GenerationStep {
             double startSec = wt.startMs() / 1000.0;
             double endSec   = wt.endMs()   / 1000.0;
 
-            // Min display time — short Whisper words don't flash too fast
+            // Min display time — stretch short words but don't overlap next word
             if ((endSec - startSec) * 1000 < MIN_WORD_DISPLAY_MS) {
-                endSec = startSec + MIN_WORD_DISPLAY_MS / 1000.0;
+                double maxEnd = startSec + MIN_WORD_DISPLAY_MS / 1000.0;
+                // Clamp to next word's start to prevent overlap
+                if (i + 1 < words.size()) {
+                    double nextStart = words.get(i + 1).startMs() / 1000.0;
+                    maxEnd = Math.min(maxEnd, nextStart);
+                }
+                endSec = Math.max(endSec, maxEnd);
             }
 
             // UPPERCASE for TikTok style
@@ -759,8 +765,9 @@ public class RenderStep implements GenerationStep {
 
         return text
                 .replace("\\", "\\\\")
-                .replace("'",  "''")
+                .replace("'",  "\u2019")  // Unicode RIGHT SINGLE QUOTE — FFmpeg renders it, doesn't break parser
                 .replace(":",  "\\:")
+                .replace(";",  "")        // strip semicolons (filter chain separator)
                 .replace("%",  "%%");
     }
 

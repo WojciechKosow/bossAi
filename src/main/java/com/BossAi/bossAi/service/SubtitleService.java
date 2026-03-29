@@ -58,18 +58,23 @@ public class SubtitleService {
                 msPerWord = Math.max(200, usableDuration / words.length);
             }
 
-            int wordOffset = sceneStartMs + 150;
+            int wordOffset = sceneStartMs + 50; // minimal offset (was 150)
 
             for (String word : words) {
                 int wordStart = wordOffset;
                 int wordEnd = wordStart + msPerWord;
 
-                if (wordEnd > sceneStartMs + scene.durationMs()) {
-                    wordEnd = sceneStartMs + scene.durationMs();
+                int sceneEnd = sceneStartMs + scene.durationMs();
+                if (wordEnd > sceneEnd) {
+                    wordEnd = sceneEnd;
                 }
 
+                // Always add the word (even if clipped) so no words are silently dropped
                 if (wordEnd > wordStart) {
                     timings.add(new WordTiming(word, wordStart, wordEnd));
+                } else if (wordStart < sceneEnd) {
+                    // Last resort: give it minimum 80ms
+                    timings.add(new WordTiming(word, wordStart, wordStart + 80));
                 }
 
                 wordOffset = wordEnd;

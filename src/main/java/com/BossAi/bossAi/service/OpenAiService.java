@@ -475,11 +475,16 @@ public class OpenAiService {
                 double startSec = wordNode.path("start").asDouble(0);
                 double endSec = wordNode.path("end").asDouble(0);
 
-                if (!word.isEmpty() && endSec > startSec) {
+                if (!word.isEmpty() && endSec >= startSec) {
+                    // Ensure minimum duration for zero-length Whisper words
+                    int startMs = (int) (startSec * 1000);
+                    int endMs = (int) (endSec * 1000);
+                    if (endMs <= startMs) endMs = startMs + 80; // 80ms floor
+
                     timings.add(new SubtitleService.WordTiming(
                             word,
-                            (int) (startSec * 1000),
-                            (int) (endSec * 1000)
+                            startMs,
+                            endMs
                     ));
                 }
             }
