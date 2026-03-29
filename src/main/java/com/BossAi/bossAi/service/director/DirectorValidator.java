@@ -164,7 +164,7 @@ public class DirectorValidator {
         int tolerance = computeTolerance(expectedDurationMs);
         int diff      = Math.abs(totalMs - expectedDurationMs);
 
-        if (diff > tolerance) {
+        if (diff > tolerance)  {
             throw new IllegalArgumentException(String.format(
                     "[DirectorValidator] Scena %d — suma cuts %dms odbiega od oczekiwanej %dms o %dms " +
                             "(tolerancja %dms). DirectorStep użyje fallback planu.",

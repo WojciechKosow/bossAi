@@ -16,6 +16,7 @@ import org.springframework.stereotype.Service;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -39,7 +40,6 @@ public class VoiceStep implements GenerationStep {
 
     @Value("${ffmpeg.temp.dir:/tmp/bossai/render}")
     private String tempDir;
-
     @Override
     public void execute(GenerationContext context) throws Exception {
         context.updateProgress(
@@ -55,26 +55,26 @@ public class VoiceStep implements GenerationStep {
         String voiceLocalPath;
 
         if (context.hasUserVoice()) {
-            // Tryb 1: user dostarczył własny voice-over
             voiceLocalPath = copyUserVoice(context);
         } else {
-            // Tryb 2: AI TTS z narracji GPT-4o
             voiceLocalPath = generateAiTts(context);
         }
 
         context.setVoiceLocalPath(voiceLocalPath);
 
-        // Transkrybuj TTS audio przez Whisper — word-level timestamps
-        // Wynik zapisany w context.wordTimings, RenderStep użyje ich do subtitle sync
         if (!context.hasUserVoice()) {
             try {
                 byte[] audioBytes = Files.readAllBytes(Path.of(voiceLocalPath));
-                List<SubtitleService.WordTiming> timings = openAiService.transcribeWordTimestamps(audioBytes);
+                List<SubtitleService.WordTiming> timings = transcribeWithRetry(audioBytes);
+
                 if (!timings.isEmpty()) {
-                    context.setWordTimings(timings);
-                    log.info("[VoiceStep] Whisper word timings OK — {} słów", timings.size());
+                    // Scal tokeny Whisper w czytelne słowa przed zapisem do kontekstu
+                    List<SubtitleService.WordTiming> merged = mergeWhisperTokens(timings);
+                    context.setWordTimings(merged);
+                    log.info("[VoiceStep] Whisper OK — {} tokenów → {} słów po merge",
+                            timings.size(), merged.size());
                 } else {
-                    log.warn("[VoiceStep] Whisper zwrócił 0 słów — RenderStep użyje estimated timings");
+                    log.warn("[VoiceStep] Whisper zwrócił 0 tokenów — RenderStep użyje estimated timings");
                 }
             } catch (Exception e) {
                 log.warn("[VoiceStep] Whisper transcription failed — fallback: {}", e.getMessage());
@@ -84,6 +84,72 @@ public class VoiceStep implements GenerationStep {
         log.info("[VoiceStep] DONE — voiceLocalPath: {}", voiceLocalPath);
     }
 
+    /**
+     * Scala tokeny Whisper w czytelne słowa wyświetlane na ekranie.
+     *
+     * Whisper zwraca podtokeny z wiodącą spacją oznaczającą nowe słowo:
+     *   " max" (spacja = nowe słowo)  → osobny token
+     *   "2"    (brak spacji = kontynuacja) → scala z poprzednim
+     *
+     * Przykład: [" max"(0-300), "2"(300-400), " seconds"(400-700)]
+     *         → ["max2"(0-400), "seconds"(400-700)]
+     *
+     * Dodatkowo: tokeny rozdzielone < 80ms są zawsze scalane
+     * (Whisper czasem dzieli jedno słowo na 2 tokeny z mikroprzerwą).
+     */
+    private List<SubtitleService.WordTiming> mergeWhisperTokens(
+            List<SubtitleService.WordTiming> tokens) {
+
+        List<SubtitleService.WordTiming> merged = new ArrayList<>();
+
+        for (SubtitleService.WordTiming token : tokens) {
+            String word = token.word();
+            if (word == null || word.isBlank()) continue;
+
+            String trimmed = word.trim();
+
+            // Token BEZ wiodącej spacji = kontynuacja poprzedniego tokenu
+            // LUB mikro-przerwa < 80ms = Whisper podzielił jedno słowo
+            boolean isSubtoken     = !word.startsWith(" ") && !merged.isEmpty();
+            boolean isMicroGap     = !merged.isEmpty()
+                    && token.startMs() - merged.get(merged.size() - 1).endMs() < 80;
+
+            if (isSubtoken || isMicroGap) {
+                SubtitleService.WordTiming prev = merged.remove(merged.size() - 1);
+                String mergedWord = prev.word() + trimmed;
+                merged.add(new SubtitleService.WordTiming(
+                        mergedWord, prev.startMs(), token.endMs()));
+                log.debug("[VoiceStep] Merge: '{}' + '{}' → '{}'",
+                        prev.word(), trimmed, mergedWord);
+            } else {
+                merged.add(new SubtitleService.WordTiming(
+                        trimmed, token.startMs(), token.endMs()));
+            }
+        }
+
+        return merged;
+    }
+
+    private List<SubtitleService.WordTiming> transcribeWithRetry(byte[] audioBytes) {
+        for (int attempt = 1; attempt <= 3; attempt++) {
+            try {
+                List<SubtitleService.WordTiming> timings =
+                        openAiService.transcribeWordTimestamps(audioBytes);
+                if (!timings.isEmpty()) {
+                    log.info("[VoiceStep] Whisper OK na próbie {} — {} tokenów", attempt, timings.size());
+                    return timings;
+                }
+                log.warn("[VoiceStep] Whisper próba {} — 0 tokenów", attempt);
+            } catch (Exception e) {
+                log.warn("[VoiceStep] Whisper próba {} failed: {}", attempt, e.getMessage());
+            }
+
+            try { Thread.sleep(500L * attempt); } catch (InterruptedException ignored) {}
+        }
+
+        log.error("[VoiceStep] Whisper failed po 3 próbach — RenderStep użyje estimated timings");
+        return List.of();
+    }
     // -------------------------------------------------------------------------
 
     private String generateAiTts(GenerationContext context) throws Exception {
@@ -131,4 +197,6 @@ public class VoiceStep implements GenerationStep {
     private Path getWorkingDir(GenerationContext context) {
         return Paths.get(tempDir, context.getGenerationId().toString());
     }
+
+
 }
