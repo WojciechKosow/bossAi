@@ -411,8 +411,8 @@ public class RenderStep implements GenerationStep {
     }
 
     // =========================================================================
-    // WORD-BY-WORD DRAWTEXT CHAIN
-    // =========================================================================
+// WORD-BY-WORD DRAWTEXT CHAIN
+// =========================================================================
 
     private String buildWordByWordFilter(
             List<SubtitleService.WordTiming> words,
@@ -421,23 +421,57 @@ public class RenderStep implements GenerationStep {
     ) {
         if (words.isEmpty()) return "";
 
+        // Krok 1: Przytnij endMs każdego słowa do startMs następnego (eliminuje nawarstwianie)
+        List<SubtitleService.WordTiming> clipped = new ArrayList<>();
+        for (int i = 0; i < words.size(); i++) {
+            SubtitleService.WordTiming wt = words.get(i);
+            int startMs = wt.startMs();
+            int endMs   = wt.endMs();
+
+            if (i < words.size() - 1) {
+                int nextStart = words.get(i + 1).startMs();
+                if (endMs > nextStart) {
+                    endMs = nextStart;
+                }
+            }
+
+            if (endMs - startMs < MIN_WORD_DISPLAY_MS) {
+                endMs = startMs + MIN_WORD_DISPLAY_MS;
+            }
+
+            clipped.add(new SubtitleService.WordTiming(wt.word(), startMs, endMs));
+        }
+
+        // Krok 2: Grupuj słowa (po 2-3 naraz, krótkie słowa z sąsiadem)
+        List<List<SubtitleService.WordTiming>> groups = groupWordsForDisplay(clipped);
+
+        log.info("[RenderStep] Word-by-word: {} tokenów → {} grup", words.size(), groups.size());
+
+        // Krok 3: Buduj drawtext chain per grupa
         StringBuilder chain = new StringBuilder();
         String currentInput = inputLabel;
 
-        for (int i = 0; i < words.size(); i++) {
-            SubtitleService.WordTiming wt = words.get(i);
-            String currentOutput = (i == words.size() - 1) ? outputLabel : "[w" + i + "]";
+        for (int i = 0; i < groups.size(); i++) {
+            List<SubtitleService.WordTiming> group = groups.get(i);
+            String currentOutput = (i == groups.size() - 1) ? outputLabel : "[w" + i + "]";
 
-            double startSec = wt.startMs() / 1000.0;
-            double endSec = wt.endMs() / 1000.0;
+            // Tekst grupy — wszystkie słowa złączone spacją, UPPERCASE
+            String displayText = group.stream()
+                    .map(wt -> wt.word().trim())
+                    .filter(w -> !w.isEmpty())
+                    .collect(Collectors.joining(" "))
+                    .toUpperCase();
 
-            // Min display time — short Whisper words don't flash too fast
+            String escapedText = escapeDrawtext(displayText);
+
+            // Timing grupy: start pierwszego słowa → end ostatniego słowa
+            double startSec = group.get(0).startMs() / 1000.0;
+            double endSec   = group.get(group.size() - 1).endMs() / 1000.0;
+
+            // Zabezpieczenie — minimalna widoczność grupy
             if ((endSec - startSec) * 1000 < MIN_WORD_DISPLAY_MS) {
                 endSec = startSec + MIN_WORD_DISPLAY_MS / 1000.0;
             }
-
-            // UPPERCASE for TikTok style
-            String escapedWord = escapeDrawtext(wt.word().toUpperCase());
 
             String alpha = String.format(Locale.US,
                     "if(lt(t,%s),min(1,(t-%s)/%s),1)",
@@ -446,7 +480,7 @@ public class RenderStep implements GenerationStep {
 
             chain.append(currentInput)
                     .append("drawtext=")
-                    .append("text='").append(escapedWord).append("':")
+                    .append("text='").append(escapedText).append("':")
                     .append("font='").append(WORD_FONT).append("':")
                     .append("fontsize=").append(WORD_FONT_SIZE).append(":")
                     .append("fontcolor=").append(WORD_FONT_COLOR).append(":")
@@ -459,17 +493,67 @@ public class RenderStep implements GenerationStep {
                     .append("alpha='").append(alpha).append("'")
                     .append(currentOutput);
 
-            if (i < words.size() - 1) {
+            if (i < groups.size() - 1) {
                 chain.append(";");
             }
 
             currentInput = currentOutput;
         }
 
-        log.info("[RenderStep] Word-by-word filter: {} drawtext nodes, {} chars",
-                words.size(), chain.length());
+        log.info("[RenderStep] Word-by-word filter: {} grup, {} chars",
+                groups.size(), chain.length());
 
         return chain.toString();
+    }
+
+    private List<List<SubtitleService.WordTiming>> groupWordsForDisplay(
+            List<SubtitleService.WordTiming> words) {
+
+        // Słowa funkcyjne — zawsze łączone z sąsiadem
+        final java.util.Set<String> FUNCTION_WORDS = java.util.Set.of(
+                "a", "an", "the", "in", "on", "at", "to", "of", "and", "or",
+                "but", "for", "nor", "so", "yet", "by", "as", "is", "it",
+                "i", "w", "z", "na", "do", "się", "że", "nie", "jak", "co",
+                "po", "za", "go", "mu", "te", "ten", "ta", "tu"
+        );
+
+        List<List<SubtitleService.WordTiming>> groups = new ArrayList<>();
+        int i = 0;
+
+        while (i < words.size()) {
+            List<SubtitleService.WordTiming> group = new ArrayList<>();
+            group.add(words.get(i));
+
+            while (group.size() < 3 && i + group.size() < words.size()) {
+                SubtitleService.WordTiming next    = words.get(i + group.size());
+                SubtitleService.WordTiming last    = group.get(group.size() - 1);
+                String                     nextWord = next.word().trim().toLowerCase();
+                String                     lastWord = last.word().trim().toLowerCase();
+
+                boolean nextIsFunctionWord = FUNCTION_WORDS.contains(nextWord);
+                boolean lastIsFunctionWord = FUNCTION_WORDS.contains(lastWord);
+                boolean nextIsShort        = nextWord.length() <= 2;
+                boolean isSmallGap         = next.startMs() - last.endMs() < 80;
+                boolean groupHasOneWord    = group.size() == 1;
+
+                // Łącz gdy:
+                // - następne słowo jest funkcyjne (in, and, or, to...)
+                // - poprzednie słowo jest funkcyjne (nie zostawiaj go samego)
+                // - następne słowo jest bardzo krótkie (1-2 znaki)
+                // - przerwa między słowami < 80ms (mówione razem)
+                if (nextIsFunctionWord || (lastIsFunctionWord && groupHasOneWord)
+                        || nextIsShort || (isSmallGap && groupHasOneWord)) {
+                    group.add(next);
+                } else {
+                    break;
+                }
+            }
+
+            groups.add(group);
+            i += group.size();
+        }
+
+        return groups;
     }
 
     // =========================================================================
@@ -635,12 +719,45 @@ public class RenderStep implements GenerationStep {
         return clips;
     }
 
+//    private void runCutWithEffect(String input, Cut cut, Path output) throws Exception {
+//        double startSec = cut.getStartMs() / 1000.0;
+//        double inputDurSec = (cut.getEndMs() - cut.getStartMs()) / 1000.0;
+//        String filter = buildEffectFilter(cut.getEffect(), inputDurSec);
+//
+//        // SLOW_MOTION extends output duration (1.5x PTS)
+//        double outputDurSec = inputDurSec;
+//        if (cut.getEffect() == EffectType.SLOW_MOTION) {
+//            outputDurSec = inputDurSec * 1.5;
+//        }
+//
+//        List<String> cmd = new ArrayList<>();
+//        cmd.add(ffmpegProperties.getBinary().getPath());
+//        cmd.add("-y");
+//        cmd.addAll(List.of("-ss", f(startSec)));
+//        cmd.addAll(List.of("-t", f(inputDurSec)));
+//        cmd.addAll(List.of("-i", input));
+//        if (filter != null) {
+//            // Write filter to file — avoids Windows quoting issues with expressions
+//            String resetFilter = "setpts=PTS-STARTPTS," + filter;
+//            Path filterFile = output.getParent().resolve(output.getFileName() + ".vf");
+//            Files.writeString(filterFile, resetFilter);
+//            cmd.addAll(List.of("-filter_script:v", filterFile.toString()));
+//        }
+//        cmd.addAll(List.of(
+//                "-t", f(outputDurSec),
+//                "-c:v", "libx264", "-preset", "fast", "-crf", "23",
+//                "-c:a", "aac",
+//                output.toString()
+//        ));
+//
+//        runCommand(cmd, "cut");
+//    }
+
     private void runCutWithEffect(String input, Cut cut, Path output) throws Exception {
         double startSec = cut.getStartMs() / 1000.0;
         double inputDurSec = (cut.getEndMs() - cut.getStartMs()) / 1000.0;
         String filter = buildEffectFilter(cut.getEffect(), inputDurSec);
 
-        // SLOW_MOTION extends output duration (1.5x PTS)
         double outputDurSec = inputDurSec;
         if (cut.getEffect() == EffectType.SLOW_MOTION) {
             outputDurSec = inputDurSec * 1.5;
@@ -650,15 +767,17 @@ public class RenderStep implements GenerationStep {
         cmd.add(ffmpegProperties.getBinary().getPath());
         cmd.add("-y");
         cmd.addAll(List.of("-ss", f(startSec)));
-        cmd.addAll(List.of("-i", input));
+        cmd.addAll(List.of("-i", input));  // ← -t USUNIĘTE przed -i
+
         if (filter != null) {
-            // Write filter to file — avoids Windows quoting issues with expressions
+            String resetFilter = "setpts=PTS-STARTPTS," + filter;
             Path filterFile = output.getParent().resolve(output.getFileName() + ".vf");
-            Files.writeString(filterFile, filter);
+            Files.writeString(filterFile, resetFilter);
             cmd.addAll(List.of("-filter_script:v", filterFile.toString()));
         }
+
         cmd.addAll(List.of(
-                "-t", f(outputDurSec),
+                "-t", f(outputDurSec),   // ← tylko jedno -t, po filtrze
                 "-c:v", "libx264", "-preset", "fast", "-crf", "23",
                 "-c:a", "aac",
                 output.toString()
@@ -671,35 +790,77 @@ public class RenderStep implements GenerationStep {
      * Animated FFmpeg effect filters — time-based progressive animations.
      * Uses 't' variable (seconds) for smooth motion over cut duration.
      */
+//    private String buildEffectFilter(EffectType effect, double duration) {
+//        if (effect == null) return null;
+//        String dur = f(duration);
+//        return switch (effect) {
+//            // Progressive zoom IN to center (100% → 115%)
+//            // 2*floor(.../2) ensures even dimensions (codec requirement) — eliminates frame jitter
+//            case ZOOM_IN -> String.format(Locale.US,
+//                    "crop=w=2*floor(iw/(1+0.15*t/%s)/2):h=2*floor(ih/(1+0.15*t/%s)/2):x=2*floor((iw-iw/(1+0.15*t/%s))/4):y=2*floor((ih-ih/(1+0.15*t/%s))/4),scale=1080:1920:flags=lanczos",
+//                    dur, dur, dur, dur);
+//            // Progressive zoom OUT from center (115% → 100%)
+//            case ZOOM_OUT -> String.format(Locale.US,
+//                    "crop=w=2*floor(iw/(1.15-0.15*t/%s)/2):h=2*floor(ih/(1.15-0.15*t/%s)/2):x=2*floor((iw-iw/(1.15-0.15*t/%s))/4):y=2*floor((ih-ih/(1.15-0.15*t/%s))/4),scale=1080:1920:flags=lanczos",
+//                    dur, dur, dur, dur);
+//            // Aggressive fast zoom IN (100% → 130%)
+//            case FAST_ZOOM -> String.format(Locale.US,
+//                    "crop=w=2*floor(iw/(1+0.3*t/%s)/2):h=2*floor(ih/(1+0.3*t/%s)/2):x=2*floor((iw-iw/(1+0.3*t/%s))/4):y=2*floor((ih-ih/(1+0.3*t/%s))/4),scale=1080:1920:flags=lanczos",
+//                    dur, dur, dur, dur);
+//            // Ken Burns: pan left → right
+//            case PAN_LEFT -> String.format(Locale.US,
+//                    "scale=2*floor(iw*1.2/2):-2,crop=w=2*floor(iw/1.2/2):h=ih:x=2*floor((iw-iw/1.2)*t/%s/2):y=0,scale=1080:1920:flags=lanczos",
+//                    dur);
+//            // Ken Burns: pan right → left
+//            case PAN_RIGHT -> String.format(Locale.US,
+//                    "scale=2*floor(iw*1.2/2):-2,crop=w=2*floor(iw/1.2/2):h=ih:x=2*floor((iw-iw/1.2)*(1-t/%s)/2):y=0,scale=1080:1920:flags=lanczos",
+//                    dur);
+//            // Camera shake — sinusoidal offset at 5Hz/4Hz, even pixel positions
+//            case SHAKE ->
+//                    "crop=w=iw-20:h=ih-20:x=2*floor((10+8*sin(2*PI*t*5))/2):y=2*floor((10+8*cos(2*PI*t*4))/2),scale=1080:1920:flags=lanczos";
+//            // Slow motion — 1.5x stretch
+//            case SLOW_MOTION -> "setpts=1.5*PTS";
+//            case NONE -> null;
+//        };
+//    }
     private String buildEffectFilter(EffectType effect, double duration) {
         if (effect == null) return null;
         String dur = f(duration);
         return switch (effect) {
-            // Progressive zoom IN to center (100% → 115%)
-            // 2*floor(.../2) ensures even dimensions (codec requirement) — eliminates frame jitter
+
             case ZOOM_IN -> String.format(Locale.US,
-                    "crop=w=2*floor(iw/(1+0.15*t/%s)/2):h=2*floor(ih/(1+0.15*t/%s)/2):x=2*floor((iw-iw/(1+0.15*t/%s))/4):y=2*floor((ih-ih/(1+0.15*t/%s))/4),scale=1080:1920:flags=lanczos",
+                    // round() zamiast 2*floor(.../2) — eliminuje jitter ±2px
+                    "crop=w=iw/(1+0.15*t/%s):h=ih/(1+0.15*t/%s)" +
+                            ":x=(iw-iw/(1+0.15*t/%s))/2:y=(ih-ih/(1+0.15*t/%s))/2" +
+                            ",scale=1080:1920:flags=lanczos",
                     dur, dur, dur, dur);
-            // Progressive zoom OUT from center (115% → 100%)
+
             case ZOOM_OUT -> String.format(Locale.US,
-                    "crop=w=2*floor(iw/(1.15-0.15*t/%s)/2):h=2*floor(ih/(1.15-0.15*t/%s)/2):x=2*floor((iw-iw/(1.15-0.15*t/%s))/4):y=2*floor((ih-ih/(1.15-0.15*t/%s))/4),scale=1080:1920:flags=lanczos",
+                    "crop=w=iw/(1.15-0.15*t/%s):h=ih/(1.15-0.15*t/%s)" +
+                            ":x=(iw-iw/(1.15-0.15*t/%s))/2:y=(ih-ih/(1.15-0.15*t/%s))/2" +
+                            ",scale=1080:1920:flags=lanczos",
                     dur, dur, dur, dur);
-            // Aggressive fast zoom IN (100% → 130%)
+
             case FAST_ZOOM -> String.format(Locale.US,
-                    "crop=w=2*floor(iw/(1+0.3*t/%s)/2):h=2*floor(ih/(1+0.3*t/%s)/2):x=2*floor((iw-iw/(1+0.3*t/%s))/4):y=2*floor((ih-ih/(1+0.3*t/%s))/4),scale=1080:1920:flags=lanczos",
+                    "crop=w=iw/(1+0.3*t/%s):h=ih/(1+0.3*t/%s)" +
+                            ":x=(iw-iw/(1+0.3*t/%s))/2:y=(ih-ih/(1+0.3*t/%s))/2" +
+                            ",scale=1080:1920:flags=lanczos",
                     dur, dur, dur, dur);
-            // Ken Burns: pan left → right
+
             case PAN_LEFT -> String.format(Locale.US,
-                    "scale=2*floor(iw*1.2/2):-2,crop=w=2*floor(iw/1.2/2):h=ih:x=2*floor((iw-iw/1.2)*t/%s/2):y=0,scale=1080:1920:flags=lanczos",
+                    "crop=w=iw/1.2:h=ih:x=(iw-iw/1.2)*t/%s:y=0" +
+                            ",scale=1080:1920:flags=lanczos",
                     dur);
-            // Ken Burns: pan right → left
+
             case PAN_RIGHT -> String.format(Locale.US,
-                    "scale=2*floor(iw*1.2/2):-2,crop=w=2*floor(iw/1.2/2):h=ih:x=2*floor((iw-iw/1.2)*(1-t/%s)/2):y=0,scale=1080:1920:flags=lanczos",
+                    "crop=w=iw/1.2:h=ih:x=(iw-iw/1.2)*(1-t/%s):y=0" +
+                            ",scale=1080:1920:flags=lanczos",
                     dur);
-            // Camera shake — sinusoidal offset at 5Hz/4Hz, even pixel positions
-            case SHAKE ->
-                    "crop=w=iw-20:h=ih-20:x=2*floor((10+8*sin(2*PI*t*5))/2):y=2*floor((10+8*cos(2*PI*t*4))/2),scale=1080:1920:flags=lanczos";
-            // Slow motion — 1.5x stretch
+
+            case SHAKE -> "crop=w=iw-20:h=ih-20" +
+                    ":x=10+8*sin(2*PI*t*5):y=10+8*cos(2*PI*t*4)" +
+                    ",scale=1080:1920:flags=lanczos";
+
             case SLOW_MOTION -> "setpts=1.5*PTS";
             case NONE -> null;
         };
