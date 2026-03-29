@@ -681,28 +681,29 @@ public class RenderStep implements GenerationStep {
         String dur = f(duration);
         return switch (effect) {
             // Progressive zoom IN to center (100% → 115%)
+            // 2*floor(.../2) ensures even dimensions (codec requirement) — eliminates frame jitter
             case ZOOM_IN -> String.format(Locale.US,
-                    "crop=w=iw/(1+0.15*t/%s):h=ih/(1+0.15*t/%s):x=(iw-iw/(1+0.15*t/%s))/2:y=(ih-ih/(1+0.15*t/%s))/2,scale=1080:1920:flags=lanczos",
+                    "crop=w=2*floor(iw/(1+0.15*t/%s)/2):h=2*floor(ih/(1+0.15*t/%s)/2):x=2*floor((iw-iw/(1+0.15*t/%s))/4):y=2*floor((ih-ih/(1+0.15*t/%s))/4),scale=1080:1920:flags=lanczos",
                     dur, dur, dur, dur);
             // Progressive zoom OUT from center (115% → 100%)
             case ZOOM_OUT -> String.format(Locale.US,
-                    "crop=w=iw/(1.15-0.15*t/%s):h=ih/(1.15-0.15*t/%s):x=(iw-iw/(1.15-0.15*t/%s))/2:y=(ih-ih/(1.15-0.15*t/%s))/2,scale=1080:1920:flags=lanczos",
+                    "crop=w=2*floor(iw/(1.15-0.15*t/%s)/2):h=2*floor(ih/(1.15-0.15*t/%s)/2):x=2*floor((iw-iw/(1.15-0.15*t/%s))/4):y=2*floor((ih-ih/(1.15-0.15*t/%s))/4),scale=1080:1920:flags=lanczos",
                     dur, dur, dur, dur);
             // Aggressive fast zoom IN (100% → 130%)
             case FAST_ZOOM -> String.format(Locale.US,
-                    "crop=w=iw/(1+0.3*t/%s):h=ih/(1+0.3*t/%s):x=(iw-iw/(1+0.3*t/%s))/2:y=(ih-ih/(1+0.3*t/%s))/2,scale=1080:1920:flags=lanczos",
+                    "crop=w=2*floor(iw/(1+0.3*t/%s)/2):h=2*floor(ih/(1+0.3*t/%s)/2):x=2*floor((iw-iw/(1+0.3*t/%s))/4):y=2*floor((ih-ih/(1+0.3*t/%s))/4),scale=1080:1920:flags=lanczos",
                     dur, dur, dur, dur);
             // Ken Burns: pan left → right
             case PAN_LEFT -> String.format(Locale.US,
-                    "scale=iw*1.2:-2,crop=w=iw/1.2:h=ih:x=(iw-iw/1.2)*t/%s:y=0,scale=1080:1920:flags=lanczos",
+                    "scale=2*floor(iw*1.2/2):-2,crop=w=2*floor(iw/1.2/2):h=ih:x=2*floor((iw-iw/1.2)*t/%s/2):y=0,scale=1080:1920:flags=lanczos",
                     dur);
             // Ken Burns: pan right → left
             case PAN_RIGHT -> String.format(Locale.US,
-                    "scale=iw*1.2:-2,crop=w=iw/1.2:h=ih:x=(iw-iw/1.2)*(1-t/%s):y=0,scale=1080:1920:flags=lanczos",
+                    "scale=2*floor(iw*1.2/2):-2,crop=w=2*floor(iw/1.2/2):h=ih:x=2*floor((iw-iw/1.2)*(1-t/%s)/2):y=0,scale=1080:1920:flags=lanczos",
                     dur);
-            // Camera shake — sinusoidal offset at 5Hz/4Hz
+            // Camera shake — sinusoidal offset at 5Hz/4Hz, even pixel positions
             case SHAKE ->
-                    "crop=w=iw-20:h=ih-20:x=10+8*sin(2*PI*t*5):y=10+8*cos(2*PI*t*4),scale=1080:1920:flags=lanczos";
+                    "crop=w=iw-20:h=ih-20:x=2*floor((10+8*sin(2*PI*t*5))/2):y=2*floor((10+8*cos(2*PI*t*4))/2),scale=1080:1920:flags=lanczos";
             // Slow motion — 1.5x stretch
             case SLOW_MOTION -> "setpts=1.5*PTS";
             case NONE -> null;
