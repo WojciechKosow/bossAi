@@ -94,8 +94,10 @@ public class VoiceStep implements GenerationStep {
      * Przykład: [" max"(0-300), "2"(300-400), " seconds"(400-700)]
      *         → ["max2"(0-400), "seconds"(400-700)]
      *
-     * Dodatkowo: tokeny rozdzielone < 80ms są zawsze scalane
-     * (Whisper czasem dzieli jedno słowo na 2 tokeny z mikroprzerwą).
+     * WAŻNE: scalamy TYLKO subtokeny (brak wiodącej spacji).
+     * NIE scalamy na podstawie mikro-przerwy — TTS naturalnie ma
+     * < 80ms przerwy między oddzielnymi słowami, co powodowało
+     * łączenie WSZYSTKICH słów w jeden ciąg (VOICESYOULITERALLYCANT...).
      */
     private List<SubtitleService.WordTiming> mergeWhisperTokens(
             List<SubtitleService.WordTiming> tokens) {
@@ -108,18 +110,15 @@ public class VoiceStep implements GenerationStep {
 
             String trimmed = word.trim();
 
-            // Token BEZ wiodącej spacji = kontynuacja poprzedniego tokenu
-            // LUB mikro-przerwa < 80ms = Whisper podzielił jedno słowo
-            boolean isSubtoken     = !word.startsWith(" ") && !merged.isEmpty();
-            boolean isMicroGap     = !merged.isEmpty()
-                    && token.startMs() - merged.get(merged.size() - 1).endMs() < 80;
+            // Token BEZ wiodącej spacji = kontynuacja poprzedniego tokenu (np. "2" po " max")
+            boolean isSubtoken = !word.startsWith(" ") && !merged.isEmpty();
 
-            if (isSubtoken || isMicroGap) {
+            if (isSubtoken) {
                 SubtitleService.WordTiming prev = merged.remove(merged.size() - 1);
                 String mergedWord = prev.word() + trimmed;
                 merged.add(new SubtitleService.WordTiming(
                         mergedWord, prev.startMs(), token.endMs()));
-                log.debug("[VoiceStep] Merge: '{}' + '{}' → '{}'",
+                log.debug("[VoiceStep] Merge subtoken: '{}' + '{}' → '{}'",
                         prev.word(), trimmed, mergedWord);
             } else {
                 merged.add(new SubtitleService.WordTiming(
