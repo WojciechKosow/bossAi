@@ -280,77 +280,75 @@ public class RenderStep implements GenerationStep {
             Path output
     ) throws Exception {
         FfmpegProperties.Output cfg = ffmpegProperties.getOutput();
-        boolean hasMusic = context.getMusicLocalPath() != null;
+        boolean hasMusic    = context.getMusicLocalPath() != null;
         boolean hasOverlays = hasOverlays(context);
 
-        // Word-by-word timings: preferuj Whisper (real timestamps), fallback do estimated
         List<SubtitleService.WordTiming> wordTimings;
         if (context.getWordTimings() != null && !context.getWordTimings().isEmpty()) {
             wordTimings = context.getWordTimings();
-            log.info("[RenderStep] Używam Whisper word timings — {} słów, zakres: {}ms-{}ms",
+            log.info("[RenderStep] Whisper word timings — {} słów, {}ms–{}ms",
                     wordTimings.size(),
                     wordTimings.get(0).startMs(),
                     wordTimings.get(wordTimings.size() - 1).endMs());
         } else {
-            log.info("[RenderStep] Whisper timings puste — generuję estimated timings");
             wordTimings = subtitleService.generateWordTimings(context.getScript());
             log.info("[RenderStep] Estimated word timings — {} słów", wordTimings.size());
-            if (wordTimings.isEmpty()) {
-                log.warn("[RenderStep] Estimated timings PUSTE — sprawdź czy sceny mają subtitleText!");
-                for (int si = 0; si < context.getScript().scenes().size(); si++) {
-                    var scene = context.getScript().scenes().get(si);
-                    log.warn("[RenderStep]   scena {}: subtitleText={}, durationMs={}",
-                            si, scene.subtitleText() != null ? "\"" + scene.subtitleText().substring(0, Math.min(40, scene.subtitleText().length())) + "...\"" : "NULL", scene.durationMs());
-                }
-            }
         }
         boolean useWordByWord = !wordTimings.isEmpty();
-        log.info("[RenderStep] Subtitle mode: {}, count: {}", useWordByWord ? "PHRASE-BY-PHRASE" : "SRT_FALLBACK", wordTimings.size());
 
-        // Fallback: SRT file jeśli word-by-word nie zadziałał
         Path srtFile = null;
         if (!useWordByWord) {
-            log.warn("[RenderStep] Word-by-word puste — fallback do SRT (jeden blok per scena!)");
+            log.warn("[RenderStep] Word-by-word puste — fallback do SRT");
             String srtContent = subtitleService.generateSrt(context.getScript(), 0);
             srtFile = workDir.resolve("subtitles.srt");
             Files.writeString(srtFile, srtContent);
         }
 
+        // === Buduj komendę ===
         List<String> cmd = new ArrayList<>();
         cmd.add(ffmpegProperties.getBinary().getPath());
         cmd.add("-y");
-        cmd.addAll(List.of("-i", concatVideo.toString()));
-        cmd.addAll(List.of("-i", context.getVoiceLocalPath()));
+        cmd.addAll(List.of("-i", concatVideo.toString()));    // input 0: video
+        cmd.addAll(List.of("-i", context.getVoiceLocalPath())); // input 1: voice
+
         if (hasMusic) {
-            // Seek into music at the optimal start offset (from MusicAlignmentService)
             int musicOffsetMs = context.getMusicStartOffsetMs();
             if (musicOffsetMs > 0) {
                 cmd.addAll(List.of("-ss", f(musicOffsetMs / 1000.0)));
-                log.info("[RenderStep] Music seek offset: {}ms ({}s)", musicOffsetMs, f(musicOffsetMs / 1000.0));
             }
-            cmd.addAll(List.of("-i", context.getMusicLocalPath()));
+            cmd.addAll(List.of("-i", context.getMusicLocalPath())); // input 2: music
         }
 
-        // Buduj filter_complex i zapisz do pliku.
-        // W pliku filter_complex_script przecinki NIE są escapowane backslashem.
+        // === Buduj i zapisz filter_complex ===
         String filterComplex = buildFilterComplex(
                 context, hasMusic, hasOverlays, useWordByWord, wordTimings, srtFile);
-        Path filterScript = workDir.resolve("filter_complex.txt");
-        Files.writeString(filterScript, filterComplex);
 
-        log.info("[RenderStep] filter_complex.txt written to: {}", filterScript);
-
-        // Loguj pierwsze 500 znaków filter_complex dla diagnostyki
-        log.info("[RenderStep] filter_complex_script ({} chars, preview):\n{}",
+        log.info("[RenderStep] filter_complex ({} chars):\n{}",
                 filterComplex.length(),
                 filterComplex.substring(0, Math.min(500, filterComplex.length())));
 
-        // Nowa składnia FFmpeg (stara -filter_complex_script jest deprecated)
-        cmd.addAll(List.of("-/filter_complex", filterScript.toString()));
+        if (filterComplex.isBlank()) {
+            // Passthrough — brak napisów, muzyki i overlays
+            log.warn("[RenderStep] filter_complex pusty — passthrough bez napisów");
+            cmd.addAll(List.of("-map", "0:v"));
+            cmd.addAll(List.of("-map", "1:a"));
+            cmd.addAll(List.of(
+                    "-c:v", cfg.getVideoCodec(), "-crf", String.valueOf(cfg.getCrf()), "-preset", "fast",
+                    "-c:a", cfg.getAudioCodec(), "-b:a", "192k", "-ar", "44100",
+                    "-movflags", "+faststart", "-shortest",
+                    output.toString()
+            ));
+            runCommand(cmd, "final-render");
+            return;
+        }
 
-        // Map
-        cmd.addAll(List.of("-map", "[vout]"));
-        cmd.addAll(List.of("-map", hasMusic ? "[audio]" : "1:a"));
+        // === Normalny render z filter_complex ===
+        Path filterScript = workDir.resolve("filter_complex.txt");
+        Files.writeString(filterScript, filterComplex);
+
+        cmd.addAll(List.of("-/filter_complex", filterScript.toString())); // ← tylko raz
+        cmd.addAll(List.of("-map", "[vout]"));                             // ← tylko raz
+        cmd.addAll(List.of("-map", hasMusic ? "[audio]" : "1:a"));        // ← tylko raz
 
         cmd.addAll(List.of(
                 "-c:v", cfg.getVideoCodec(),
@@ -389,17 +387,33 @@ public class RenderStep implements GenerationStep {
             fc.append("[voice][music]amix=inputs=2:duration=first:dropout_transition=2[audio];");
         }
 
-        // === VIDEO: word-by-word subtitles lub SRT fallback ===
+        // === VIDEO ===
         if (useWordByWord) {
             String afterWordsLabel = hasOverlays ? "[worded]" : "[vout]";
             String wordChain = buildWordByWordFilter(wordTimings, "[0:v]", afterWordsLabel);
-            fc.append(wordChain);
+
+            if (wordChain == null || wordChain.isBlank()) {
+                // Brak napisów — passthrough
+                log.warn("[RenderStep] buildWordByWordFilter zwrócił pusty string — passthrough");
+                if (hasOverlays) {
+                    fc.append("[0:v]null[worded]");
+                } else {
+                    fc.append("[0:v]null[vout]");
+                }
+            } else {
+                fc.append(wordChain);
+            }
+
         } else if (srtFile != null) {
             String afterSrtLabel = hasOverlays ? "[subtitled]" : "[vout]";
             fc.append(buildSrtFilter(srtFile, "[0:v]", afterSrtLabel));
+
         } else {
+            // Brak napisów w ogóle
             if (hasOverlays) {
-                fc.append("[0:v]null[subtitled];");
+                fc.append("[0:v]null[subtitled]");
+            } else {
+                fc.append("[0:v]null[vout]");
             }
         }
 
@@ -414,13 +428,15 @@ public class RenderStep implements GenerationStep {
                 fc.append(overlayFilter);
             } else {
                 log.warn("[RenderStep] OverlayEngine zwrócił null — relabel do [vout]");
-                String currentFc = fc.toString();
                 String fromLabel = useWordByWord ? "[worded]" : "[subtitled]";
-                return currentFc.replace(fromLabel, "[vout]");
+                return fc.toString().replace(fromLabel, "[vout]");
             }
         }
 
-        return fc.toString();
+        String result = fc.toString();
+        log.info("[RenderStep] filter_complex zbudowany — {} chars, hasMusic={}, hasOverlays={}, useWordByWord={}",
+                result.length(), hasMusic, hasOverlays, useWordByWord);
+        return result;
     }
 
     // =========================================================================
@@ -501,37 +517,36 @@ public class RenderStep implements GenerationStep {
         while (i < words.size()) {
             StringBuilder text = new StringBuilder();
             double phraseStart = words.get(i).startMs() / 1000.0;
-            double phraseEnd = words.get(i).endMs() / 1000.0;
-            int wordsInPhrase = 0;
+            double phraseEnd   = words.get(i).endMs() / 1000.0;
+            int wordsInPhrase  = 0;
 
             while (i < words.size() && wordsInPhrase < WORDS_PER_PHRASE) {
                 SubtitleService.WordTiming wt = words.get(i);
 
-                // Break phrase at scene boundaries (gap > 500ms from previous word)
                 if (wordsInPhrase > 0) {
                     double gap = (wt.startMs() / 1000.0) - phraseEnd;
                     if (gap > 0.5) break;
                 }
 
                 if (wordsInPhrase > 0) text.append(" ");
-                text.append(escapeDrawtext(wt.word().toUpperCase()));
+                // Dodaj surowe słowo — escapujemy CAŁY tekst dopiero na końcu
+                text.append(wt.word().trim().toUpperCase());
 
                 phraseEnd = wt.endMs() / 1000.0;
                 wordsInPhrase++;
                 i++;
             }
 
-            // Ensure minimum display time
             if ((phraseEnd - phraseStart) < MIN_WORD_DISPLAY_MS / 1000.0) {
                 phraseEnd = phraseStart + MIN_WORD_DISPLAY_MS / 1000.0;
-                // Clamp to next phrase start
                 if (i < words.size()) {
                     double nextStart = words.get(i).startMs() / 1000.0;
                     phraseEnd = Math.min(phraseEnd, nextStart);
                 }
             }
 
-            phrases.add(new Phrase(text.toString(), phraseStart, phraseEnd));
+            // Escapuj cały tekst frazy jako jedną całość
+            phrases.add(new Phrase(escapeDrawtext(text.toString()), phraseStart, phraseEnd));
         }
 
         return phrases;
@@ -653,7 +668,11 @@ public class RenderStep implements GenerationStep {
         List<ScriptResult.TextOverlay> overlays = new ArrayList<>();
 
         if (context.getScript().overlays() != null) {
-            overlays.addAll(context.getScript().overlays());
+            context.getScript().overlays().stream()
+                    // Pomijaj overlays na pozycji BOTTOM — tam są phrase subtitles
+                    .filter(o -> o.position() == null
+                            || !o.position().equalsIgnoreCase("BOTTOM"))
+                    .forEach(overlays::add);
         }
 
         if (context.isWatermarkEnabled()) {
@@ -700,39 +719,6 @@ public class RenderStep implements GenerationStep {
         return clips;
     }
 
-//    private void runCutWithEffect(String input, Cut cut, Path output) throws Exception {
-//        double startSec = cut.getStartMs() / 1000.0;
-//        double inputDurSec = (cut.getEndMs() - cut.getStartMs()) / 1000.0;
-//        String filter = buildEffectFilter(cut.getEffect(), inputDurSec);
-//
-//        // SLOW_MOTION extends output duration (1.5x PTS)
-//        double outputDurSec = inputDurSec;
-//        if (cut.getEffect() == EffectType.SLOW_MOTION) {
-//            outputDurSec = inputDurSec * 1.5;
-//        }
-//
-//        List<String> cmd = new ArrayList<>();
-//        cmd.add(ffmpegProperties.getBinary().getPath());
-//        cmd.add("-y");
-//        cmd.addAll(List.of("-ss", f(startSec)));
-//        cmd.addAll(List.of("-t", f(inputDurSec)));
-//        cmd.addAll(List.of("-i", input));
-//        if (filter != null) {
-//            // Write filter to file — avoids Windows quoting issues with expressions
-//            String resetFilter = "setpts=PTS-STARTPTS," + filter;
-//            Path filterFile = output.getParent().resolve(output.getFileName() + ".vf");
-//            Files.writeString(filterFile, resetFilter);
-//            cmd.addAll(List.of("-filter_script:v", filterFile.toString()));
-//        }
-//        cmd.addAll(List.of(
-//                "-t", f(outputDurSec),
-//                "-c:v", "libx264", "-preset", "fast", "-crf", "23",
-//                "-c:a", "aac",
-//                output.toString()
-//        ));
-//
-//        runCommand(cmd, "cut");
-//    }
 
     private void runCutWithEffect(String input, Cut cut, Path output) throws Exception {
         double startSec = cut.getStartMs() / 1000.0;
@@ -767,43 +753,6 @@ public class RenderStep implements GenerationStep {
         runCommand(cmd, "cut");
     }
 
-    /**
-     * Animated FFmpeg effect filters — time-based progressive animations.
-     * Uses 't' variable (seconds) for smooth motion over cut duration.
-     */
-//    private String buildEffectFilter(EffectType effect, double duration) {
-//        if (effect == null) return null;
-//        String dur = f(duration);
-//        return switch (effect) {
-//            // Progressive zoom IN to center (100% → 115%)
-//            // 2*floor(.../2) ensures even dimensions (codec requirement) — eliminates frame jitter
-//            case ZOOM_IN -> String.format(Locale.US,
-//                    "crop=w=2*floor(iw/(1+0.15*t/%s)/2):h=2*floor(ih/(1+0.15*t/%s)/2):x=2*floor((iw-iw/(1+0.15*t/%s))/4):y=2*floor((ih-ih/(1+0.15*t/%s))/4),scale=1080:1920:flags=lanczos",
-//                    dur, dur, dur, dur);
-//            // Progressive zoom OUT from center (115% → 100%)
-//            case ZOOM_OUT -> String.format(Locale.US,
-//                    "crop=w=2*floor(iw/(1.15-0.15*t/%s)/2):h=2*floor(ih/(1.15-0.15*t/%s)/2):x=2*floor((iw-iw/(1.15-0.15*t/%s))/4):y=2*floor((ih-ih/(1.15-0.15*t/%s))/4),scale=1080:1920:flags=lanczos",
-//                    dur, dur, dur, dur);
-//            // Aggressive fast zoom IN (100% → 130%)
-//            case FAST_ZOOM -> String.format(Locale.US,
-//                    "crop=w=2*floor(iw/(1+0.3*t/%s)/2):h=2*floor(ih/(1+0.3*t/%s)/2):x=2*floor((iw-iw/(1+0.3*t/%s))/4):y=2*floor((ih-ih/(1+0.3*t/%s))/4),scale=1080:1920:flags=lanczos",
-//                    dur, dur, dur, dur);
-//            // Ken Burns: pan left → right
-//            case PAN_LEFT -> String.format(Locale.US,
-//                    "scale=2*floor(iw*1.2/2):-2,crop=w=2*floor(iw/1.2/2):h=ih:x=2*floor((iw-iw/1.2)*t/%s/2):y=0,scale=1080:1920:flags=lanczos",
-//                    dur);
-//            // Ken Burns: pan right → left
-//            case PAN_RIGHT -> String.format(Locale.US,
-//                    "scale=2*floor(iw*1.2/2):-2,crop=w=2*floor(iw/1.2/2):h=ih:x=2*floor((iw-iw/1.2)*(1-t/%s)/2):y=0,scale=1080:1920:flags=lanczos",
-//                    dur);
-//            // Camera shake — sinusoidal offset at 5Hz/4Hz, even pixel positions
-//            case SHAKE ->
-//                    "crop=w=iw-20:h=ih-20:x=2*floor((10+8*sin(2*PI*t*5))/2):y=2*floor((10+8*cos(2*PI*t*4))/2),scale=1080:1920:flags=lanczos";
-//            // Slow motion — 1.5x stretch
-//            case SLOW_MOTION -> "setpts=1.5*PTS";
-//            case NONE -> null;
-//        };
-//    }
     private String buildEffectFilter(EffectType effect, double duration) {
         if (effect == null) return null;
         String dur = f(duration);
@@ -846,8 +795,18 @@ public class RenderStep implements GenerationStep {
     // =========================================================================
 
     private boolean hasOverlays(GenerationContext context) {
+        // Watermark zawsze liczy się jako overlay
+        if (context.isWatermarkEnabled()) return true;
+
         List<ScriptResult.TextOverlay> overlays = context.getScript().overlays();
-        return (overlays != null && !overlays.isEmpty()) || context.isWatermarkEnabled();
+        if (overlays == null || overlays.isEmpty()) return false;
+
+        // Filtruj overlays które są SUBTITLE_TYPE — te obsługuje phrase system
+        // Zostawiaj tylko dekoracyjne overlays: HOOK banner, CTA button itp.
+        // które mają pozycję inną niż BOTTOM (gdzie są phrase subtitles)
+        return overlays.stream().anyMatch(o ->
+                o.position() != null && !o.position().equalsIgnoreCase("BOTTOM")
+        );
     }
 
     private int countOverlays(GenerationContext context) {
