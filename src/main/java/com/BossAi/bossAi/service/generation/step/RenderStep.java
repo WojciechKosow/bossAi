@@ -287,17 +287,30 @@ public class RenderStep implements GenerationStep {
         List<SubtitleService.WordTiming> wordTimings;
         if (context.getWordTimings() != null && !context.getWordTimings().isEmpty()) {
             wordTimings = context.getWordTimings();
-            log.info("[RenderStep] Używam Whisper word timings — {} słów", wordTimings.size());
+            log.info("[RenderStep] Używam Whisper word timings — {} słów, zakres: {}ms-{}ms",
+                    wordTimings.size(),
+                    wordTimings.get(0).startMs(),
+                    wordTimings.get(wordTimings.size() - 1).endMs());
         } else {
+            log.info("[RenderStep] Whisper timings puste — generuję estimated timings");
             wordTimings = subtitleService.generateWordTimings(context.getScript());
-            log.info("[RenderStep] Używam estimated word timings — {} słów", wordTimings.size());
+            log.info("[RenderStep] Estimated word timings — {} słów", wordTimings.size());
+            if (wordTimings.isEmpty()) {
+                log.warn("[RenderStep] Estimated timings PUSTE — sprawdź czy sceny mają subtitleText!");
+                for (int si = 0; si < context.getScript().scenes().size(); si++) {
+                    var scene = context.getScript().scenes().get(si);
+                    log.warn("[RenderStep]   scena {}: subtitleText={}, durationMs={}",
+                            si, scene.subtitleText() != null ? "\"" + scene.subtitleText().substring(0, Math.min(40, scene.subtitleText().length())) + "...\"" : "NULL", scene.durationMs());
+                }
+            }
         }
         boolean useWordByWord = !wordTimings.isEmpty();
+        log.info("[RenderStep] Subtitle mode: {}, count: {}", useWordByWord ? "PHRASE-BY-PHRASE" : "SRT_FALLBACK", wordTimings.size());
 
         // Fallback: SRT file jeśli word-by-word nie zadziałał
         Path srtFile = null;
         if (!useWordByWord) {
-            log.warn("[RenderStep] Word-by-word puste — fallback do SRT");
+            log.warn("[RenderStep] Word-by-word puste — fallback do SRT (jeden blok per scena!)");
             String srtContent = subtitleService.generateSrt(context.getScript(), 0);
             srtFile = workDir.resolve("subtitles.srt");
             Files.writeString(srtFile, srtContent);
@@ -411,8 +424,13 @@ public class RenderStep implements GenerationStep {
     }
 
     // =========================================================================
+    // PHRASE-BY-PHRASE SUBTITLE CHAIN (TikTok style)
+    // =========================================================================
 // WORD-BY-WORD DRAWTEXT CHAIN
 // =========================================================================
+
+    /** Max words per subtitle phrase — TikTok shows 2-3 words at a time */
+    private static final int WORDS_PER_PHRASE = 3;
 
     private String buildWordByWordFilter(
             List<SubtitleService.WordTiming> words,
@@ -421,66 +439,29 @@ public class RenderStep implements GenerationStep {
     ) {
         if (words.isEmpty()) return "";
 
-        // Krok 1: Przytnij endMs każdego słowa do startMs następnego (eliminuje nawarstwianie)
-        List<SubtitleService.WordTiming> clipped = new ArrayList<>();
-        for (int i = 0; i < words.size(); i++) {
-            SubtitleService.WordTiming wt = words.get(i);
-            int startMs = wt.startMs();
-            int endMs   = wt.endMs();
+        // Group words into phrases of WORDS_PER_PHRASE
+        List<Phrase> phrases = groupIntoPhrases(words);
 
-            if (i < words.size() - 1) {
-                int nextStart = words.get(i + 1).startMs();
-                if (endMs > nextStart) {
-                    endMs = nextStart;
-                }
-            }
-
-            if (endMs - startMs < MIN_WORD_DISPLAY_MS) {
-                endMs = startMs + MIN_WORD_DISPLAY_MS;
-            }
-
-            clipped.add(new SubtitleService.WordTiming(wt.word(), startMs, endMs));
+        if (phrases.isEmpty()) {
+            log.warn("[RenderStep] 0 phrases po grupowaniu — brak napisów");
+            return "";
         }
 
-        // Krok 2: Grupuj słowa (po 2-3 naraz, krótkie słowa z sąsiadem)
-        List<List<SubtitleService.WordTiming>> groups = groupWordsForDisplay(clipped);
-
-        log.info("[RenderStep] Word-by-word: {} tokenów → {} grup", words.size(), groups.size());
-
-        // Krok 3: Buduj drawtext chain per grupa
         StringBuilder chain = new StringBuilder();
         String currentInput = inputLabel;
 
-        for (int i = 0; i < groups.size(); i++) {
-            List<SubtitleService.WordTiming> group = groups.get(i);
-            String currentOutput = (i == groups.size() - 1) ? outputLabel : "[w" + i + "]";
-
-            // Tekst grupy — wszystkie słowa złączone spacją, UPPERCASE
-            String displayText = group.stream()
-                    .map(wt -> wt.word().trim())
-                    .filter(w -> !w.isEmpty())
-                    .collect(Collectors.joining(" "))
-                    .toUpperCase();
-
-            String escapedText = escapeDrawtext(displayText);
-
-            // Timing grupy: start pierwszego słowa → end ostatniego słowa
-            double startSec = group.get(0).startMs() / 1000.0;
-            double endSec   = group.get(group.size() - 1).endMs() / 1000.0;
-
-            // Zabezpieczenie — minimalna widoczność grupy
-            if ((endSec - startSec) * 1000 < MIN_WORD_DISPLAY_MS) {
-                endSec = startSec + MIN_WORD_DISPLAY_MS / 1000.0;
-            }
+        for (int i = 0; i < phrases.size(); i++) {
+            Phrase phrase = phrases.get(i);
+            String currentOutput = (i == phrases.size() - 1) ? outputLabel : "[p" + i + "]";
 
             String alpha = String.format(Locale.US,
                     "if(lt(t,%s),min(1,(t-%s)/%s),1)",
-                    f(startSec + WORD_FADE_IN), f(startSec), f(WORD_FADE_IN)
+                    f(phrase.startSec + WORD_FADE_IN), f(phrase.startSec), f(WORD_FADE_IN)
             );
 
             chain.append(currentInput)
                     .append("drawtext=")
-                    .append("text='").append(escapedText).append("':")
+                    .append("text='").append(phrase.escapedText).append("':")
                     .append("font='").append(WORD_FONT).append("':")
                     .append("fontsize=").append(WORD_FONT_SIZE).append(":")
                     .append("fontcolor=").append(WORD_FONT_COLOR).append(":")
@@ -489,71 +470,71 @@ public class RenderStep implements GenerationStep {
                     .append("shadowcolor=black@0.6:shadowx=2:shadowy=2:")
                     .append("x=(W-tw)/2:")
                     .append("y=(H*0.75):")
-                    .append("enable='between(t,").append(f(startSec)).append(",").append(f(endSec)).append(")':")
+                    .append("enable='between(t,").append(f(phrase.startSec)).append(",").append(f(phrase.endSec)).append(")':")
                     .append("alpha='").append(alpha).append("'")
                     .append(currentOutput);
 
-            if (i < groups.size() - 1) {
+            if (i < phrases.size() - 1) {
                 chain.append(";");
             }
 
             currentInput = currentOutput;
         }
 
-        log.info("[RenderStep] Word-by-word filter: {} grup, {} chars",
-                groups.size(), chain.length());
+        log.info("[RenderStep] Phrase subtitles: {} phrases ({} words → {} drawtext nodes), {} chars",
+                phrases.size(), words.size(), phrases.size(), chain.length());
 
         return chain.toString();
     }
 
-    private List<List<SubtitleService.WordTiming>> groupWordsForDisplay(
-            List<SubtitleService.WordTiming> words) {
+    private record Phrase(String escapedText, double startSec, double endSec) {}
 
-        // Słowa funkcyjne — zawsze łączone z sąsiadem
-        final java.util.Set<String> FUNCTION_WORDS = java.util.Set.of(
-                "a", "an", "the", "in", "on", "at", "to", "of", "and", "or",
-                "but", "for", "nor", "so", "yet", "by", "as", "is", "it",
-                "i", "w", "z", "na", "do", "się", "że", "nie", "jak", "co",
-                "po", "za", "go", "mu", "te", "ten", "ta", "tu"
-        );
+    /**
+     * Grupuje WordTimings w frazy po WORDS_PER_PHRASE (2-3 słowa).
+     * Każda fraza: start = start pierwszego słowa, end = end ostatniego.
+     * Rozdziela frazy na granicach scen (duże przerwy > 500ms).
+     */
+    private List<Phrase> groupIntoPhrases(List<SubtitleService.WordTiming> words) {
+        List<Phrase> phrases = new ArrayList<>();
 
-        List<List<SubtitleService.WordTiming>> groups = new ArrayList<>();
         int i = 0;
-
         while (i < words.size()) {
-            List<SubtitleService.WordTiming> group = new ArrayList<>();
-            group.add(words.get(i));
+            StringBuilder text = new StringBuilder();
+            double phraseStart = words.get(i).startMs() / 1000.0;
+            double phraseEnd = words.get(i).endMs() / 1000.0;
+            int wordsInPhrase = 0;
 
-            while (group.size() < 3 && i + group.size() < words.size()) {
-                SubtitleService.WordTiming next    = words.get(i + group.size());
-                SubtitleService.WordTiming last    = group.get(group.size() - 1);
-                String                     nextWord = next.word().trim().toLowerCase();
-                String                     lastWord = last.word().trim().toLowerCase();
+            while (i < words.size() && wordsInPhrase < WORDS_PER_PHRASE) {
+                SubtitleService.WordTiming wt = words.get(i);
 
-                boolean nextIsFunctionWord = FUNCTION_WORDS.contains(nextWord);
-                boolean lastIsFunctionWord = FUNCTION_WORDS.contains(lastWord);
-                boolean nextIsShort        = nextWord.length() <= 2;
-                boolean isSmallGap         = next.startMs() - last.endMs() < 80;
-                boolean groupHasOneWord    = group.size() == 1;
+                // Break phrase at scene boundaries (gap > 500ms from previous word)
+                if (wordsInPhrase > 0) {
+                    double gap = (wt.startMs() / 1000.0) - phraseEnd;
+                    if (gap > 0.5) break;
+                }
 
-                // Łącz gdy:
-                // - następne słowo jest funkcyjne (in, and, or, to...)
-                // - poprzednie słowo jest funkcyjne (nie zostawiaj go samego)
-                // - następne słowo jest bardzo krótkie (1-2 znaki)
-                // - przerwa między słowami < 80ms (mówione razem)
-                if (nextIsFunctionWord || (lastIsFunctionWord && groupHasOneWord)
-                        || nextIsShort || (isSmallGap && groupHasOneWord)) {
-                    group.add(next);
-                } else {
-                    break;
+                if (wordsInPhrase > 0) text.append(" ");
+                text.append(escapeDrawtext(wt.word().toUpperCase()));
+
+                phraseEnd = wt.endMs() / 1000.0;
+                wordsInPhrase++;
+                i++;
+            }
+
+            // Ensure minimum display time
+            if ((phraseEnd - phraseStart) < MIN_WORD_DISPLAY_MS / 1000.0) {
+                phraseEnd = phraseStart + MIN_WORD_DISPLAY_MS / 1000.0;
+                // Clamp to next phrase start
+                if (i < words.size()) {
+                    double nextStart = words.get(i).startMs() / 1000.0;
+                    phraseEnd = Math.min(phraseEnd, nextStart);
                 }
             }
 
-            groups.add(group);
-            i += group.size();
+            phrases.add(new Phrase(text.toString(), phraseStart, phraseEnd));
         }
 
-        return groups;
+        return phrases;
     }
 
     // =========================================================================
@@ -827,40 +808,34 @@ public class RenderStep implements GenerationStep {
         if (effect == null) return null;
         String dur = f(duration);
         return switch (effect) {
+            // ZOOM: scale UP progressively → crop FIXED center at 1080:1920.
+            // Fixed crop = zero jitter. Variable scale uses subpixel interpolation = smooth.
+            // trunc(.../2)*2 ensures even dimensions for H.264 codec.
 
+            // Progressive zoom IN to center (100% → 115%)
             case ZOOM_IN -> String.format(Locale.US,
-                    // round() zamiast 2*floor(.../2) — eliminuje jitter ±2px
-                    "crop=w=iw/(1+0.15*t/%s):h=ih/(1+0.15*t/%s)" +
-                            ":x=(iw-iw/(1+0.15*t/%s))/2:y=(ih-ih/(1+0.15*t/%s))/2" +
-                            ",scale=1080:1920:flags=lanczos",
-                    dur, dur, dur, dur);
-
+                    "scale=trunc(1080*(1+0.15*t/%s)/2)*2:trunc(1920*(1+0.15*t/%s)/2)*2:flags=lanczos,crop=1080:1920",
+                    dur, dur);
+            // Progressive zoom OUT from center (115% → 100%)
             case ZOOM_OUT -> String.format(Locale.US,
-                    "crop=w=iw/(1.15-0.15*t/%s):h=ih/(1.15-0.15*t/%s)" +
-                            ":x=(iw-iw/(1.15-0.15*t/%s))/2:y=(ih-ih/(1.15-0.15*t/%s))/2" +
-                            ",scale=1080:1920:flags=lanczos",
-                    dur, dur, dur, dur);
-
+                    "scale=trunc(1080*(1.15-0.15*t/%s)/2)*2:trunc(1920*(1.15-0.15*t/%s)/2)*2:flags=lanczos,crop=1080:1920",
+                    dur, dur);
+            // Aggressive fast zoom IN (100% → 130%)
             case FAST_ZOOM -> String.format(Locale.US,
-                    "crop=w=iw/(1+0.3*t/%s):h=ih/(1+0.3*t/%s)" +
-                            ":x=(iw-iw/(1+0.3*t/%s))/2:y=(ih-ih/(1+0.3*t/%s))/2" +
-                            ",scale=1080:1920:flags=lanczos",
-                    dur, dur, dur, dur);
-
+                    "scale=trunc(1080*(1+0.3*t/%s)/2)*2:trunc(1920*(1+0.3*t/%s)/2)*2:flags=lanczos,crop=1080:1920",
+                    dur, dur);
+            // Ken Burns: scale 1.2x → fixed crop 1080:1920 → pan x from left to right
             case PAN_LEFT -> String.format(Locale.US,
-                    "crop=w=iw/1.2:h=ih:x=(iw-iw/1.2)*t/%s:y=0" +
-                            ",scale=1080:1920:flags=lanczos",
+                    "scale=trunc(1080*1.2/2)*2:trunc(1920*1.2/2)*2:flags=lanczos,crop=1080:1920:trunc((iw-1080)*t/%s/2)*2:trunc((ih-1920)/4)*2",
                     dur);
-
+            // Ken Burns: scale 1.2x → fixed crop 1080:1920 → pan x from right to left
             case PAN_RIGHT -> String.format(Locale.US,
-                    "crop=w=iw/1.2:h=ih:x=(iw-iw/1.2)*(1-t/%s):y=0" +
-                            ",scale=1080:1920:flags=lanczos",
+                    "scale=trunc(1080*1.2/2)*2:trunc(1920*1.2/2)*2:flags=lanczos,crop=1080:1920:trunc((iw-1080)*(1-t/%s)/2)*2:trunc((ih-1920)/4)*2",
                     dur);
-
-            case SHAKE -> "crop=w=iw-20:h=ih-20" +
-                    ":x=10+8*sin(2*PI*t*5):y=10+8*cos(2*PI*t*4)" +
-                    ",scale=1080:1920:flags=lanczos";
-
+            // Camera shake — reduced amplitude (4px), even pixel positions
+            case SHAKE ->
+                    "scale=1100:1954:flags=lanczos,crop=1080:1920:trunc((10+4*sin(2*PI*t*5))/2)*2:trunc((10+4*cos(2*PI*t*4))/2)*2";
+            // Slow motion — 1.5x stretch
             case SLOW_MOTION -> "setpts=1.5*PTS";
             case NONE -> null;
         };
