@@ -286,17 +286,30 @@ public class RenderStep implements GenerationStep {
         List<SubtitleService.WordTiming> wordTimings;
         if (context.getWordTimings() != null && !context.getWordTimings().isEmpty()) {
             wordTimings = context.getWordTimings();
-            log.info("[RenderStep] Używam Whisper word timings — {} słów", wordTimings.size());
+            log.info("[RenderStep] Używam Whisper word timings — {} słów, zakres: {}ms-{}ms",
+                    wordTimings.size(),
+                    wordTimings.get(0).startMs(),
+                    wordTimings.get(wordTimings.size() - 1).endMs());
         } else {
+            log.info("[RenderStep] Whisper timings puste — generuję estimated timings");
             wordTimings = subtitleService.generateWordTimings(context.getScript());
-            log.info("[RenderStep] Używam estimated word timings — {} słów", wordTimings.size());
+            log.info("[RenderStep] Estimated word timings — {} słów", wordTimings.size());
+            if (wordTimings.isEmpty()) {
+                log.warn("[RenderStep] Estimated timings PUSTE — sprawdź czy sceny mają subtitleText!");
+                for (int si = 0; si < context.getScript().scenes().size(); si++) {
+                    var scene = context.getScript().scenes().get(si);
+                    log.warn("[RenderStep]   scena {}: subtitleText={}, durationMs={}",
+                            si, scene.subtitleText() != null ? "\"" + scene.subtitleText().substring(0, Math.min(40, scene.subtitleText().length())) + "...\"" : "NULL", scene.durationMs());
+                }
+            }
         }
         boolean useWordByWord = !wordTimings.isEmpty();
+        log.info("[RenderStep] Subtitle mode: {}, count: {}", useWordByWord ? "PHRASE-BY-PHRASE" : "SRT_FALLBACK", wordTimings.size());
 
         // Fallback: SRT file jeśli word-by-word nie zadziałał
         Path srtFile = null;
         if (!useWordByWord) {
-            log.warn("[RenderStep] Word-by-word puste — fallback do SRT");
+            log.warn("[RenderStep] Word-by-word puste — fallback do SRT (jeden blok per scena!)");
             String srtContent = subtitleService.generateSrt(context.getScript(), 0);
             srtFile = workDir.resolve("subtitles.srt");
             Files.writeString(srtFile, srtContent);
@@ -410,8 +423,11 @@ public class RenderStep implements GenerationStep {
     }
 
     // =========================================================================
-    // WORD-BY-WORD DRAWTEXT CHAIN
+    // PHRASE-BY-PHRASE SUBTITLE CHAIN (TikTok style)
     // =========================================================================
+
+    /** Max words per subtitle phrase — TikTok shows 2-3 words at a time */
+    private static final int WORDS_PER_PHRASE = 3;
 
     private String buildWordByWordFilter(
             List<SubtitleService.WordTiming> words,
@@ -420,38 +436,29 @@ public class RenderStep implements GenerationStep {
     ) {
         if (words.isEmpty()) return "";
 
+        // Group words into phrases of WORDS_PER_PHRASE
+        List<Phrase> phrases = groupIntoPhrases(words);
+
+        if (phrases.isEmpty()) {
+            log.warn("[RenderStep] 0 phrases po grupowaniu — brak napisów");
+            return "";
+        }
+
         StringBuilder chain = new StringBuilder();
         String currentInput = inputLabel;
 
-        for (int i = 0; i < words.size(); i++) {
-            SubtitleService.WordTiming wt = words.get(i);
-            String currentOutput = (i == words.size() - 1) ? outputLabel : "[w" + i + "]";
-
-            double startSec = wt.startMs() / 1000.0;
-            double endSec   = wt.endMs()   / 1000.0;
-
-            // Min display time — stretch short words but don't overlap next word
-            if ((endSec - startSec) * 1000 < MIN_WORD_DISPLAY_MS) {
-                double maxEnd = startSec + MIN_WORD_DISPLAY_MS / 1000.0;
-                // Clamp to next word's start to prevent overlap
-                if (i + 1 < words.size()) {
-                    double nextStart = words.get(i + 1).startMs() / 1000.0;
-                    maxEnd = Math.min(maxEnd, nextStart);
-                }
-                endSec = Math.max(endSec, maxEnd);
-            }
-
-            // UPPERCASE for TikTok style
-            String escapedWord = escapeDrawtext(wt.word().toUpperCase());
+        for (int i = 0; i < phrases.size(); i++) {
+            Phrase phrase = phrases.get(i);
+            String currentOutput = (i == phrases.size() - 1) ? outputLabel : "[p" + i + "]";
 
             String alpha = String.format(Locale.US,
                     "if(lt(t,%s),min(1,(t-%s)/%s),1)",
-                    f(startSec + WORD_FADE_IN), f(startSec), f(WORD_FADE_IN)
+                    f(phrase.startSec + WORD_FADE_IN), f(phrase.startSec), f(WORD_FADE_IN)
             );
 
             chain.append(currentInput)
                     .append("drawtext=")
-                    .append("text='").append(escapedWord).append("':")
+                    .append("text='").append(phrase.escapedText).append("':")
                     .append("font='").append(WORD_FONT).append("':")
                     .append("fontsize=").append(WORD_FONT_SIZE).append(":")
                     .append("fontcolor=").append(WORD_FONT_COLOR).append(":")
@@ -460,21 +467,71 @@ public class RenderStep implements GenerationStep {
                     .append("shadowcolor=black@0.6:shadowx=2:shadowy=2:")
                     .append("x=(W-tw)/2:")
                     .append("y=(H*0.75):")
-                    .append("enable='between(t,").append(f(startSec)).append(",").append(f(endSec)).append(")':")
+                    .append("enable='between(t,").append(f(phrase.startSec)).append(",").append(f(phrase.endSec)).append(")':")
                     .append("alpha='").append(alpha).append("'")
                     .append(currentOutput);
 
-            if (i < words.size() - 1) {
+            if (i < phrases.size() - 1) {
                 chain.append(";");
             }
 
             currentInput = currentOutput;
         }
 
-        log.info("[RenderStep] Word-by-word filter: {} drawtext nodes, {} chars",
-                words.size(), chain.length());
+        log.info("[RenderStep] Phrase subtitles: {} phrases ({} words → {} drawtext nodes), {} chars",
+                phrases.size(), words.size(), phrases.size(), chain.length());
 
         return chain.toString();
+    }
+
+    private record Phrase(String escapedText, double startSec, double endSec) {}
+
+    /**
+     * Grupuje WordTimings w frazy po WORDS_PER_PHRASE (2-3 słowa).
+     * Każda fraza: start = start pierwszego słowa, end = end ostatniego.
+     * Rozdziela frazy na granicach scen (duże przerwy > 500ms).
+     */
+    private List<Phrase> groupIntoPhrases(List<SubtitleService.WordTiming> words) {
+        List<Phrase> phrases = new ArrayList<>();
+
+        int i = 0;
+        while (i < words.size()) {
+            StringBuilder text = new StringBuilder();
+            double phraseStart = words.get(i).startMs() / 1000.0;
+            double phraseEnd = words.get(i).endMs() / 1000.0;
+            int wordsInPhrase = 0;
+
+            while (i < words.size() && wordsInPhrase < WORDS_PER_PHRASE) {
+                SubtitleService.WordTiming wt = words.get(i);
+
+                // Break phrase at scene boundaries (gap > 500ms from previous word)
+                if (wordsInPhrase > 0) {
+                    double gap = (wt.startMs() / 1000.0) - phraseEnd;
+                    if (gap > 0.5) break;
+                }
+
+                if (wordsInPhrase > 0) text.append(" ");
+                text.append(escapeDrawtext(wt.word().toUpperCase()));
+
+                phraseEnd = wt.endMs() / 1000.0;
+                wordsInPhrase++;
+                i++;
+            }
+
+            // Ensure minimum display time
+            if ((phraseEnd - phraseStart) < MIN_WORD_DISPLAY_MS / 1000.0) {
+                phraseEnd = phraseStart + MIN_WORD_DISPLAY_MS / 1000.0;
+                // Clamp to next phrase start
+                if (i < words.size()) {
+                    double nextStart = words.get(i).startMs() / 1000.0;
+                    phraseEnd = Math.min(phraseEnd, nextStart);
+                }
+            }
+
+            phrases.add(new Phrase(text.toString(), phraseStart, phraseEnd));
+        }
+
+        return phrases;
     }
 
     // =========================================================================
@@ -680,30 +737,33 @@ public class RenderStep implements GenerationStep {
         if (effect == null) return null;
         String dur = f(duration);
         return switch (effect) {
+            // ZOOM: scale UP progressively → crop FIXED center at 1080:1920.
+            // Fixed crop = zero jitter. Variable scale uses subpixel interpolation = smooth.
+            // trunc(.../2)*2 ensures even dimensions for H.264 codec.
+
             // Progressive zoom IN to center (100% → 115%)
-            // 2*floor(.../2) ensures even dimensions (codec requirement) — eliminates frame jitter
             case ZOOM_IN -> String.format(Locale.US,
-                    "crop=w=2*floor(iw/(1+0.15*t/%s)/2):h=2*floor(ih/(1+0.15*t/%s)/2):x=2*floor((iw-iw/(1+0.15*t/%s))/4):y=2*floor((ih-ih/(1+0.15*t/%s))/4),scale=1080:1920:flags=lanczos",
-                    dur, dur, dur, dur);
+                    "scale=trunc(1080*(1+0.15*t/%s)/2)*2:trunc(1920*(1+0.15*t/%s)/2)*2:flags=lanczos,crop=1080:1920",
+                    dur, dur);
             // Progressive zoom OUT from center (115% → 100%)
             case ZOOM_OUT -> String.format(Locale.US,
-                    "crop=w=2*floor(iw/(1.15-0.15*t/%s)/2):h=2*floor(ih/(1.15-0.15*t/%s)/2):x=2*floor((iw-iw/(1.15-0.15*t/%s))/4):y=2*floor((ih-ih/(1.15-0.15*t/%s))/4),scale=1080:1920:flags=lanczos",
-                    dur, dur, dur, dur);
+                    "scale=trunc(1080*(1.15-0.15*t/%s)/2)*2:trunc(1920*(1.15-0.15*t/%s)/2)*2:flags=lanczos,crop=1080:1920",
+                    dur, dur);
             // Aggressive fast zoom IN (100% → 130%)
             case FAST_ZOOM -> String.format(Locale.US,
-                    "crop=w=2*floor(iw/(1+0.3*t/%s)/2):h=2*floor(ih/(1+0.3*t/%s)/2):x=2*floor((iw-iw/(1+0.3*t/%s))/4):y=2*floor((ih-ih/(1+0.3*t/%s))/4),scale=1080:1920:flags=lanczos",
-                    dur, dur, dur, dur);
-            // Ken Burns: pan left → right
+                    "scale=trunc(1080*(1+0.3*t/%s)/2)*2:trunc(1920*(1+0.3*t/%s)/2)*2:flags=lanczos,crop=1080:1920",
+                    dur, dur);
+            // Ken Burns: scale 1.2x → fixed crop 1080:1920 → pan x from left to right
             case PAN_LEFT -> String.format(Locale.US,
-                    "scale=2*floor(iw*1.2/2):-2,crop=w=2*floor(iw/1.2/2):h=ih:x=2*floor((iw-iw/1.2)*t/%s/2):y=0,scale=1080:1920:flags=lanczos",
+                    "scale=trunc(1080*1.2/2)*2:trunc(1920*1.2/2)*2:flags=lanczos,crop=1080:1920:trunc((iw-1080)*t/%s/2)*2:trunc((ih-1920)/4)*2",
                     dur);
-            // Ken Burns: pan right → left
+            // Ken Burns: scale 1.2x → fixed crop 1080:1920 → pan x from right to left
             case PAN_RIGHT -> String.format(Locale.US,
-                    "scale=2*floor(iw*1.2/2):-2,crop=w=2*floor(iw/1.2/2):h=ih:x=2*floor((iw-iw/1.2)*(1-t/%s)/2):y=0,scale=1080:1920:flags=lanczos",
+                    "scale=trunc(1080*1.2/2)*2:trunc(1920*1.2/2)*2:flags=lanczos,crop=1080:1920:trunc((iw-1080)*(1-t/%s)/2)*2:trunc((ih-1920)/4)*2",
                     dur);
-            // Camera shake — sinusoidal offset at 5Hz/4Hz, even pixel positions
+            // Camera shake — reduced amplitude (4px), even pixel positions
             case SHAKE ->
-                    "crop=w=iw-20:h=ih-20:x=2*floor((10+8*sin(2*PI*t*5))/2):y=2*floor((10+8*cos(2*PI*t*4))/2),scale=1080:1920:flags=lanczos";
+                    "scale=1100:1954:flags=lanczos,crop=1080:1920:trunc((10+4*sin(2*PI*t*5))/2)*2:trunc((10+4*cos(2*PI*t*4))/2)*2";
             // Slow motion — 1.5x stretch
             case SLOW_MOTION -> "setpts=1.5*PTS";
             case NONE -> null;
