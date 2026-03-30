@@ -52,7 +52,7 @@ public class RenderStep implements GenerationStep {
     private final OverlayEngine overlayEngine;
 
     // Word-by-word subtitle config — TikTok style (big, bold, centered)
-    private static final int WORD_FONT_SIZE = 80;
+    private static final int WORD_FONT_SIZE = 60;
     private static final String WORD_FONT_COLOR = "white";
     private static final String WORD_BORDER_COLOR = "black";
     private static final int WORD_BORDER_WIDTH = 5;
@@ -176,7 +176,11 @@ public class RenderStep implements GenerationStep {
                 ffmpegProperties.getBinary().getPath(),
                 "-y", "-f", "concat", "-safe", "0",
                 "-i", concatFile.toString(),
-                "-c", "copy",
+                "-c:v", "libx264", "-preset", "fast", "-crf", "23",
+                "-pix_fmt", "yuv420p",
+                "-vsync", "cfr",
+                "-r", "30",
+                "-c:a", "aac",
                 output.toString()
         ), "concat-" + prefix);
         return output;
@@ -243,7 +247,7 @@ public class RenderStep implements GenerationStep {
         Files.writeString(filterScript, fc.toString());
         cmd.addAll(List.of("-/filter_complex", filterScript.toString()));
         cmd.addAll(List.of("-map", "[vout]", "-an"));
-        cmd.addAll(List.of("-c:v", "libx264", "-preset", "ultrafast", "-crf", "20"));
+        cmd.addAll(List.of("-c:v", "libx264", "-preset", "ultrafast", "-crf", "20", "-pix_fmt", "yuv420p"));
 
         Path output = workDir.resolve("temp_concat.mp4");
         cmd.add(output.toString());
@@ -334,6 +338,7 @@ public class RenderStep implements GenerationStep {
             cmd.addAll(List.of("-map", "1:a"));
             cmd.addAll(List.of(
                     "-c:v", cfg.getVideoCodec(), "-crf", String.valueOf(cfg.getCrf()), "-preset", "fast",
+                    "-pix_fmt", "yuv420p",
                     "-c:a", cfg.getAudioCodec(), "-b:a", "192k", "-ar", "44100",
                     "-movflags", "+faststart", "-shortest",
                     output.toString()
@@ -358,6 +363,7 @@ public class RenderStep implements GenerationStep {
                 "-b:a", "192k",
                 "-ar", "44100",
                 "-movflags", "+faststart",
+                "-avoid_negative_ts", "make_zero",
                 "-shortest",
                 output.toString()
         ));
@@ -446,7 +452,7 @@ public class RenderStep implements GenerationStep {
 // =========================================================================
 
     /** Max words per subtitle phrase — TikTok shows 2-3 words at a time */
-    private static final int WORDS_PER_PHRASE = 3;
+    private static final int WORDS_PER_PHRASE = 2;
 
     private String buildWordByWordFilter(
             List<SubtitleService.WordTiming> words,
@@ -470,6 +476,10 @@ public class RenderStep implements GenerationStep {
             Phrase phrase = phrases.get(i);
             String currentOutput = (i == phrases.size() - 1) ? outputLabel : "[p" + i + "]";
 
+            int fontSize = phrase.escapedText.length() <= 8  ? 80 :
+                    phrase.escapedText.length() <= 14 ? 65 :
+                            phrase.escapedText.length() <= 20 ? 52 : 44;
+
             String alpha = String.format(Locale.US,
                     "if(lt(t,%s),min(1,(t-%s)/%s),1)",
                     f(phrase.startSec + WORD_FADE_IN), f(phrase.startSec), f(WORD_FADE_IN)
@@ -479,7 +489,7 @@ public class RenderStep implements GenerationStep {
                     .append("drawtext=")
                     .append("text='").append(phrase.escapedText).append("':")
                     .append("font='").append(WORD_FONT).append("':")
-                    .append("fontsize=").append(WORD_FONT_SIZE).append(":")
+                    .append("fontsize=").append(fontSize).append(":")
                     .append("fontcolor=").append(WORD_FONT_COLOR).append(":")
                     .append("bordercolor=").append(WORD_BORDER_COLOR).append(":")
                     .append("borderw=").append(WORD_BORDER_WIDTH).append(":")
@@ -512,8 +522,8 @@ public class RenderStep implements GenerationStep {
      */
     private List<Phrase> groupIntoPhrases(List<SubtitleService.WordTiming> words) {
         List<Phrase> phrases = new ArrayList<>();
-
         int i = 0;
+
         while (i < words.size()) {
             StringBuilder text = new StringBuilder();
             double phraseStart = words.get(i).startMs() / 1000.0;
@@ -526,29 +536,46 @@ public class RenderStep implements GenerationStep {
                 if (wordsInPhrase > 0) {
                     double gap = (wt.startMs() / 1000.0) - phraseEnd;
                     if (gap > 0.5) break;
+                    String candidate = text + " " + wt.word().trim().toUpperCase();
+                    if (candidate.length() > 16) break;
                 }
 
                 if (wordsInPhrase > 0) text.append(" ");
-                // Dodaj surowe słowo — escapujemy CAŁY tekst dopiero na końcu
                 text.append(wt.word().trim().toUpperCase());
-
                 phraseEnd = wt.endMs() / 1000.0;
                 wordsInPhrase++;
                 i++;
             }
 
-            if ((phraseEnd - phraseStart) < MIN_WORD_DISPLAY_MS / 1000.0) {
-                phraseEnd = phraseStart + MIN_WORD_DISPLAY_MS / 1000.0;
+            // Minimum display time — ale nie przekraczaj startu następnego słowa
+            double minEnd = phraseStart + MIN_WORD_DISPLAY_MS / 1000.0;
+            if (phraseEnd < minEnd) {
                 if (i < words.size()) {
                     double nextStart = words.get(i).startMs() / 1000.0;
-                    phraseEnd = Math.min(phraseEnd, nextStart);
+                    phraseEnd = Math.min(minEnd, nextStart - 0.02);
+                } else {
+                    phraseEnd = minEnd;
                 }
             }
+            if (phraseEnd <= phraseStart) phraseEnd = phraseStart + 0.15;
 
-            // Escapuj cały tekst frazy jako jedną całość
             phrases.add(new Phrase(escapeDrawtext(text.toString()), phraseStart, phraseEnd));
         }
 
+        // === DRUGI PASS: usuń nakładanie się fraz ===
+        for (int j = 0; j < phrases.size() - 1; j++) {
+            Phrase curr = phrases.get(j);
+            Phrase next = phrases.get(j + 1);
+            // Jeśli fraza kończy się po starcie następnej, przytnij ją
+            if (curr.endSec() > next.startSec() - 0.02) {
+                double newEnd = next.startSec() - 0.02;
+                if (newEnd > curr.startSec() + 0.05) { // zostaw minimum 50ms
+                    phrases.set(j, new Phrase(curr.escapedText(), curr.startSec(), newEnd));
+                }
+            }
+        }
+
+        log.info("[groupIntoPhrases] {} phrases from {} words", phrases.size(), words.size());
         return phrases;
     }
 
@@ -741,11 +768,16 @@ public class RenderStep implements GenerationStep {
             Path filterFile = output.getParent().resolve(output.getFileName() + ".vf");
             Files.writeString(filterFile, resetFilter);
             cmd.addAll(List.of("-filter_script:v", filterFile.toString()));
+        } else {
+            cmd.addAll(List.of("-vf", "setpts=PTS-STARTPTS"));
         }
 
         cmd.addAll(List.of(
-                "-t", f(outputDurSec),   // ← tylko jedno -t, po filtrze
+                "-t", f(outputDurSec),
                 "-c:v", "libx264", "-preset", "fast", "-crf", "23",
+                "-pix_fmt", "yuv420p",
+                "-vsync", "cfr",
+                "-r", "30",
                 "-c:a", "aac",
                 output.toString()
         ));

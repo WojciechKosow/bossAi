@@ -102,31 +102,34 @@ public class VoiceStep implements GenerationStep {
     private List<SubtitleService.WordTiming> mergeWhisperTokens(
             List<SubtitleService.WordTiming> tokens) {
 
-        List<SubtitleService.WordTiming> merged = new ArrayList<>();
+        List<SubtitleService.WordTiming> result = new ArrayList<>();
 
         for (SubtitleService.WordTiming token : tokens) {
             String word = token.word();
             if (word == null || word.isBlank()) continue;
 
+            // Usuń wiodące/końcowe spacje, zachowaj słowo
             String trimmed = word.trim();
+            if (trimmed.isEmpty()) continue;
 
-            // Token BEZ wiodącej spacji = kontynuacja poprzedniego tokenu (np. "2" po " max")
-            boolean isSubtoken = !word.startsWith(" ") && !merged.isEmpty();
+            // Whisper word-level API zwraca gotowe słowa — żadnego scalania
+            // Scalamy TYLKO gdy przerwa < 30ms (dosłownie ten sam fonem podzielony)
+            boolean isSamePhoneme = !result.isEmpty()
+                    && token.startMs() - result.get(result.size() - 1).endMs() < 30
+                    && !trimmed.matches("[A-Z].*"); // nie scalaj nowych zdań
 
-            if (isSubtoken) {
-                SubtitleService.WordTiming prev = merged.remove(merged.size() - 1);
-                String mergedWord = prev.word() + trimmed;
-                merged.add(new SubtitleService.WordTiming(
-                        mergedWord, prev.startMs(), token.endMs()));
-                log.debug("[VoiceStep] Merge subtoken: '{}' + '{}' → '{}'",
-                        prev.word(), trimmed, mergedWord);
+            if (isSamePhoneme) {
+                SubtitleService.WordTiming prev = result.remove(result.size() - 1);
+                result.add(new SubtitleService.WordTiming(
+                        prev.word() + trimmed, prev.startMs(), token.endMs()));
             } else {
-                merged.add(new SubtitleService.WordTiming(
+                result.add(new SubtitleService.WordTiming(
                         trimmed, token.startMs(), token.endMs()));
             }
         }
 
-        return merged;
+        log.info("[VoiceStep] mergeWhisperTokens: {} tokenów → {} słów", tokens.size(), result.size());
+        return result;
     }
 
     private List<SubtitleService.WordTiming> transcribeWithRetry(byte[] audioBytes) {
