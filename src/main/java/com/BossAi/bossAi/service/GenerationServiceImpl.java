@@ -471,6 +471,10 @@ public class GenerationServiceImpl implements GenerationService {
 
         StyleConfig styleConfig = styleService.getConfig(request.getStyle());
 
+        // Asset reuse dostępny tylko dla planów > BASIC (PRO, CREATOR)
+        boolean reuseEnabled = request.isReuseAssets()
+                && userPlan.getPlanType().ordinal() > PlanType.BASIC.ordinal();
+
         return GenerationContext.builder()
                 .generationId(generation.getId())
                 .userId(user.getId())
@@ -481,6 +485,7 @@ public class GenerationServiceImpl implements GenerationService {
                 .userMusicAsset(userMusicAsset)
                 .userVoiceAsset(userVoiceAsset)
                 .userImageAssets(userImageAssets)
+                .reuseAssets(reuseEnabled)
                 .styleConfig(styleConfig)
                 .style(request.getStyle())
                 .build();

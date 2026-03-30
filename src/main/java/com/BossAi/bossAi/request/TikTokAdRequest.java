@@ -28,4 +28,11 @@ public class TikTokAdRequest {
 
     @Enumerated(EnumType.STRING)
     private VideoStyle style;
+
+    /**
+     * Czy pipeline ma próbować ponownie wykorzystać wcześniej wygenerowane assety
+     * (obrazy, wideo) dopasowane tematycznie do nowego promptu.
+     * Domyślnie true — oszczędza kredyty. Dostępne dla planów > BASIC.
+     */
+    private boolean reuseAssets = true;
 }

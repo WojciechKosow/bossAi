@@ -41,6 +41,13 @@ public class Asset {
 
     private boolean reusable;
 
+    /**
+     * Prompt/opis użyty do wygenerowania tego assetu.
+     * Używany przez AssetReuseService do tematycznego dopasowania.
+     */
+    @Column(length = 2000)
+    private String prompt;
+
     private LocalDateTime createdAt;
     private LocalDateTime expiresAt;
 
