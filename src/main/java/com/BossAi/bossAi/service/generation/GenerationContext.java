@@ -114,6 +114,27 @@ public class GenerationContext {
     @Builder.Default
     private List<Asset> userImageAssets = new ArrayList<>();
 
+    /**
+     * Czy pipeline próbuje ponownie wykorzystać wcześniejsze assety.
+     * true = domyślnie ON (oszczędność kredytów). Dostępne dla planów > BASIC.
+     */
+    private boolean reuseAssets;
+
+    /**
+     * Assety (IMAGE) dopasowane tematycznie do nowego promptu przez AssetReuseService.
+     * Mapowanie: imagePrompt → Asset z poprzednich generacji.
+     * Jeśli scena ma match w tej mapie, ImageStep pomija generację i używa istniejącego URL.
+     */
+    @Builder.Default
+    private java.util.Map<String, Asset> reusedImageAssets = new java.util.HashMap<>();
+
+    /**
+     * Assety (VIDEO) dopasowane tematycznie.
+     * Mapowanie: imagePrompt (klucz sceny) → Asset VIDEO z poprzednich generacji.
+     */
+    @Builder.Default
+    private java.util.Map<String, Asset> reusedVideoAssets = new java.util.HashMap<>();
+
     // -------------------------------------------------------------------------
     // WYNIKI SCRIPTSTEP
     // -------------------------------------------------------------------------

@@ -17,4 +17,8 @@ public interface AssetRepository extends JpaRepository<Asset, UUID> {
     List<Asset> findByExpiresAtBefore(LocalDateTime dateTime);
     List<Asset> findByUserAndType(User user, AssetType type);
     Optional<Asset> findByGenerationId(UUID generationId);
+
+    List<Asset> findByUserAndReusableTrueAndTypeAndPromptIsNotNull(User user, AssetType type);
+
+    List<Asset> findByUserAndReusableTrueAndTypeInAndPromptIsNotNull(User user, List<AssetType> types);
 }

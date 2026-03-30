@@ -33,6 +33,12 @@ public class AssetServiceImpl implements AssetService {
     @Override
     @Transactional
     public AssetDTO createAsset(UUID userId, AssetType type, AssetSource source, byte[] data, String storageKey, UUID generationId) {
+        return createAsset(userId, type, source, data, storageKey, generationId, null);
+    }
+
+    @Override
+    @Transactional
+    public AssetDTO createAsset(UUID userId, AssetType type, AssetSource source, byte[] data, String storageKey, UUID generationId, String prompt) {
 
         User user = userRepository.findById(userId).orElseThrow();
 
@@ -43,26 +49,15 @@ public class AssetServiceImpl implements AssetService {
         Asset asset = new Asset();
         asset.setUser(user);
         asset.setType(type);
-
-//        if (generation.getGenerationType().equals(GenerationType.SYSTEM_GENERATION)) {
-//            asset.setSource(AssetSource.SYSTEM_GENERATED);
-//        } else {
-//            asset.setSource(AssetSource.AI_GENERATED);
-//        }
-
         asset.setSource(source);
-
         asset.setSizeBytes(data.length);
         asset.setReusable(canReuse(userPlan));
+        asset.setPrompt(prompt);
         asset.setCreatedAt(LocalDateTime.now());
         asset.setExpiresAt(resolveExpiration(userPlan));
-
         asset.setGenerationId(generationId);
 
-
         assetRepository.save(asset);
-
-//        String storageKey = getStorageKey(user, type, asset);
 
         asset.setStorageKey(storageKey);
         storageService.save(data, storageKey);
@@ -114,6 +109,18 @@ public class AssetServiceImpl implements AssetService {
             String externalUrl,
             UUID generationId
     ) {
+        return createAssetFromUrl(userId, type, source, externalUrl, generationId, null);
+    }
+
+    @Override
+    public AssetDTO createAssetFromUrl(
+            UUID userId,
+            AssetType type,
+            AssetSource source,
+            String externalUrl,
+            UUID generationId,
+            String prompt
+    ) {
         String storageKey = "external/" + UUID.randomUUID();
 
         Asset asset = Asset.builder()
@@ -124,13 +131,15 @@ public class AssetServiceImpl implements AssetService {
                 .originalFilename(externalUrl)
                 .sizeBytes(0)
                 .reusable(true)
+                .prompt(prompt)
                 .generationId(generationId)
                 .createdAt(LocalDateTime.now())
                 .build();
 
         assetRepository.save(asset);
 
-        log.debug("[AssetService] Asset (URL) zapisany — type: {}, url: {}", type, externalUrl);
+        log.debug("[AssetService] Asset (URL) zapisany — type: {}, url: {}, prompt: {}",
+                type, externalUrl, prompt != null ? prompt.substring(0, Math.min(50, prompt.length())) : "null");
 
         return mapToDto(asset);
     }

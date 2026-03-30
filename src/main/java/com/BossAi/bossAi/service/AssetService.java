@@ -20,6 +20,16 @@ public interface AssetService {
             UUID generationId
     );
 
+    AssetDTO createAsset(
+            UUID userId,
+            AssetType type,
+            AssetSource source,
+            byte[] data,
+            String storageKey,
+            UUID generationId,
+            String prompt
+    );
+
     AssetDTO createUserUpload(
             String email,
             AssetType type,
@@ -32,6 +42,15 @@ public interface AssetService {
             AssetSource source,
             String externalUrl,
             UUID generationId
+    );
+
+    AssetDTO createAssetFromUrl(
+            UUID userId,
+            AssetType type,
+            AssetSource source,
+            String externalUrl,
+            UUID generationId,
+            String prompt
     );
 
     List<AssetDTO> getUserAssets();

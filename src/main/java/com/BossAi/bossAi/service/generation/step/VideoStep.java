@@ -1,5 +1,6 @@
 package com.BossAi.bossAi.service.generation.step;
 
+import com.BossAi.bossAi.entity.Asset;
 import com.BossAi.bossAi.entity.AssetSource;
 import com.BossAi.bossAi.entity.AssetType;
 import com.BossAi.bossAi.service.AssetService;
@@ -19,6 +20,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -86,8 +88,11 @@ public class VideoStep implements GenerationStep {
                         .filter(i -> !videoSceneIndices.contains(i))
                         .collect(Collectors.toList()));
 
+        Map<String, Asset> reusedVideos = context.getReusedVideoAssets();
+
         // Przetwarzaj każdą scenę
         int videoCount = 0;
+        int reusedCount = 0;
         for (int i = 0; i < scenes.size(); i++) {
             SceneAsset scene = scenes.get(i);
             boolean isVideo  = videoSceneIndices.contains(scene.getIndex());
@@ -100,6 +105,25 @@ public class VideoStep implements GenerationStep {
             );
 
             if (isVideo) {
+                // Sprawdź czy mamy reusable VIDEO asset
+                Asset reusedAsset = reusedVideos != null
+                        ? reusedVideos.get(scene.getImagePrompt())
+                        : null;
+
+                if (reusedAsset != null && reusedAsset.getStorageKey() != null) {
+                    // REUSE — pobierz istniejące wideo z storage
+                    log.info("[VideoStep] VIDEO scena {} REUSED — asset: {}",
+                            scene.getIndex(), reusedAsset.getId());
+                    byte[] existingBytes = storageService.load(reusedAsset.getStorageKey());
+                    String filename = String.format("scene_%02d_%s.mp4", scene.getIndex(), context.getGenerationId());
+                    Path videoPath = workDir.resolve(filename);
+                    Files.write(videoPath, existingBytes);
+                    scene.setVideoLocalPath(videoPath.toString());
+                    reusedCount++;
+                    videoCount++;
+                    continue;
+                }
+
                 processVideoScene(scene, modelId, workDir, context);
                 videoCount++;
             } else {
@@ -107,8 +131,8 @@ public class VideoStep implements GenerationStep {
             }
         }
 
-        log.info("[VideoStep] DONE — {} scen VIDEO (API), {} scen IMAGE (FFmpeg)",
-                videoCount, scenes.size() - videoCount);
+        log.info("[VideoStep] DONE — {} scen VIDEO (API), {} scen IMAGE (FFmpeg), {} reused",
+                videoCount - reusedCount, scenes.size() - videoCount, reusedCount);
     }
 
     // =========================================================================
@@ -138,7 +162,8 @@ public class VideoStep implements GenerationStep {
                 AssetSource.AI_GENERATED,
                 videoBytes,
                 "video/scenes/" + filename,
-                context.getGenerationId()
+                context.getGenerationId(),
+                scene.getImagePrompt()
         );
 
         log.info("[VideoStep] VIDEO scena {} DONE — {} bytes → {}",

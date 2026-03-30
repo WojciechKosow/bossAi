@@ -1,5 +1,6 @@
 package com.BossAi.bossAi.service.generation.step;
 
+import com.BossAi.bossAi.entity.Asset;
 import com.BossAi.bossAi.entity.AssetSource;
 import com.BossAi.bossAi.entity.AssetType;
 import com.BossAi.bossAi.service.AssetService;
@@ -13,6 +14,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * ImageStep — generuje obraz dla każdej sceny przez fal.ai.
@@ -38,9 +40,13 @@ public class ImageStep implements GenerationStep {
     public void execute(GenerationContext context) throws Exception {
         List<SceneAsset> scenes = context.getScenes();
         String modelId = modelSelector.imageModel(context.getPlanType());
+        Map<String, Asset> reusedImages = context.getReusedImageAssets();
 
-        log.info("[ImageStep] START — {} scen, model: {}, generationId: {}",
-                scenes.size(), modelId, context.getGenerationId());
+        log.info("[ImageStep] START — {} scen, model: {}, reuse: {} dopasowań, generationId: {}",
+                scenes.size(), modelId, reusedImages != null ? reusedImages.size() : 0,
+                context.getGenerationId());
+
+        int reusedCount = 0;
 
         for (int i = 0; i < scenes.size(); i++) {
             SceneAsset scene = scenes.get(i);
@@ -54,6 +60,23 @@ public class ImageStep implements GenerationStep {
                     String.format("Generuję obraz sceny %d/%d...", i + 1, scenes.size())
             );
 
+            // Sprawdź czy istnieje reusable asset dla tej sceny
+            Asset reusedAsset = reusedImages != null
+                    ? reusedImages.get(scene.getImagePrompt())
+                    : null;
+
+            if (reusedAsset != null && reusedAsset.getStorageKey() != null) {
+                // REUSE — użyj istniejącego assetu zamiast generować nowy
+                String existingUrl = reusedAsset.getOriginalFilename(); // URL z external/
+                scene.setImageUrl(existingUrl);
+                reusedCount++;
+
+                log.info("[ImageStep] Scena {}/{} REUSED — asset: {}, prompt: {}",
+                        i + 1, scenes.size(), reusedAsset.getId(),
+                        scene.getImagePrompt().substring(0, Math.min(60, scene.getImagePrompt().length())));
+                continue;
+            }
+
             log.info("[ImageStep] Scena {}/{} — prompt: {}",
                     i + 1, scenes.size(), scene.getImagePrompt());
 
@@ -61,18 +84,20 @@ public class ImageStep implements GenerationStep {
             String imageUrl = falAiService.generateImage(scene.getImagePrompt(), modelId);
             scene.setImageUrl(imageUrl);
 
-            // Zapisz asset do bazy przez AssetService
+            // Zapisz asset do bazy przez AssetService — z promptem do przyszłego reuse
             assetService.createAssetFromUrl(
                     context.getUserId(),
                     AssetType.IMAGE,
                     AssetSource.AI_GENERATED,
                     imageUrl,
-                    context.getGenerationId()
+                    context.getGenerationId(),
+                    scene.getImagePrompt()
             );
 
             log.info("[ImageStep] Scena {}/{} DONE — imageUrl: {}", i + 1, scenes.size(), imageUrl);
         }
 
-        log.info("[ImageStep] DONE — wszystkie {} obrazy wygenerowane", scenes.size());
+        log.info("[ImageStep] DONE — {} obrazów wygenerowanych, {} reused (zaoszczędzone)",
+                scenes.size() - reusedCount, reusedCount);
     }
 }

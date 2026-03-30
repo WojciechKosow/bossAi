@@ -5,6 +5,7 @@ import com.BossAi.bossAi.service.generation.GenerationStepName;
 import com.BossAi.bossAi.service.generation.context.SceneAsset;
 import com.BossAi.bossAi.service.generation.context.ScriptResult;
 import com.BossAi.bossAi.service.generation.step.*;
+import com.BossAi.bossAi.service.generation.step.AssetReuseStep;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -46,6 +47,7 @@ public class PipelineConfig {
     private final MusicStep  musicStep;
     private final RenderStep renderStep;
     private final DirectorStep directorStep;
+    private final AssetReuseStep assetReuseStep;
 
     @Value("${pipeline.stub:false}")
     private boolean stubMode;
@@ -60,7 +62,7 @@ public class PipelineConfig {
             return new StubTikTokAdPipeline(renderStep, aiExecutor, tempDir);
         }
         return new RealTikTokAdPipeline(
-                scriptStep, directorStep, imageStep, voiceStep,
+                scriptStep, directorStep, assetReuseStep, imageStep, voiceStep,
                 videoStep, musicStep, renderStep, aiExecutor
         );
     }
@@ -95,6 +97,7 @@ public class PipelineConfig {
 
         private final ScriptStep scriptStep;
         private final DirectorStep directorStep;
+        private final AssetReuseStep assetReuseStep;
         private final ImageStep  imageStep;
         private final VoiceStep  voiceStep;
         private final VideoStep  videoStep;
@@ -103,10 +106,10 @@ public class PipelineConfig {
         private final Executor   executor;
 
         public RealTikTokAdPipeline(
-                ScriptStep s, DirectorStep d, ImageStep i, VoiceStep vo,
+                ScriptStep s, DirectorStep d, AssetReuseStep ar, ImageStep i, VoiceStep vo,
                 VideoStep vi, MusicStep m, RenderStep r, Executor e) {
-            this.scriptStep = s; this.directorStep = d; this.imageStep = i;
-            this.voiceStep  = vo; this.videoStep = vi;
+            this.scriptStep = s; this.directorStep = d; this.assetReuseStep = ar;
+            this.imageStep = i; this.voiceStep  = vo; this.videoStep = vi;
             this.musicStep  = m; this.renderStep = r;
             this.executor   = e;
         }
@@ -123,6 +126,10 @@ public class PipelineConfig {
             log.info("[Pipeline {}] -> DIRECTOR", context.getGenerationId());
             callback.onStep(GenerationStepName.SCRIPT);
             directorStep.execute(context);
+
+            // 1.6 — ASSET REUSE (po ScriptStep — potrzebuje scen z imagePrompt)
+            log.info("[Pipeline {}] → ASSET REUSE", context.getGenerationId());
+            assetReuseStep.execute(context);
 
             // 2 — IMAGE
             log.info("[Pipeline {}] → IMAGE", context.getGenerationId());
