@@ -23,10 +23,7 @@ import java.io.InputStreamReader;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Locale;
-import java.util.UUID;
+import java.util.*;
 import java.util.stream.Collectors;
 
 /**
@@ -284,7 +281,7 @@ public class RenderStep implements GenerationStep {
             Path output
     ) throws Exception {
         FfmpegProperties.Output cfg = ffmpegProperties.getOutput();
-        boolean hasMusic    = context.getMusicLocalPath() != null;
+        boolean hasMusic = context.getMusicLocalPath() != null;
         boolean hasOverlays = hasOverlays(context);
 
         List<SubtitleService.WordTiming> wordTimings;
@@ -451,7 +448,9 @@ public class RenderStep implements GenerationStep {
 // WORD-BY-WORD DRAWTEXT CHAIN
 // =========================================================================
 
-    /** Max words per subtitle phrase — TikTok shows 2-3 words at a time */
+    /**
+     * Max words per subtitle phrase — TikTok shows 2-3 words at a time
+     */
     private static final int WORDS_PER_PHRASE = 2;
 
     private String buildWordByWordFilter(
@@ -476,7 +475,7 @@ public class RenderStep implements GenerationStep {
             Phrase phrase = phrases.get(i);
             String currentOutput = (i == phrases.size() - 1) ? outputLabel : "[p" + i + "]";
 
-            int fontSize = phrase.escapedText.length() <= 8  ? 80 :
+            int fontSize = phrase.escapedText.length() <= 8 ? 80 :
                     phrase.escapedText.length() <= 14 ? 65 :
                             phrase.escapedText.length() <= 20 ? 52 : 44;
 
@@ -495,7 +494,8 @@ public class RenderStep implements GenerationStep {
                     .append("borderw=").append(WORD_BORDER_WIDTH).append(":")
                     .append("shadowcolor=black@0.6:shadowx=2:shadowy=2:")
                     .append("x=(W-tw)/2:")
-                    .append("y=(H*0.75):")
+                    .append("y=(H*0.72):")
+                    .append("line_spacing=10:")
                     .append("enable='between(t,").append(f(phrase.startSec)).append(",").append(f(phrase.endSec)).append(")':")
                     .append("alpha='").append(alpha).append("'")
                     .append(currentOutput);
@@ -513,7 +513,8 @@ public class RenderStep implements GenerationStep {
         return chain.toString();
     }
 
-    private record Phrase(String escapedText, double startSec, double endSec) {}
+    private record Phrase(String escapedText, double startSec, double endSec) {
+    }
 
     /**
      * Grupuje WordTimings w frazy po WORDS_PER_PHRASE (2-3 słowa).
@@ -527,17 +528,17 @@ public class RenderStep implements GenerationStep {
         while (i < words.size()) {
             StringBuilder text = new StringBuilder();
             double phraseStart = words.get(i).startMs() / 1000.0;
-            double phraseEnd   = words.get(i).endMs() / 1000.0;
-            int wordsInPhrase  = 0;
+            double phraseEnd = words.get(i).endMs() / 1000.0;
+            int wordsInPhrase = 0;
 
             while (i < words.size() && wordsInPhrase < WORDS_PER_PHRASE) {
                 SubtitleService.WordTiming wt = words.get(i);
 
                 if (wordsInPhrase > 0) {
                     double gap = (wt.startMs() / 1000.0) - phraseEnd;
-                    if (gap > 0.5) break;
+                    if (gap > 1.5) break;
                     String candidate = text + " " + wt.word().trim().toUpperCase();
-                    if (candidate.length() > 16) break;
+                    if (candidate.length() > 22) break;
                 }
 
                 if (wordsInPhrase > 0) text.append(" ");
@@ -559,7 +560,20 @@ public class RenderStep implements GenerationStep {
             }
             if (phraseEnd <= phraseStart) phraseEnd = phraseStart + 0.15;
 
-            phrases.add(new Phrase(escapeDrawtext(text.toString()), phraseStart, phraseEnd));
+            String rawText = text.toString();
+            String[] words2 = rawText.split(" ");
+
+            String displayText;
+            if (words2.length >= 2) {
+                int mid = (int) Math.ceil(words2.length / 2.0);
+                String line1 = String.join(" ", Arrays.copyOfRange(words2, 0, mid));
+                String line2 = String.join(" ", Arrays.copyOfRange(words2, mid, words2.length));
+                displayText = line1 + "\n" + line2;
+            } else {
+                displayText = rawText;
+            }
+
+            phrases.add(new Phrase(escapeDrawtext(displayText), phraseStart, phraseEnd));
         }
 
         // === DRUGI PASS: usuń nakładanie się fraz ===

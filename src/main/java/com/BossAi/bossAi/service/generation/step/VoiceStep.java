@@ -121,7 +121,7 @@ public class VoiceStep implements GenerationStep {
             if (isSamePhoneme) {
                 SubtitleService.WordTiming prev = result.remove(result.size() - 1);
                 result.add(new SubtitleService.WordTiming(
-                        prev.word() + trimmed, prev.startMs(), token.endMs()));
+                        prev.word() + " " + trimmed, prev.startMs(), token.endMs()));
             } else {
                 result.add(new SubtitleService.WordTiming(
                         trimmed, token.startMs(), token.endMs()));
