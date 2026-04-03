@@ -113,6 +113,11 @@ public class ProjectAssetService {
     }
 
     @Transactional(readOnly = true)
+    public List<ProjectAsset> getProjectAssetEntities(UUID projectId) {
+        return assetRepository.findByProjectIdOrderByCreatedAtAsc(projectId);
+    }
+
+    @Transactional(readOnly = true)
     public ProjectAsset getAsset(UUID assetId) {
         return assetRepository.findById(assetId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Asset not found"));

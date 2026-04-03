@@ -69,7 +69,7 @@ public class VideoProductionOrchestrator {
             AudioAnalysisResponse audioAnalysis = analyzeMusic(context);
 
             // 2. Pobierz assety projektu z bazy
-            List<ProjectAsset> projectAssets = projectAssetService.getProjectAssets(projectId);
+            List<ProjectAsset> projectAssets = projectAssetService.getProjectAssetEntities(projectId);
 
             // 3. Generuj EDL
             EdlDto edl = edlGeneratorService.generateEdl(context, audioAnalysis, projectAssets);
