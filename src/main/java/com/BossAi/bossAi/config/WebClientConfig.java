@@ -82,6 +82,19 @@ public class WebClientConfig {
                 .build();
     }
 
+    /**
+     * Generyczny WebClient.Builder dla mikroserwisów wewnętrznych
+     * (audio-analysis, remotion-renderer).
+     * Każdy serwis ustawia własny baseUrl w konstruktorze.
+     */
+    @Bean
+    public WebClient.Builder webClientBuilder() {
+        return WebClient.builder()
+                .exchangeStrategies(ExchangeStrategies.builder()
+                        .codecs(cfg -> cfg.defaultCodecs().maxInMemorySize(16 * 1024 * 1024))
+                        .build());
+    }
+
     // -------------------------------------------------------------------------
 
     private HttpClient buildHttpClient(long connectTimeoutMs, long readTimeoutMs) {
