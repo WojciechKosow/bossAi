@@ -1,0 +1,96 @@
+version: '3.8'
+
+services:
+
+  # ──────────────────────────────────────────────
+  # PostgreSQL — baza danych dla Spring Boot
+  # ──────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: bossai-postgres
+    environment:
+      POSTGRES_DB: bossai
+      POSTGRES_USER: bossai
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-bossai_dev}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bossai"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ──────────────────────────────────────────────
+  # Spring Boot — glowna aplikacja (backend API)
+  # ──────────────────────────────────────────────
+  spring-boot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: bossai-spring
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/bossai
+      SPRING_DATASOURCE_USERNAME: bossai
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-bossai_dev}
+      SPRING_PROFILES_ACTIVE: microservices
+      AUDIO_ANALYSIS_URL: http://audio-analysis:8000
+      REMOTION_RENDERER_URL: http://remotion-renderer:3000
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      FAL_AI_API_KEY: ${FAL_AI_API_KEY}
+    ports:
+      - "8080:8080"
+    volumes:
+      - temp_files:/tmp/bossai
+
+  # ──────────────────────────────────────────────
+  # Python / FastAPI — audio analysis service
+  # ──────────────────────────────────────────────
+  audio-analysis:
+    build:
+      context: ../audio-analysis-service
+      dockerfile: Dockerfile
+    container_name: bossai-audio-analysis
+    environment:
+      HOST: 0.0.0.0
+      PORT: 8000
+      LOG_LEVEL: info
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # ──────────────────────────────────────────────
+  # Node.js / Remotion — video rendering service
+  # ──────────────────────────────────────────────
+  remotion-renderer:
+    build:
+      context: ../remotion-renderer
+      dockerfile: Dockerfile
+    container_name: bossai-remotion-renderer
+    environment:
+      HOST: 0.0.0.0
+      PORT: 3000
+      NODE_ENV: production
+      CONCURRENCY: 1
+    ports:
+      - "3000:3000"
+    volumes:
+      - render_output:/app/output
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  postgres_data:
+  temp_files:
+  render_output:

@@ -1,0 +1,17 @@
+# Konfiguracja mikroserwisow (Python audio-analysis + Node.js remotion-renderer)
+# Aktywuj profil: --spring.profiles.active=microservices
+
+audio-analysis:
+  base-url: ${AUDIO_ANALYSIS_URL:http://localhost:8000}
+  timeout:
+    connect: 5000
+    read: 30000
+
+remotion-renderer:
+  base-url: ${REMOTION_RENDERER_URL:http://localhost:3000}
+  timeout:
+    connect: 5000
+    read: 60000
+  polling:
+    max-attempts: 120
+    interval-ms: 3000
