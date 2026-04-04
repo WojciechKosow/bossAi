@@ -23,6 +23,10 @@ public class EdlAudioTrack {
     @JsonProperty("asset_id")
     private String assetId;
 
+    /** URL do pliku audio — Remotion pobiera asset z tego URL */
+    @JsonProperty("asset_url")
+    private String assetUrl;
+
     @JsonProperty("type")
     private String type;
 
