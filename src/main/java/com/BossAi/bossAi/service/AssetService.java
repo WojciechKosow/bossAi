@@ -30,6 +30,17 @@ public interface AssetService {
             String prompt
     );
 
+    AssetDTO createAsset(
+            UUID userId,
+            AssetType type,
+            AssetSource source,
+            byte[] data,
+            String storageKey,
+            UUID generationId,
+            String prompt,
+            String originalUrl
+    );
+
     AssetDTO createUserUpload(
             String email,
             AssetType type,

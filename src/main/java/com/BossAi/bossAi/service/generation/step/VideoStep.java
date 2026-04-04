@@ -111,17 +111,22 @@ public class VideoStep implements GenerationStep {
                         : null;
 
                 if (reusedAsset != null && reusedAsset.getStorageKey() != null) {
-                    // REUSE — pobierz istniejące wideo z storage
-                    log.info("[VideoStep] VIDEO scena {} REUSED — asset: {}",
-                            scene.getIndex(), reusedAsset.getId());
-                    byte[] existingBytes = storageService.load(reusedAsset.getStorageKey());
-                    String filename = String.format("scene_%02d_%s.mp4", scene.getIndex(), context.getGenerationId());
-                    Path videoPath = workDir.resolve(filename);
-                    Files.write(videoPath, existingBytes);
-                    scene.setVideoLocalPath(videoPath.toString());
-                    reusedCount++;
-                    videoCount++;
-                    continue;
+                    try {
+                        // REUSE — pobierz istniejące wideo z storage
+                        byte[] existingBytes = storageService.load(reusedAsset.getStorageKey());
+                        String filename = String.format("scene_%02d_%s.mp4", scene.getIndex(), context.getGenerationId());
+                        Path videoPath = workDir.resolve(filename);
+                        Files.write(videoPath, existingBytes);
+                        scene.setVideoLocalPath(videoPath.toString());
+                        reusedCount++;
+                        videoCount++;
+                        log.info("[VideoStep] VIDEO scena {} REUSED — asset: {}, {} bytes",
+                                scene.getIndex(), reusedAsset.getId(), existingBytes.length);
+                        continue;
+                    } catch (Exception e) {
+                        log.warn("[VideoStep] VIDEO scena {} — reuse failed ({}), generuję nowy",
+                                scene.getIndex(), e.getMessage());
+                    }
                 }
 
                 processVideoScene(scene, modelId, workDir, context);
