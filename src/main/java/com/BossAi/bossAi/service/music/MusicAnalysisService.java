@@ -1,36 +1,141 @@
 package com.BossAi.bossAi.service.music;
 
+import com.BossAi.bossAi.service.audio.AudioAnalysisClient;
+import com.BossAi.bossAi.service.audio.AudioAnalysisResponse;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 
 /**
  * MusicAnalysisService — analizuje strukturę muzyki (energy profile, segmenty).
  *
- * Używa FFmpeg astats do pomiaru RMS energy co ~500ms.
- * Na podstawie profilu energii wykrywa segmenty:
- *   - DROP: nagły skok energii (>50% wzrost w 1-2 oknach)
- *   - BUILD_UP: stopniowy wzrost energii przez >=3 okna
- *   - PEAK: utrzymana wysoka energia (>75 percentyla) przez >=2 okna
- *   - QUIET: niska energia (<25 percentyla) przez >=2 okna
- *   - NORMAL: reszta
+ * Strategia: najpierw Python/librosa (AudioAnalysisClient), fallback na FFmpeg astats.
+ * Python daje: prawdziwe BPM, beat map, energy curve, mood, sekcje.
+ * FFmpeg daje: przybliżony energy profile (często pusty).
  */
 @Slf4j
 @Service
+@RequiredArgsConstructor
 public class MusicAnalysisService {
+
+    private final AudioAnalysisClient audioAnalysisClient;
 
     /** Rozmiar okna analizy w ms */
     private static final int WINDOW_MS = 500;
 
     /**
      * Analizuje plik audio i zwraca pełny profil energii + segmenty.
+     * Strategia: Python/librosa → fallback FFmpeg astats.
      */
     public MusicAnalysisResult analyze(String audioPath) {
         log.info("[MusicAnalysis] Analizuję: {}", audioPath);
+
+        // Próbuj Python/librosa (dokładne BPM, beat map, energy, sekcje)
+        try {
+            MusicAnalysisResult pythonResult = analyzeViaPython(audioPath);
+            if (pythonResult != null) {
+                return pythonResult;
+            }
+        } catch (Exception e) {
+            log.warn("[MusicAnalysis] Python analysis failed — fallback to FFmpeg: {}", e.getMessage());
+        }
+
+        // Fallback: stary FFmpeg astats
+        return analyzeViaFfmpeg(audioPath);
+    }
+
+    /**
+     * Analiza przez Python/FastAPI microservice (librosa + essentia).
+     */
+    private MusicAnalysisResult analyzeViaPython(String audioPath) throws Exception {
+        Path path = Path.of(audioPath);
+        if (!Files.exists(path)) return null;
+
+        byte[] audioBytes = Files.readAllBytes(path);
+        String filename = path.getFileName().toString();
+
+        AudioAnalysisResponse response = audioAnalysisClient.analyzeAudio(audioBytes, filename);
+        if (response == null) return null;
+
+        log.info("[MusicAnalysis] Python OK — bpm={}, duration={}s, {} beats, {} sections, mood={}",
+                response.bpm(), response.durationSeconds(),
+                response.beats() != null ? response.beats().size() : 0,
+                response.sections() != null ? response.sections().size() : 0,
+                response.mood());
+
+        // Konwertuj energy curve na nasz format (co 500ms)
+        List<Double> energyProfile = new ArrayList<>();
+        if (response.energyCurve() != null && !response.energyCurve().isEmpty()) {
+            double maxTime = response.durationSeconds();
+            for (double t = 0; t < maxTime; t += WINDOW_MS / 1000.0) {
+                final double time = t;
+                double energy = response.energyCurve().stream()
+                        .filter(ep -> ep.time() >= time && ep.time() < time + WINDOW_MS / 1000.0)
+                        .mapToDouble(AudioAnalysisResponse.EnergyPoint::energy)
+                        .average()
+                        .orElse(0.5);
+                energyProfile.add(energy);
+            }
+        }
+
+        // Konwertuj sekcje
+        List<MusicAnalysisResult.MusicSegment> segments = new ArrayList<>();
+        if (response.sections() != null) {
+            for (AudioAnalysisResponse.Section section : response.sections()) {
+                MusicAnalysisResult.SegmentType type = mapSectionType(section.type(), section.energy());
+                segments.add(new MusicAnalysisResult.MusicSegment(
+                        (int) (section.start() * 1000),
+                        (int) (section.end() * 1000),
+                        type,
+                        parseEnergy(section.energy())
+                ));
+            }
+        }
+
+        int totalDurationMs = (int) (response.durationSeconds() * 1000);
+        double avgEnergy = energyProfile.stream().mapToDouble(Double::doubleValue).average().orElse(0.5);
+
+        return new MusicAnalysisResult(totalDurationMs, energyProfile, segments, avgEnergy, response.bpm());
+    }
+
+    private MusicAnalysisResult.SegmentType mapSectionType(String type, String energy) {
+        if (type == null) return MusicAnalysisResult.SegmentType.NORMAL;
+        return switch (type.toLowerCase()) {
+            case "drop" -> MusicAnalysisResult.SegmentType.DROP;
+            case "build", "build_up", "buildup" -> MusicAnalysisResult.SegmentType.BUILD_UP;
+            case "peak", "chorus" -> MusicAnalysisResult.SegmentType.PEAK;
+            case "quiet", "intro", "outro", "bridge" -> MusicAnalysisResult.SegmentType.QUIET;
+            default -> {
+                // Fallback: mapuj na podstawie energy stringa
+                if ("high".equalsIgnoreCase(energy)) yield MusicAnalysisResult.SegmentType.PEAK;
+                if ("low".equalsIgnoreCase(energy)) yield MusicAnalysisResult.SegmentType.QUIET;
+                yield MusicAnalysisResult.SegmentType.NORMAL;
+            }
+        };
+    }
+
+    private double parseEnergy(String energy) {
+        if (energy == null) return 0.5;
+        return switch (energy.toLowerCase()) {
+            case "high" -> 0.85;
+            case "medium" -> 0.55;
+            case "low" -> 0.25;
+            default -> 0.5;
+        };
+    }
+
+    /**
+     * Fallback: analiza przez FFmpeg astats (stary kod).
+     */
+    private MusicAnalysisResult analyzeViaFfmpeg(String audioPath) {
+        log.info("[MusicAnalysis] FFmpeg fallback — {}", audioPath);
 
         List<EnergyPoint> rawEnergy = extractEnergyProfile(audioPath);
 

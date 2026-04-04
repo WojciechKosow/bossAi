@@ -802,34 +802,37 @@ public class RenderStep implements GenerationStep {
     private String buildEffectFilter(EffectType effect, double duration) {
         if (effect == null) return null;
         String dur = f(duration);
+        int totalFrames = (int) Math.ceil(duration * 30); // 30fps
         return switch (effect) {
             // ZOOM: scale UP progressively → crop FIXED center at 1080:1920.
-            // Fixed crop = zero jitter. Variable scale uses subpixel interpolation = smooth.
-            // trunc(.../2)*2 ensures even dimensions for H.264 codec.
+            // Uses zoompan filter instead of scale with 't' variable to avoid
+            // "Expressions with frame variables not valid in init eval_mode" error
+            // in newer FFmpeg versions.
 
             // Progressive zoom IN to center (100% → 115%)
             case ZOOM_IN -> String.format(Locale.US,
-                    "scale=trunc(1080*(1+0.15*t/%s)/2)*2:trunc(1920*(1+0.15*t/%s)/2)*2:flags=lanczos,crop=1080:1920",
-                    dur, dur);
+                    "zoompan=z='1+0.15*on/%d':d=%d:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=1080x1920:fps=30",
+                    totalFrames, totalFrames);
             // Progressive zoom OUT from center (115% → 100%)
             case ZOOM_OUT -> String.format(Locale.US,
-                    "scale=trunc(1080*(1.15-0.15*t/%s)/2)*2:trunc(1920*(1.15-0.15*t/%s)/2)*2:flags=lanczos,crop=1080:1920",
-                    dur, dur);
+                    "zoompan=z='1.15-0.15*on/%d':d=%d:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=1080x1920:fps=30",
+                    totalFrames, totalFrames);
             // Aggressive fast zoom IN (100% → 130%)
             case FAST_ZOOM -> String.format(Locale.US,
-                    "scale=trunc(1080*(1+0.3*t/%s)/2)*2:trunc(1920*(1+0.3*t/%s)/2)*2:flags=lanczos,crop=1080:1920",
-                    dur, dur);
-            // Ken Burns: scale 1.2x → fixed crop 1080:1920 → pan x from left to right
+                    "zoompan=z='1+0.3*on/%d':d=%d:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=1080x1920:fps=30",
+                    totalFrames, totalFrames);
+            // Ken Burns: pan from left to right with slight zoom
             case PAN_LEFT -> String.format(Locale.US,
-                    "scale=trunc(1080*1.2/2)*2:trunc(1920*1.2/2)*2:flags=lanczos,crop=1080:1920:trunc((iw-1080)*t/%s/2)*2:trunc((ih-1920)/4)*2",
-                    dur);
-            // Ken Burns: scale 1.2x → fixed crop 1080:1920 → pan x from right to left
+                    "zoompan=z='1.15':d=%d:x='(iw-iw/zoom)*on/%d':y='(ih-ih/zoom)/2':s=1080x1920:fps=30",
+                    totalFrames, totalFrames);
+            // Ken Burns: pan from right to left with slight zoom
             case PAN_RIGHT -> String.format(Locale.US,
-                    "scale=trunc(1080*1.2/2)*2:trunc(1920*1.2/2)*2:flags=lanczos,crop=1080:1920:trunc((iw-1080)*(1-t/%s)/2)*2:trunc((ih-1920)/4)*2",
-                    dur);
+                    "zoompan=z='1.15':d=%d:x='(iw-iw/zoom)*(1-on/%d)':y='(ih-ih/zoom)/2':s=1080x1920:fps=30",
+                    totalFrames, totalFrames);
             // Camera shake — reduced amplitude (4px), even pixel positions
-            case SHAKE ->
-                    "scale=1100:1954:flags=lanczos,crop=1080:1920:trunc((10+4*sin(2*PI*t*5))/2)*2:trunc((10+4*cos(2*PI*t*4))/2)*2";
+            case SHAKE -> String.format(Locale.US,
+                    "zoompan=z='1.02':d=%d:x='iw/2-(iw/zoom/2)+4*sin(2*PI*on/6)':y='ih/2-(ih/zoom/2)+4*cos(2*PI*on/5)':s=1080x1920:fps=30",
+                    totalFrames);
             // Slow motion — 1.5x stretch
             case SLOW_MOTION -> "setpts=1.5*PTS";
             case NONE -> null;
