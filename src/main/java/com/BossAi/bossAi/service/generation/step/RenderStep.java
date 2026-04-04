@@ -833,6 +833,26 @@ public class RenderStep implements GenerationStep {
             case SHAKE -> String.format(Locale.US,
                     "zoompan=z='1.02':d=%d:x='iw/2-(iw/zoom/2)+4*sin(2*PI*on/6)':y='ih/2-(ih/zoom/2)+4*cos(2*PI*on/5)':s=1080x1920:fps=30",
                     totalFrames);
+            // Ken Burns: pan from bottom to top with slight zoom
+            case PAN_UP -> String.format(Locale.US,
+                    "zoompan=z='1.15':d=%d:x='(iw-iw/zoom)/2':y='(ih-ih/zoom)*(1-on/%d)':s=1080x1920:fps=30",
+                    totalFrames, totalFrames);
+            // Ken Burns: pan from top to bottom with slight zoom
+            case PAN_DOWN -> String.format(Locale.US,
+                    "zoompan=z='1.15':d=%d:x='(iw-iw/zoom)/2':y='(ih-ih/zoom)*on/%d':s=1080x1920:fps=30",
+                    totalFrames, totalFrames);
+            // Zoom to offset point (not center) — 30% right, 40% down
+            case ZOOM_IN_OFFSET -> String.format(Locale.US,
+                    "zoompan=z='1+0.2*on/%d':d=%d:x='iw*0.3-(iw/zoom/2)':y='ih*0.4-(ih/zoom/2)':s=1080x1920:fps=30",
+                    totalFrames, totalFrames);
+            // Bounce/pulse zoom — quick zoom in then back out (sinusoidal)
+            case BOUNCE -> String.format(Locale.US,
+                    "zoompan=z='1+0.12*sin(PI*on/%d)':d=%d:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=1080x1920:fps=30",
+                    totalFrames, totalFrames);
+            // Drift — slow diagonal movement
+            case DRIFT -> String.format(Locale.US,
+                    "zoompan=z='1.1':d=%d:x='(iw-iw/zoom)*0.3+(iw-iw/zoom)*0.4*on/%d':y='(ih-ih/zoom)*0.3+(ih-ih/zoom)*0.4*on/%d':s=1080x1920:fps=30",
+                    totalFrames, totalFrames, totalFrames);
             // Slow motion — 1.5x stretch
             case SLOW_MOTION -> "setpts=1.5*PTS";
             case NONE -> null;

@@ -74,10 +74,11 @@ public class DirectorStep implements GenerationStep {
             }
         }
 
-        // Krok 3: Efekty + przejścia między scenami
+        // Krok 3: Efekty + przejścia między scenami (music-aware)
         String contentType = context.getScript() != null ? context.getScript().contentType() : null;
-        effectAssigner.applyEffects(plan, context.getStyle(), contentType);
-        effectAssigner.applyTransitions(plan, context.getStyle(), contentType);
+        var audioAnalysis = context.getCachedAudioAnalysis();
+        effectAssigner.applyEffects(plan, context.getStyle(), contentType, audioAnalysis);
+        effectAssigner.applyTransitions(plan, context.getStyle(), contentType, audioAnalysis);
 
         // Krok 4: Zapisz do kontekstu — ZAWSZE, niezależnie od ścieżki powyżej
         context.setDirectorPlan(plan);
