@@ -30,6 +30,9 @@ public class EffectRegistry {
     public static final String KEN_BURNS = "ken_burns";
     public static final String GLITCH = "glitch";
     public static final String FLASH = "flash";
+    public static final String BOUNCE = "bounce";
+    public static final String DRIFT = "drift";
+    public static final String ZOOM_IN_OFFSET = "zoom_in_offset";
 
     // ─── Przejscia ────────────────────────────────────────────────────
 
@@ -66,7 +69,10 @@ public class EffectRegistry {
             Map.entry(ZOOM_PULSE, Map.of("scale", 1.05, "frequency_bpm", 120)),
             Map.entry(KEN_BURNS, Map.of("scale_from", 1.0, "scale_to", 1.2, "pan_direction", "left")),
             Map.entry(GLITCH, Map.of("intensity", 0.5, "frequency", 3)),
-            Map.entry(FLASH, Map.of("opacity", 0.8, "duration_ms", 100))
+            Map.entry(FLASH, Map.of("opacity", 0.8, "duration_ms", 100)),
+            Map.entry(BOUNCE, Map.of("scale_peak", 1.12, "easing", "spring")),
+            Map.entry(DRIFT, Map.of("direction", "diagonal", "distance_percent", 10, "easing", "linear")),
+            Map.entry(ZOOM_IN_OFFSET, Map.of("scale_from", 1.0, "scale_to", 1.2, "offset_x", 0.3, "offset_y", 0.4, "easing", "easeInOut"))
     );
 
     private static final Map<String, Map<String, Object>> TRANSITION_DEFAULTS = Map.of(

@@ -26,6 +26,10 @@ public class EdlSegment {
     @JsonProperty("asset_id")
     private String assetId;
 
+    /** URL do pliku media — Remotion pobiera asset z tego URL */
+    @JsonProperty("asset_url")
+    private String assetUrl;
+
     @JsonProperty("asset_type")
     private String assetType;
 
