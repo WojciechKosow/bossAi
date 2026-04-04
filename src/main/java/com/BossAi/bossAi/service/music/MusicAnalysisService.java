@@ -35,11 +35,19 @@ public class MusicAnalysisService {
      * Strategia: Python/librosa → fallback FFmpeg astats.
      */
     public MusicAnalysisResult analyze(String audioPath) {
+        return analyze(audioPath, null);
+    }
+
+    /**
+     * Analizuje plik audio, opcjonalnie uzywajac cached AudioAnalysisResponse
+     * z kontekstu (ustawiony wczesniej przez BeatDetectionServiceImpl).
+     */
+    public MusicAnalysisResult analyze(String audioPath, AudioAnalysisResponse cachedResponse) {
         log.info("[MusicAnalysis] Analizuję: {}", audioPath);
 
         // Próbuj Python/librosa (dokładne BPM, beat map, energy, sekcje)
         try {
-            MusicAnalysisResult pythonResult = analyzeViaPython(audioPath);
+            MusicAnalysisResult pythonResult = analyzeViaPython(audioPath, cachedResponse);
             if (pythonResult != null) {
                 return pythonResult;
             }
@@ -53,15 +61,21 @@ public class MusicAnalysisService {
 
     /**
      * Analiza przez Python/FastAPI microservice (librosa + essentia).
+     * Uzywa cachedResponse jesli dostepny (z BeatDetectionService), unikajac duplikatu.
      */
-    private MusicAnalysisResult analyzeViaPython(String audioPath) throws Exception {
-        Path path = Path.of(audioPath);
-        if (!Files.exists(path)) return null;
+    private MusicAnalysisResult analyzeViaPython(String audioPath, AudioAnalysisResponse cachedResponse) throws Exception {
+        AudioAnalysisResponse response = cachedResponse;
 
-        byte[] audioBytes = Files.readAllBytes(path);
-        String filename = path.getFileName().toString();
+        if (response == null) {
+            Path path = Path.of(audioPath);
+            if (!Files.exists(path)) return null;
 
-        AudioAnalysisResponse response = audioAnalysisClient.analyzeAudio(audioBytes, filename);
+            byte[] audioBytes = Files.readAllBytes(path);
+            String filename = path.getFileName().toString();
+            response = audioAnalysisClient.analyzeAudio(audioBytes, filename);
+        } else {
+            log.info("[MusicAnalysis] Using cached AudioAnalysisResponse (from BeatDetection)");
+        }
         if (response == null) return null;
 
         log.info("[MusicAnalysis] Python OK — bpm={}, duration={}s, {} beats, {} sections, mood={}",

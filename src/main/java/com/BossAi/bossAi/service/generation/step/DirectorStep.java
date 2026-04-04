@@ -66,7 +66,7 @@ public class DirectorStep implements GenerationStep {
         if (context.getMusicLocalPath() != null) {
             log.info("[DirectorStep] Muzyka dostępna — stosuję beat sync");
             try {
-                List<Integer> beats = beatDetectionService.detectBeats(context.getMusicLocalPath());
+                List<Integer> beats = beatDetectionService.detectBeats(context.getMusicLocalPath(), context);
                 applyBeatSync(plan, context, beats);
                 log.info("[DirectorStep] Beat sync OK — {} beatów", beats.size());
             } catch (Exception e) {

@@ -89,7 +89,10 @@ public class MusicStep implements GenerationStep {
     private void analyzeAndAlign(GenerationContext context) {
         try {
             log.info("[MusicStep] Analizuję strukturę muzyki...");
-            MusicAnalysisResult analysis = musicAnalysisService.analyze(context.getMusicLocalPath());
+            MusicAnalysisResult analysis = musicAnalysisService.analyze(
+                    context.getMusicLocalPath(),
+                    context.getCachedAudioAnalysis()  // reuse z BeatDetection (jesli juz wywolany)
+            );
             context.setMusicAnalysis(analysis);
 
             log.info("[MusicStep] Analiza OK — {}ms, {} segmentów, avg energy={}, bpm={}",
