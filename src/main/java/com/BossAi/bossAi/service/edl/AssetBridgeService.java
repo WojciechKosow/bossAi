@@ -8,6 +8,7 @@ import com.BossAi.bossAi.service.generation.context.SceneAsset;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.UUID;
@@ -35,7 +36,7 @@ public class AssetBridgeService {
      * @param email      email usera (do ownership)
      * @return UUID utworzonego VideoProject
      */
-    @Transactional
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public UUID bridgeToVideoProject(GenerationContext context, Generation generation, String email) {
         log.info("[AssetBridge] Bridging generation {} to VideoProject", context.getGenerationId());
 
