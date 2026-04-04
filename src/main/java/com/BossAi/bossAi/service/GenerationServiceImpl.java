@@ -53,7 +53,11 @@ public class GenerationServiceImpl implements GenerationService {
     private final AssetService assetService;
     private final FfmpegProperties ffmpegProperties;
     private final StyleService styleService;
+    private final com.BossAi.bossAi.service.edl.AssetBridgeService assetBridgeService;
+    private final com.BossAi.bossAi.service.edl.VideoProductionOrchestrator videoProductionOrchestrator;
 
+    @org.springframework.beans.factory.annotation.Value("${rendering.use-new-pipeline:false}")
+    private boolean useNewPipeline;
 
     private static final int MAX_ACTIVE_GENERATIONS = 1;
     private static final int GENERATION_COOLDOWN_SECONDS = 5;
@@ -210,6 +214,18 @@ public class GenerationServiceImpl implements GenerationService {
 
             log.info("[GenerationService] Pipeline DONE — generationId: {}, url: {}",
                     genId, context.getFinalVideoUrl());
+
+            // ── NEW PIPELINE: bridge assets → VideoProject → EDL → Remotion ──
+            if (useNewPipeline) {
+                try {
+                    String userEmail = generation.getUser().getEmail();
+                    UUID projectId = assetBridgeService.bridgeToVideoProject(context, generation, userEmail);
+                    log.info("[GenerationService] New pipeline triggered — projectId: {}", projectId);
+                    videoProductionOrchestrator.produceVideo(projectId, context);
+                } catch (Exception ex) {
+                    log.warn("[GenerationService] New pipeline failed (non-blocking) — {}", ex.getMessage());
+                }
+            }
 
         } catch (Exception e) {
             log.error("[GenerationService] Pipeline FAILED — generationId: {}, error: {}",
