@@ -121,6 +121,15 @@ public class VideoProductionOrchestrator {
             return null;
         }
 
+        // Reuse cached response from pipeline (BeatDetection/MusicAnalysis already called Python)
+        if (context.getCachedAudioAnalysis() != null) {
+            AudioAnalysisResponse cached = context.getCachedAudioAnalysis();
+            log.info("[Orchestrator] Using cached audio analysis — BPM={}, mood={}, {} beats",
+                    cached.bpm(), cached.mood(),
+                    cached.beats() != null ? cached.beats().size() : 0);
+            return cached;
+        }
+
         try {
             Path musicPath = Path.of(context.getMusicLocalPath());
             byte[] audioBytes = Files.readAllBytes(musicPath);

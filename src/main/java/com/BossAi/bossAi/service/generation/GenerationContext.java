@@ -190,6 +190,13 @@ public class GenerationContext {
     private MusicAnalysisResult musicAnalysis;
 
     /**
+     * Raw response z Python audio-analysis-service.
+     * Cachowany po pierwszym uzyciu (BeatDetection lub MusicAnalysis),
+     * zeby nie wolac Pythona wielokrotnie dla tego samego pliku.
+     */
+    private com.BossAi.bossAi.service.audio.AudioAnalysisResponse cachedAudioAnalysis;
+
+    /**
      * Offset startu muzyki w ms — od tego momentu muzyka zaczyna grać.
      * Np. 43000 = zacznij od 43. sekundy muzyki (FFmpeg -ss).
      * Obliczany przez MusicAlignmentService na podstawie analizy muzyki + scenariusza.
