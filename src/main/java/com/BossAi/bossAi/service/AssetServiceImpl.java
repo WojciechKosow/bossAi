@@ -39,7 +39,13 @@ public class AssetServiceImpl implements AssetService {
     @Override
     @Transactional
     public AssetDTO createAsset(UUID userId, AssetType type, AssetSource source, byte[] data, String storageKey, UUID generationId, String prompt) {
+        return createAsset(userId, type, source, data, storageKey, generationId, prompt, null);
+    }
 
+    @Override
+    @Transactional
+    public AssetDTO createAsset(UUID userId, AssetType type, AssetSource source, byte[] data,
+                                String storageKey, UUID generationId, String prompt, String originalUrl) {
         User user = userRepository.findById(userId).orElseThrow();
 
         Generation generation = generationRepository.getReferenceById(generationId);
@@ -53,6 +59,7 @@ public class AssetServiceImpl implements AssetService {
         asset.setSizeBytes(data.length);
         asset.setReusable(canReuse(userPlan));
         asset.setPrompt(prompt);
+        asset.setOriginalFilename(originalUrl);
         asset.setCreatedAt(LocalDateTime.now());
         asset.setExpiresAt(resolveExpiration(userPlan));
         asset.setGenerationId(generationId);
