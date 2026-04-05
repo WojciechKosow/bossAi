@@ -218,6 +218,10 @@ public class GenerationServiceImpl implements GenerationService {
             // ── NEW PIPELINE: bridge assets → VideoProject → EDL → Remotion ──
             if (useNewPipeline) {
                 try {
+                    // Zapisz Generation TERAZ — AssetBridge potrzebuje jej w DB
+                    // (FK constraint: video_projects.generation_id → generations.id)
+                    generationRepository.save(generation);
+
                     String userEmail = generation.getUser().getEmail();
                     UUID projectId = assetBridgeService.bridgeToVideoProject(context, generation, userEmail);
                     log.info("[GenerationService] New pipeline triggered — projectId: {}", projectId);
