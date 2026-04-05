@@ -18,6 +18,8 @@ import org.springframework.scheduling.annotation.Async;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.nio.file.Files;
@@ -100,12 +102,22 @@ public class GenerationServiceImpl implements GenerationService {
 
 
 
-        pipelineAsyncRunner.runPipelineAsync(generation.getId(), context, tx.getId());
+        // Uruchom pipeline DOPIERO po commicie transakcji.
+        // @Async odpala nowy wątek natychmiast — jeśli zrobimy to tutaj,
+        // wątek może wystartować zanim INSERT Generation się commituje → findById() = empty.
+        UUID genId = generation.getId();
+        UUID txId = tx.getId();
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                pipelineAsyncRunner.runPipelineAsync(genId, context, txId);
+            }
+        });
 
         log.info("[GenerationService] TikTok Ad zainicjowany — generationId: {}, user: {}",
-                generation.getId(), email);
+                genId, email);
 
-        return new GenerationResponse(generation.getId(), generation.getGenerationStatus());
+        return new GenerationResponse(genId, generation.getGenerationStatus());
     }
 
     @Override
