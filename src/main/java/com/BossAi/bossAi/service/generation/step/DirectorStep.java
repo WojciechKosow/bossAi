@@ -158,9 +158,19 @@ public class DirectorStep implements GenerationStep {
                     .orElseThrow(() -> new IllegalStateException(
                             "[DirectorStep] Scena " + scene.getSceneIndex() + " nie znaleziona przy beat sync"));
 
-            List<Cut> cuts = mapBeatsToScene(beats, asset.getDurationMs());
+            // Oblicz offset czasowy sceny na timeline
+            int sceneOffsetMs = 0;
+            for (SceneAsset s : context.getScenes()) {
+                if (s.getIndex() < scene.getSceneIndex()) {
+                    sceneOffsetMs += s.getDurationMs();
+                }
+            }
+
+            List<Cut> cuts = mapBeatsToScene(beats, asset.getDurationMs(), sceneOffsetMs);
 
             if (!cuts.isEmpty()) {
+                log.info("[DirectorStep] Beat sync scena {} — {} cutów (offset={}ms, duration={}ms)",
+                        scene.getSceneIndex(), cuts.size(), sceneOffsetMs, asset.getDurationMs());
                 scene.setCuts(cuts);
             } else {
                 log.warn("[DirectorStep] Beat sync dla sceny {} wygenerował 0 cuts — zostawiam oryginalne",
@@ -169,21 +179,33 @@ public class DirectorStep implements GenerationStep {
         }
     }
 
-    private List<Cut> mapBeatsToScene(List<Integer> beats, int durationMs) {
+    /**
+     * Mapuje beaty na cuty wewnątrz sceny.
+     * Beaty to pozycje absolutne na timeline muzyki.
+     * sceneOffsetMs = początek sceny na timeline wideo.
+     * Cuty mają startMs/endMs RELATYWNE do sceny (0 = początek sceny).
+     */
+    private List<Cut> mapBeatsToScene(List<Integer> beats, int durationMs, int sceneOffsetMs) {
         List<Cut> cuts = new ArrayList<>();
-        int current = 0;
+        int sceneEndMs = sceneOffsetMs + durationMs;
+        int current = 0; // relatywny do sceny
 
         for (int beat : beats) {
-            if (beat >= durationMs) break;
-            if (beat <= current) continue; // ignoruj beaty wsteczne
+            // Pomiń beaty sprzed tej sceny
+            if (beat < sceneOffsetMs) continue;
+            // Stop gdy beat za sceną
+            if (beat >= sceneEndMs) break;
+
+            int relBeat = beat - sceneOffsetMs;
+            if (relBeat <= current) continue;
 
             cuts.add(Cut.builder()
                     .startMs(current)
-                    .endMs(beat)
-                    .energy(resolveEnergy(beat))
+                    .endMs(relBeat)
+                    .energy(resolveEnergy(relBeat - current))
                     .build());
 
-            current = beat;
+            current = relBeat;
         }
 
         // Domknij ostatni cut do końca sceny
@@ -198,9 +220,9 @@ public class DirectorStep implements GenerationStep {
         return cuts;
     }
 
-    private String resolveEnergy(int beatMs) {
-        if (beatMs < 1000) return "high";
-        if (beatMs < 3000) return "medium";
+    private String resolveEnergy(int cutDurationMs) {
+        if (cutDurationMs < 500) return "high";
+        if (cutDurationMs < 1500) return "medium";
         return "low";
     }
 
