@@ -5,12 +5,15 @@ import com.BossAi.bossAi.service.ProjectAssetService;
 import com.BossAi.bossAi.service.StorageService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.core.io.Resource;
+import org.springframework.core.io.UrlResource;
 import org.springframework.http.HttpHeaders;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.UUID;
 
 /**
@@ -31,9 +34,12 @@ public class InternalAssetController {
     /**
      * GET /internal/assets/{assetId}/file — pobiera plik media po UUID assetu.
      * Remotion wywołuje ten endpoint żeby pobrać wideo/obraz/audio do renderowania.
+     *
+     * Zwraca Resource (nie byte[]) — Spring automatycznie obsługuje HTTP Range requests,
+     * co jest wymagane przez Remotion's <Video> component (Chromium seek).
      */
     @GetMapping("/{assetId}/file")
-    public ResponseEntity<byte[]> getAssetFile(@PathVariable UUID assetId) {
+    public ResponseEntity<Resource> getAssetFile(@PathVariable UUID assetId) {
         try {
             ProjectAsset asset = projectAssetService.getAsset(assetId);
 
@@ -42,18 +48,26 @@ public class InternalAssetController {
                 return ResponseEntity.notFound().build();
             }
 
-            byte[] data = storageService.load(asset.getStorageUrl());
+            Path filePath = storageService.resolvePath(asset.getStorageUrl());
+
+            if (!Files.exists(filePath)) {
+                log.warn("[InternalAsset] File not found at path: {}", filePath);
+                return ResponseEntity.notFound().build();
+            }
+
+            Resource resource = new UrlResource(filePath.toUri());
 
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(resolveMediaType(asset.getMimeType()));
-            headers.setContentLength(data.length);
+            headers.set("Accept-Ranges", "bytes");
             headers.set("X-Asset-Type", asset.getType().name());
             if (asset.getFilename() != null) {
-                headers.set("X-Asset-Filename", asset.getFilename());
                 headers.set("Content-Disposition", "inline; filename=\"" + asset.getFilename() + "\"");
             }
 
-            return new ResponseEntity<>(data, headers, HttpStatus.OK);
+            return ResponseEntity.ok()
+                    .headers(headers)
+                    .body(resource);
 
         } catch (Exception e) {
             log.error("[InternalAsset] Failed to serve asset {}: {}", assetId, e.getMessage());
