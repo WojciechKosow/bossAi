@@ -1,6 +1,7 @@
 package com.BossAi.bossAi.service.edl;
 
 import com.BossAi.bossAi.dto.edl.EdlDto;
+import com.BossAi.bossAi.dto.edl.EdlMetadata;
 import com.BossAi.bossAi.entity.*;
 import com.BossAi.bossAi.service.*;
 import com.BossAi.bossAi.service.audio.AudioAnalysisClient;
@@ -155,8 +156,14 @@ public class VideoProductionOrchestrator {
 
         try {
             // Serializuj EDL do Map (Remotion oczekuje raw JSON object)
-            Map<String, Object> edlMap = objectMapper.convertValue(edl, Map.class);
+            if (edl.getMetadata() != null) {
+                EdlMetadata meta = edl.getMetadata();
+                if (meta.getWidth() <= 0) meta.setWidth(1080);
+                if (meta.getHeight() <= 0) meta.setHeight(1920);
+                if (meta.getFps() <= 0) meta.setFps(30);
+            }
 
+            Map<String, Object> edlMap = objectMapper.convertValue(edl, Map.class);
             RemotionRenderRequest request = RemotionRenderRequest.builder()
                     .renderId(renderId)
                     .edl(edlMap)

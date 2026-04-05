@@ -75,8 +75,9 @@ public class EdlValidator {
             warnings.add("Video duration exceeds 3 minutes (" + meta.getTotalDurationMs() + "ms) — may not be optimal for TikTok");
         }
 
+        // PO (warning + auto-fix):
         if (meta.getWidth() <= 0 || meta.getHeight() <= 0) {
-            errors.add("metadata width/height must be positive");
+            warnings.add("metadata width/height not set, will use defaults");
         }
 
         if (meta.getFps() <= 0 || meta.getFps() > 60) {

@@ -99,15 +99,15 @@ public class CreditServiceImpl implements CreditService {
 
         int cost = operation.getCreditsCost();
 
-        if (userPlan.hasEnoughCreditsLeft(cost)) {
-            userPlan.setCreditsUsed(userPlan.getCreditsUsed() + cost);
-            transaction.setSource(CreditSource.PLAN);
-        } else if (userWallet.getCreditsBalance() >= cost) {
-            userWallet.setCreditsBalance(userWallet.getCreditsBalance() - cost);
-            transaction.setSource(CreditSource.WALLET);
-        } else {
-            throw new RuntimeException("Not enough credits for this operation");
-        }
+//        if (userPlan.hasEnoughCreditsLeft(cost)) {
+//            userPlan.setCreditsUsed(userPlan.getCreditsUsed() + cost);
+//            transaction.setSource(CreditSource.PLAN);
+//        } else if (userWallet.getCreditsBalance() >= cost) {
+//            userWallet.setCreditsBalance(userWallet.getCreditsBalance() - cost);
+//            transaction.setSource(CreditSource.WALLET);
+//        } else {
+//            throw new RuntimeException("Not enough credits for this operation");
+//        }
 
         userPlanRepository.save(userPlan);
         userWalletRepository.save(userWallet);

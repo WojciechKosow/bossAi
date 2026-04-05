@@ -1,10 +1,12 @@
 package com.BossAi.bossAi.service.render;
 
 import com.BossAi.bossAi.config.properties.RemotionRendererProperties;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 /**
  * HTTP client do mikroserwisu remotion-renderer (Node.js/Remotion).
@@ -17,9 +19,11 @@ public class RemotionRenderClient {
 
     private final WebClient webClient;
     private final RemotionRendererProperties properties;
+    private final ObjectMapper objectMapper;
 
-    public RemotionRenderClient(RemotionRendererProperties properties, WebClient.Builder builder) {
+    public RemotionRenderClient(RemotionRendererProperties properties, WebClient.Builder builder, ObjectMapper objectMapper) {
         this.properties = properties;
+        this.objectMapper = objectMapper;
         this.webClient = builder
                 .baseUrl(properties.getBaseUrl())
                 .build();
@@ -35,6 +39,12 @@ public class RemotionRenderClient {
      */
     public RemotionRenderResponse triggerRender(RemotionRenderRequest request) {
         log.info("[RemotionRenderClient] Triggering render — renderId: {}", request.renderId());
+
+        try {
+            log.info("REQUEST JSON: {}", objectMapper.writeValueAsString(request));
+        } catch (Exception e) {
+            log.error("JSON serialize error", e);
+        }
 
         RemotionRenderResponse response = webClient.post()
                 .uri("/api/v1/render")
@@ -59,6 +69,7 @@ public class RemotionRenderClient {
             log.info("[RemotionRenderClient] Render triggered — renderId: {}, status: {}",
                     response.renderId(), response.status());
         }
+
 
         return response;
     }

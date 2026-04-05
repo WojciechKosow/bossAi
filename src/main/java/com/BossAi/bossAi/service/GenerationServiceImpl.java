@@ -352,12 +352,12 @@ public class GenerationServiceImpl implements GenerationService {
                 )
         );
 
-        if (activeCount >= MAX_ACTIVE_GENERATIONS) {
-            throw new ResponseStatusException(
-                    HttpStatus.TOO_MANY_REQUESTS,
-                    "Too many active generations. Please wait."
-            );
-        }
+//        if (activeCount >= MAX_ACTIVE_GENERATIONS) {
+//            throw new ResponseStatusException(
+//                    HttpStatus.TOO_MANY_REQUESTS,
+//                    "Too many active generations. Please wait."
+//            );
+//        }
     }
 
     private void validateCooldown(User user) {

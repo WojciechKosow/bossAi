@@ -94,6 +94,9 @@ public class OpenAiService {
 
         ALWAYS respond ONLY with valid JSON matching the exact schema below.
         No markdown, no comments, no preamble, no explanation outside JSON.
+        
+            Segments MUST contain only VIDEO or IMAGE assets.
+            VOICE and MUSIC must go ONLY into audio_tracks.
 
         JSON SCHEMA:
         {

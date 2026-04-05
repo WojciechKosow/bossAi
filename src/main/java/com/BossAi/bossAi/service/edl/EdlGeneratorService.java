@@ -14,6 +14,9 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -83,6 +86,8 @@ public class EdlGeneratorService {
                 edl.getTextOverlays() != null ? edl.getTextOverlays().size() : 0,
                 edl.getWhisperWords() != null ? edl.getWhisperWords().size() : 0);
 
+
+
         return edl;
     }
 
@@ -103,6 +108,10 @@ public class EdlGeneratorService {
             if ("VIDEO".equals(typeName) || "IMAGE".equals(typeName)) {
                 assetBySceneIndex.put(sceneAssetIdx++, asset);
             }
+        }
+
+        for (ProjectAsset asset : projectAssets) {
+            log.info("Asset {} storageUrl={}", asset.getId(), asset.getStorageUrl());
         }
 
         List<EdlSegment> segments = new ArrayList<>();
@@ -163,6 +172,9 @@ public class EdlGeneratorService {
                         .totalDurationMs(totalDuration)
                         .bpm(audioAnalysis != null ? audioAnalysis.bpm() : null)
                         .pacing(context.getDirectorPlan() != null ? context.getDirectorPlan().getPacing() : "medium")
+                        .width(1080)
+                        .height(1920)
+                        .fps(30)
                         .build())
                 .segments(segments)
                 .audioTracks(audioTracks)
@@ -197,11 +209,30 @@ public class EdlGeneratorService {
 
         if (edl.getSegments() != null) {
             for (EdlSegment seg : edl.getSegments()) {
-                if (seg.getAssetId() != null && seg.getAssetUrl() == null) {
-                    seg.setAssetUrl(urlById.get(seg.getAssetId()));
+
+                String assetId = seg.getAssetId();
+                String url = urlById.get(assetId);
+
+                if (url == null) {
+                    throw new RuntimeException(
+                            "❌ Missing assetUrl for assetId=" + assetId
+                    );
                 }
+
+                seg.setAssetUrl(url);
+
+                String assetType = url.toLowerCase().endsWith(".mp4")
+                        ? "VIDEO"
+                        : "IMAGE";
+
+                seg.setAssetType(assetType);
             }
         }
+
+        log.info("Available assets: {}", urlById.keySet());
+        log.info("EDL assetIds: {}", edl.getSegments().stream()
+                .map(EdlSegment::getAssetId)
+                .toList());
 
         if (edl.getAudioTracks() != null) {
             for (EdlAudioTrack track : edl.getAudioTracks()) {
@@ -222,10 +253,20 @@ public class EdlGeneratorService {
      * W przeciwnym razie (sciezka lokalna) — zbuduj URL przez internal endpoint.
      */
     private String buildAssetUrl(String callbackBase, String assetId, String storageUrl) {
-        if (storageUrl != null && (storageUrl.startsWith("http://") || storageUrl.startsWith("https://"))) {
+
+        // jeśli to external URL (np. S3) → zostaw
+        if (storageUrl != null &&
+                (storageUrl.startsWith("http://") || storageUrl.startsWith("https://"))) {
             return storageUrl;
         }
-        return callbackBase + "/internal/assets/" + assetId + "/file";
+
+        // 🔥 KLUCZOWY FIX
+        return callbackBase + "/api/assets/file/" + assetId;
+    }
+
+    private String extractKey(String storageUrl) {
+        if (storageUrl == null) return "";
+        return Path.of(storageUrl).getFileName().toString();
     }
 
     // =========================================================================
