@@ -200,11 +200,13 @@ public class EdlGeneratorService {
     private void injectAssetUrls(EdlDto edl, List<ProjectAsset> projectAssets) {
         String callbackBase = remotionProperties.getCallbackBaseUrl();
 
-        // Buduj mapę assetId → HTTP URL
+        // Buduj mapy assetId → HTTP URL oraz assetId → mimeType
         Map<String, String> urlById = new HashMap<>();
+        Map<String, String> mimeById = new HashMap<>();
         for (ProjectAsset asset : projectAssets) {
             String assetId = asset.getId().toString();
             urlById.put(assetId, buildAssetUrl(callbackBase, assetId, asset.getStorageUrl()));
+            mimeById.put(assetId, asset.getMimeType() != null ? asset.getMimeType() : "");
         }
 
         if (edl.getSegments() != null) {
@@ -221,10 +223,9 @@ public class EdlGeneratorService {
 
                 seg.setAssetUrl(url);
 
-                String assetType = url.toLowerCase().endsWith(".mp4")
-                        ? "VIDEO"
-                        : "IMAGE";
-
+                // Determine asset_type from actual mimeType, not URL extension
+                String mime = mimeById.getOrDefault(assetId, "");
+                String assetType = mime.startsWith("video/") ? "VIDEO" : "IMAGE";
                 seg.setAssetType(assetType);
             }
         }
