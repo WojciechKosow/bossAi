@@ -68,6 +68,9 @@ public class EdlGeneratorService {
         // Inject whisper words — GPT nie generuje per-word timings, mamy je z Whisper
         injectWhisperWords(edl, context);
 
+        // Uzupelnij brakujace nested objects (GPT czesto pomija style/position/effects)
+        ensureNestedDefaults(edl);
+
         EdlValidator.ValidationResult result = edlValidator.validate(edl);
         if (!result.valid()) {
             log.warn("[EdlGenerator] GPT EDL invalid, falling back to deterministic — errors: {}", result.errors());
@@ -223,6 +226,35 @@ public class EdlGeneratorService {
             return storageUrl;
         }
         return callbackBase + "/internal/assets/" + assetId + "/file";
+    }
+
+    // =========================================================================
+    // DEFAULTS — uzupelnia null nested objects po GPT response
+    // =========================================================================
+
+    /**
+     * GPT czesto pomija style/position na text overlays i effects na segmentach.
+     * Remotion Zod schema wymaga obiektow (nie null) — uzupelniamy defaultami.
+     */
+    private void ensureNestedDefaults(EdlDto edl) {
+        if (edl.getSegments() != null) {
+            for (EdlSegment seg : edl.getSegments()) {
+                if (seg.getEffects() == null) {
+                    seg.setEffects(List.of());
+                }
+            }
+        }
+
+        if (edl.getTextOverlays() != null) {
+            for (EdlTextOverlay overlay : edl.getTextOverlays()) {
+                if (overlay.getStyle() == null) {
+                    overlay.setStyle(EdlTextOverlay.TextStyle.builder().build());
+                }
+                if (overlay.getPosition() == null) {
+                    overlay.setPosition(EdlTextOverlay.TextPosition.builder().build());
+                }
+            }
+        }
     }
 
     // =========================================================================
