@@ -14,5 +14,5 @@ remotion-renderer:
     connect: 5000
     read: 60000
   polling:
-    max-attempts: 120
-    interval-ms: 3000
+    max-attempts: 400
+    interval-ms: 5000
