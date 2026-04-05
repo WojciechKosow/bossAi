@@ -172,6 +172,7 @@ public class ImageToClipStep {
         cmd.addAll(List.of("-pix_fmt", "yuv420p")); // wymagane przez niektóre players
         cmd.addAll(List.of("-r", "30"));             // stały framerate
         cmd.addAll(List.of("-an"));                  // brak audio — dodane w RenderStep mix
+        cmd.addAll(List.of("-movflags", "+faststart")); // moov atom na początku — wymagane przez Remotion (Chromium seek)
         cmd.add(output.toString());
         return cmd;
     }
