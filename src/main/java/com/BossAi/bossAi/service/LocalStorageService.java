@@ -51,4 +51,9 @@ public class LocalStorageService implements StorageService {
     public String generateUrl(String key) {
         return "/api/assets/file/" + key;
     }
+
+    @Override
+    public Path resolvePath(String key) {
+        return root.resolve(key).toAbsolutePath();
+    }
 }
