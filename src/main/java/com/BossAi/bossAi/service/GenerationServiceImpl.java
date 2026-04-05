@@ -1,8 +1,6 @@
 package com.BossAi.bossAi.service;
 
-import com.BossAi.bossAi.config.PipelineConfig;
 import com.BossAi.bossAi.config.properties.FfmpegProperties;
-import com.BossAi.bossAi.dto.AssetDTO;
 import com.BossAi.bossAi.dto.GenerationDTO;
 import com.BossAi.bossAi.entity.*;
 import com.BossAi.bossAi.repository.*;
@@ -11,8 +9,6 @@ import com.BossAi.bossAi.request.GenerateVideoRequest;
 import com.BossAi.bossAi.request.TikTokAdRequest;
 import com.BossAi.bossAi.response.GenerationResponse;
 import com.BossAi.bossAi.service.generation.GenerationContext;
-import com.BossAi.bossAi.service.generation.GenerationExecutor;
-import com.BossAi.bossAi.service.generation.GenerationStepName;
 import com.BossAi.bossAi.service.style.StyleConfig;
 import com.BossAi.bossAi.service.style.StyleService;
 import lombok.RequiredArgsConstructor;
@@ -44,20 +40,13 @@ public class GenerationServiceImpl implements GenerationService {
     private final UserPlanRepository userPlanRepository;
     private final CreditService creditService;
     private final PlanSelectionService planSelectionService;
-    private final ProgressService progressService;
     private final StorageService storageService;
-    private final GenerationExecutor generationExecutor;
-    private final PipelineConfig.TikTokAdPipeline tikTokAdPipeline;
+    private final PipelineAsyncRunner pipelineAsyncRunner;
     private final AssetRepository assetRepository;
     private final PlanDefinitionRepository planDefinitionRepository;
     private final AssetService assetService;
     private final FfmpegProperties ffmpegProperties;
     private final StyleService styleService;
-    private final com.BossAi.bossAi.service.edl.AssetBridgeService assetBridgeService;
-    private final com.BossAi.bossAi.service.edl.VideoProductionOrchestrator videoProductionOrchestrator;
-
-    @org.springframework.beans.factory.annotation.Value("${rendering.use-new-pipeline:false}")
-    private boolean useNewPipeline;
 
     private static final int MAX_ACTIVE_GENERATIONS = 1;
     private static final int GENERATION_COOLDOWN_SECONDS = 5;
@@ -111,7 +100,7 @@ public class GenerationServiceImpl implements GenerationService {
 
 
 
-        runPipelineAsync(generation, context, tx);
+        pipelineAsyncRunner.runPipelineAsync(generation, context, tx);
 
         log.info("[GenerationService] TikTok Ad zainicjowany — generationId: {}, user: {}",
                 generation.getId(), email);
@@ -175,77 +164,6 @@ public class GenerationServiceImpl implements GenerationService {
         return new GenerationResponse(generation.getId(), generation.getGenerationStatus());
     }
 
-    @Async("aiExecutor")
-    public void runPipelineAsync(
-            Generation generation,
-            GenerationContext context,
-            CreditTransaction tx
-    ) {
-        UUID genId = generation.getId();
-
-        try {
-            generation.setGenerationStatus(GenerationStatus.PROCESSING);
-            generationRepository.save(generation);
-
-            progressService.broadcast(genId, GenerationStepName.INITIALIZING);
-
-            log.info("[GenerationService] Pipeline START — generationId: {}", genId);
-
-            // Wykonaj pipeline — każdy Step aktualizuje context.currentStep
-            // Broadcastujemy po każdym kroku przez hook w execute
-            tikTokAdPipeline.execute(context, step ->
-                    progressService.broadcast(genId, step, step.getProgressPercent(), step.getDisplayMessage())
-            );
-
-            // SAVING
-            progressService.broadcast(genId, GenerationStepName.SAVING);
-            context.updateProgress(GenerationStepName.SAVING,
-                    GenerationStepName.SAVING.getProgressPercent(),
-                    GenerationStepName.SAVING.getDisplayMessage());
-
-            generation.setVideoUrl(context.getFinalVideoUrl());
-            generation.setGenerationStatus(GenerationStatus.DONE);
-            generation.setFinishedAt(LocalDateTime.now());
-
-            updateUserLastGeneration(generation.getUser().getId());
-            creditService.confirm(tx.getId());
-
-            progressService.broadcast(genId, GenerationStepName.DONE);
-
-            log.info("[GenerationService] Pipeline DONE — generationId: {}, url: {}",
-                    genId, context.getFinalVideoUrl());
-
-            // ── NEW PIPELINE: bridge assets → VideoProject → EDL → Remotion ──
-            if (useNewPipeline) {
-                try {
-                    // Zapisz Generation TERAZ — AssetBridge potrzebuje jej w DB
-                    // (FK constraint: video_projects.generation_id → generations.id)
-                    generationRepository.save(generation);
-
-                    String userEmail = generation.getUser().getEmail();
-                    UUID projectId = assetBridgeService.bridgeToVideoProject(context, generation, userEmail);
-                    log.info("[GenerationService] New pipeline triggered — projectId: {}", projectId);
-                    videoProductionOrchestrator.produceVideo(projectId, context);
-                } catch (Exception ex) {
-                    log.warn("[GenerationService] New pipeline failed (non-blocking) — {}", ex.getMessage());
-                }
-            }
-
-        } catch (Exception e) {
-            log.error("[GenerationService] Pipeline FAILED — generationId: {}, error: {}",
-                    genId, e.getMessage(), e);
-
-            generation.setGenerationStatus(GenerationStatus.FAILED);
-            generation.setErrorMessage(e.getMessage());
-
-            creditService.refund(tx.getId());
-            progressService.broadcast(genId, GenerationStepName.FAILED,
-                    0, "Generacja nieudana: " + e.getMessage());
-
-        } finally {
-            generationRepository.save(generation);
-        }
-    }
 
     @Async("aiExecutor")
     void processImageAsync(UUID generationId, GenerateImageRequest request, CreditTransaction tx) {
@@ -511,11 +429,4 @@ public class GenerationServiceImpl implements GenerationService {
                 .build();
     }
 
-    @Transactional
-    protected void updateUserLastGeneration(UUID userId) {
-        userRepository.findById(userId).ifPresent(user -> {
-            user.setLastGeneration(LocalDateTime.now());
-            userRepository.save(user);
-        });
-    }
 }
