@@ -50,6 +50,7 @@ public class InternalAssetController {
             headers.set("X-Asset-Type", asset.getType().name());
             if (asset.getFilename() != null) {
                 headers.set("X-Asset-Filename", asset.getFilename());
+                headers.set("Content-Disposition", "inline; filename=\"" + asset.getFilename() + "\"");
             }
 
             return new ResponseEntity<>(data, headers, HttpStatus.OK);

@@ -260,8 +260,8 @@ public class EdlGeneratorService {
             return storageUrl;
         }
 
-        // 🔥 KLUCZOWY FIX
-        return callbackBase + "/api/assets/file/" + assetId;
+        // Remotion pobiera assety z internal endpoint (bez auth, ProjectAsset lookup)
+        return callbackBase + "/internal/assets/" + assetId + "/file";
     }
 
     private String extractKey(String storageUrl) {
