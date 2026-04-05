@@ -54,8 +54,8 @@ public class PipelineAsyncRunner {
             GenerationContext context,
             UUID txId
     ) {
-        // Załaduj świeżą encję z DB — nie używamy detached entity z innej transakcji
-        Generation generation = generationRepository.findById(generationId)
+        // Załaduj świeżą encję z DB + eagerly fetch User (unikamy LazyInitializationException w async)
+        Generation generation = generationRepository.findByIdWithUser(generationId)
                 .orElseThrow(() -> new IllegalStateException(
                         "Generation not found: " + generationId));
 

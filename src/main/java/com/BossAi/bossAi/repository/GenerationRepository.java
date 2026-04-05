@@ -7,11 +7,17 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
-import java.awt.print.Pageable;
+import org.springframework.data.jpa.repository.EntityGraph;
+
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 public interface GenerationRepository extends JpaRepository<Generation, UUID> {
+
+    @EntityGraph(attributePaths = "user")
+    @Query("SELECT g FROM Generation g WHERE g.id = :id")
+    Optional<Generation> findByIdWithUser(@Param("id") UUID id);
     List<Generation> findAllByUserId(UUID userId);
 
     long countByUserAndGenerationStatusIn(
