@@ -46,5 +46,11 @@ public class EdlDto {
     @JsonProperty("text_overlays")
     private List<EdlTextOverlay> textOverlays;
 
+    @JsonProperty("subtitle_config")
+    private EdlSubtitleConfig subtitleConfig;
+
+    @JsonProperty("whisper_words")
+    private List<EdlWhisperWord> whisperWords;
+
     public static final String CURRENT_VERSION = "1.0";
 }

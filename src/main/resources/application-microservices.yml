@@ -9,6 +9,7 @@ audio-analysis:
 
 remotion-renderer:
   base-url: ${REMOTION_RENDERER_URL:http://localhost:3000}
+  callback-base-url: ${SPRING_BOOT_BASE_URL:http://localhost:8080}
   timeout:
     connect: 5000
     read: 60000

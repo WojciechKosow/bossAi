@@ -1,5 +1,6 @@
 package com.BossAi.bossAi.service.edl;
 
+import com.BossAi.bossAi.config.properties.RemotionRendererProperties;
 import com.BossAi.bossAi.dto.edl.*;
 import com.BossAi.bossAi.entity.ProjectAsset;
 import com.BossAi.bossAi.service.OpenAiService;
@@ -39,6 +40,7 @@ public class EdlGeneratorService {
     private final ObjectMapper objectMapper;
     private final EffectRegistry effectRegistry;
     private final EdlValidator edlValidator;
+    private final RemotionRendererProperties remotionProperties;
 
     // =========================================================================
     // PUBLIC API
@@ -63,16 +65,20 @@ public class EdlGeneratorService {
         // Inject asset URLs — GPT nie zna URLi, tylko asset_id
         injectAssetUrls(edl, projectAssets);
 
+        // Inject whisper words — GPT nie generuje per-word timings, mamy je z Whisper
+        injectWhisperWords(edl, context);
+
         EdlValidator.ValidationResult result = edlValidator.validate(edl);
         if (!result.valid()) {
             log.warn("[EdlGenerator] GPT EDL invalid, falling back to deterministic — errors: {}", result.errors());
             return buildDeterministicEdl(context, audioAnalysis, projectAssets);
         }
 
-        log.info("[EdlGenerator] GPT EDL valid — {} segments, {} audio tracks, {} overlays",
+        log.info("[EdlGenerator] GPT EDL valid — {} segments, {} audio tracks, {} overlays, {} whisper words",
                 edl.getSegments().size(),
                 edl.getAudioTracks() != null ? edl.getAudioTracks().size() : 0,
-                edl.getTextOverlays() != null ? edl.getTextOverlays().size() : 0);
+                edl.getTextOverlays() != null ? edl.getTextOverlays().size() : 0,
+                edl.getWhisperWords() != null ? edl.getWhisperWords().size() : 0);
 
         return edl;
     }
@@ -123,7 +129,7 @@ public class EdlGeneratorService {
             segments.add(EdlSegment.builder()
                     .id(UUID.randomUUID().toString())
                     .assetId(asset.getId().toString())
-                    .assetUrl(asset.getStorageUrl())
+                    .assetUrl(buildAssetUrl(remotionProperties.getCallbackBaseUrl(), asset.getId().toString(), asset.getStorageUrl()))
                     .assetType(asset.getType().name())
                     .startMs(timelineMs)
                     .endMs(timelineMs + durationMs)
@@ -140,6 +146,10 @@ public class EdlGeneratorService {
         // Text overlays — phrase-grouped with karaoke animation
         List<EdlTextOverlay> overlays = buildSubtitleOverlays(context);
 
+        // Whisper words — per-word timing for Remotion SubtitleTrack
+        List<EdlWhisperWord> whisperWords = buildWhisperWords(context);
+        EdlSubtitleConfig subtitleConfig = buildSubtitleConfig(context);
+
         int totalDuration = segments.isEmpty() ? 0 : segments.get(segments.size() - 1).getEndMs();
 
         return EdlDto.builder()
@@ -154,6 +164,8 @@ public class EdlGeneratorService {
                 .segments(segments)
                 .audioTracks(audioTracks)
                 .textOverlays(overlays)
+                .subtitleConfig(subtitleConfig)
+                .whisperWords(whisperWords)
                 .build();
     }
 
@@ -161,14 +173,24 @@ public class EdlGeneratorService {
     // ASSET URL INJECTION — uzupelnia URLe po GPT response
     // =========================================================================
 
+    /**
+     * Wstrzykuje HTTP URL-e do segmentow i audio trackow.
+     *
+     * Remotion to oddzielny serwis Node.js — nie ma dostepu do lokalnego filesystemu.
+     * Zamiast surowego storageUrl (np. /tmp/bossai/...) uzywamy endpointu HTTP:
+     *   {callbackBaseUrl}/internal/assets/{assetId}/file
+     *
+     * Jesli storageUrl jest juz pelnym HTTP/HTTPS URL-em (np. S3), uzywamy go bezposrednio.
+     */
     private void injectAssetUrls(EdlDto edl, List<ProjectAsset> projectAssets) {
-        Map<String, String> urlById = projectAssets.stream()
-                .filter(a -> a.getStorageUrl() != null)
-                .collect(Collectors.toMap(
-                        a -> a.getId().toString(),
-                        ProjectAsset::getStorageUrl,
-                        (a, b) -> a
-                ));
+        String callbackBase = remotionProperties.getCallbackBaseUrl();
+
+        // Buduj mapę assetId → HTTP URL
+        Map<String, String> urlById = new HashMap<>();
+        for (ProjectAsset asset : projectAssets) {
+            String assetId = asset.getId().toString();
+            urlById.put(assetId, buildAssetUrl(callbackBase, assetId, asset.getStorageUrl()));
+        }
 
         if (edl.getSegments() != null) {
             for (EdlSegment seg : edl.getSegments()) {
@@ -186,9 +208,21 @@ public class EdlGeneratorService {
             }
         }
 
-        log.info("[EdlGenerator] Injected asset URLs for {} segments, {} audio tracks",
+        log.info("[EdlGenerator] Injected asset URLs (callback={}) for {} segments, {} audio tracks",
+                callbackBase,
                 edl.getSegments() != null ? edl.getSegments().size() : 0,
                 edl.getAudioTracks() != null ? edl.getAudioTracks().size() : 0);
+    }
+
+    /**
+     * Jesli storageUrl to pelny HTTP(S) URL — uzyj go bezposrednio.
+     * W przeciwnym razie (sciezka lokalna) — zbuduj URL przez internal endpoint.
+     */
+    private String buildAssetUrl(String callbackBase, String assetId, String storageUrl) {
+        if (storageUrl != null && (storageUrl.startsWith("http://") || storageUrl.startsWith("https://"))) {
+            return storageUrl;
+        }
+        return callbackBase + "/internal/assets/" + assetId + "/file";
     }
 
     // =========================================================================
@@ -323,6 +357,8 @@ public class EdlGeneratorService {
                                                   List<ProjectAsset> projectAssets) {
         List<EdlAudioTrack> audioTracks = new ArrayList<>();
 
+        String callbackBase = remotionProperties.getCallbackBaseUrl();
+
         // Voice track
         ProjectAsset voiceAsset = projectAssets.stream()
                 .filter(a -> "VOICE".equals(a.getType().name()))
@@ -331,7 +367,7 @@ public class EdlGeneratorService {
             audioTracks.add(EdlAudioTrack.builder()
                     .id(UUID.randomUUID().toString())
                     .assetId(voiceAsset.getId().toString())
-                    .assetUrl(voiceAsset.getStorageUrl())
+                    .assetUrl(buildAssetUrl(callbackBase, voiceAsset.getId().toString(), voiceAsset.getStorageUrl()))
                     .type("voiceover")
                     .startMs(0)
                     .volume(1.0)
@@ -346,7 +382,7 @@ public class EdlGeneratorService {
             audioTracks.add(EdlAudioTrack.builder()
                     .id(UUID.randomUUID().toString())
                     .assetId(musicAsset.getId().toString())
-                    .assetUrl(musicAsset.getStorageUrl())
+                    .assetUrl(buildAssetUrl(callbackBase, musicAsset.getId().toString(), musicAsset.getStorageUrl()))
                     .type("music")
                     .startMs(0)
                     .volume(0.3)
@@ -423,6 +459,58 @@ public class EdlGeneratorService {
                 overlays.size(), words.size());
 
         return overlays;
+    }
+
+    // =========================================================================
+    // WHISPER WORDS — per-word timing for Remotion SubtitleTrack
+    // =========================================================================
+
+    /**
+     * Konwertuje WordTiming z GenerationContext na EdlWhisperWord.
+     * Remotion uzywa tego w SubtitleTrack → KaraokeHighlight
+     * do podswietlania aktywnego slowa w real-time (dokladny sync z voice-over).
+     */
+    private List<EdlWhisperWord> buildWhisperWords(GenerationContext context) {
+        if (context.getWordTimings() == null || context.getWordTimings().isEmpty()) {
+            return List.of();
+        }
+
+        return context.getWordTimings().stream()
+                .map(wt -> EdlWhisperWord.builder()
+                        .word(wt.word())
+                        .startMs(wt.startMs())
+                        .endMs(wt.endMs())
+                        .build())
+                .toList();
+    }
+
+    private EdlSubtitleConfig buildSubtitleConfig(GenerationContext context) {
+        boolean hasWords = context.getWordTimings() != null && !context.getWordTimings().isEmpty();
+
+        return EdlSubtitleConfig.builder()
+                .enabled(hasWords)
+                .position("bottom_third")
+                .highlightColor("#FFD700")
+                .fontSize(42)
+                .fontFamily("Inter")
+                .strokeColor("#000000")
+                .strokeWidth(3)
+                .build();
+    }
+
+    /**
+     * Wstrzykuje whisper words i subtitle config do GPT-generated EDL
+     * (GPT nie ma dostepu do word timings z Whisper).
+     */
+    private void injectWhisperWords(EdlDto edl, GenerationContext context) {
+        List<EdlWhisperWord> whisperWords = buildWhisperWords(context);
+        EdlSubtitleConfig subtitleConfig = buildSubtitleConfig(context);
+
+        edl.setWhisperWords(whisperWords);
+        edl.setSubtitleConfig(subtitleConfig);
+
+        log.info("[EdlGenerator] Injected {} whisper words, subtitles enabled: {}",
+                whisperWords.size(), subtitleConfig.isEnabled());
     }
 
     // =========================================================================
