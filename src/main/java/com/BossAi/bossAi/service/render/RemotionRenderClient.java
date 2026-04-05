@@ -40,8 +40,19 @@ public class RemotionRenderClient {
                 .uri("/api/v1/render")
                 .contentType(MediaType.APPLICATION_JSON)
                 .bodyValue(request)
-                .retrieve()
-                .bodyToMono(RemotionRenderResponse.class)
+                .exchangeToMono(clientResponse -> {
+                    if (clientResponse.statusCode().isError()) {
+                        return clientResponse.bodyToMono(String.class)
+                                .flatMap(errorBody -> {
+                                    log.error("[RemotionRenderClient] Render request failed — status: {}, body: {}",
+                                            clientResponse.statusCode(), errorBody);
+                                    return reactor.core.publisher.Mono.error(
+                                            new RuntimeException("Remotion render failed (" +
+                                                    clientResponse.statusCode() + "): " + errorBody));
+                                });
+                    }
+                    return clientResponse.bodyToMono(RemotionRenderResponse.class);
+                })
                 .block();
 
         if (response != null) {
