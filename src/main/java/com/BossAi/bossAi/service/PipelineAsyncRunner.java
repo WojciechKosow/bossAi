@@ -25,13 +25,12 @@ import java.util.UUID;
  * z tego samego beanu (self-invocation), proxy nie przechwytuje wywołania
  * i metoda działa SYNCHRONICZNIE — wewnątrz transakcji wywołującej.
  *
- * To powodowało FK constraint error: generateTikTokAd() otwierała transakcję,
- * runPipelineAsync() biegł synchronicznie w tej samej transakcji,
- * AssetBridgeService z REQUIRES_NEW otwierał NOWĄ transakcję
- * i nie widział niezcommitowanego Generation row → FK violation.
- *
- * Rozwiązanie: osobny bean = proxy działa = @Async naprawdę odpala nowy wątek
- * POZA transakcją generateTikTokAd() → Generation jest już w DB.
+ * DLACZEGO UUID zamiast Generation entity:
+ * generateTikTokAd() jest @Transactional — entity jest managed w tej transakcji.
+ * Po powrocie z metody transakcja commituje i entity staje się DETACHED.
+ * Async thread próbujący save() detached entity dostaje
+ * StaleObjectStateException (optimistic lock na merge).
+ * Rozwiązanie: przekazujemy UUID i robimy findById() na świeżym persistence context.
  */
 @Service
 @Slf4j
@@ -51,26 +50,29 @@ public class PipelineAsyncRunner {
 
     @Async("aiExecutor")
     public void runPipelineAsync(
-            Generation generation,
+            UUID generationId,
             GenerationContext context,
-            CreditTransaction tx
+            UUID txId
     ) {
-        UUID genId = generation.getId();
+        // Załaduj świeżą encję z DB — nie używamy detached entity z innej transakcji
+        Generation generation = generationRepository.findById(generationId)
+                .orElseThrow(() -> new IllegalStateException(
+                        "Generation not found: " + generationId));
 
         try {
             generation.setGenerationStatus(GenerationStatus.PROCESSING);
             generationRepository.save(generation);
 
-            progressService.broadcast(genId, GenerationStepName.INITIALIZING);
+            progressService.broadcast(generationId, GenerationStepName.INITIALIZING);
 
-            log.info("[PipelineAsyncRunner] Pipeline START — generationId: {}", genId);
+            log.info("[PipelineAsyncRunner] Pipeline START — generationId: {}", generationId);
 
             tikTokAdPipeline.execute(context, step ->
-                    progressService.broadcast(genId, step, step.getProgressPercent(), step.getDisplayMessage())
+                    progressService.broadcast(generationId, step, step.getProgressPercent(), step.getDisplayMessage())
             );
 
             // SAVING
-            progressService.broadcast(genId, GenerationStepName.SAVING);
+            progressService.broadcast(generationId, GenerationStepName.SAVING);
             context.updateProgress(GenerationStepName.SAVING,
                     GenerationStepName.SAVING.getProgressPercent(),
                     GenerationStepName.SAVING.getDisplayMessage());
@@ -80,15 +82,14 @@ public class PipelineAsyncRunner {
             generation.setFinishedAt(LocalDateTime.now());
 
             updateUserLastGeneration(generation.getUser().getId());
-            creditService.confirm(tx.getId());
+            creditService.confirm(txId);
 
-            progressService.broadcast(genId, GenerationStepName.DONE);
+            progressService.broadcast(generationId, GenerationStepName.DONE);
 
             log.info("[PipelineAsyncRunner] Pipeline DONE — generationId: {}, url: {}",
-                    genId, context.getFinalVideoUrl());
+                    generationId, context.getFinalVideoUrl());
 
-            // Zapisz DONE status PRZED bridge — bo bridge z REQUIRES_NEW
-            // musi widzieć Generation w DB
+            // Zapisz DONE status PRZED bridge
             generationRepository.save(generation);
 
             // ── NEW PIPELINE: bridge assets → VideoProject → EDL → Remotion ──
@@ -105,13 +106,13 @@ public class PipelineAsyncRunner {
 
         } catch (Exception e) {
             log.error("[PipelineAsyncRunner] Pipeline FAILED — generationId: {}, error: {}",
-                    genId, e.getMessage(), e);
+                    generationId, e.getMessage(), e);
 
             generation.setGenerationStatus(GenerationStatus.FAILED);
             generation.setErrorMessage(e.getMessage());
 
-            creditService.refund(tx.getId());
-            progressService.broadcast(genId, GenerationStepName.FAILED,
+            creditService.refund(txId);
+            progressService.broadcast(generationId, GenerationStepName.FAILED,
                     0, "Generacja nieudana: " + e.getMessage());
 
         } finally {

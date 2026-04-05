@@ -100,7 +100,7 @@ public class GenerationServiceImpl implements GenerationService {
 
 
 
-        pipelineAsyncRunner.runPipelineAsync(generation, context, tx);
+        pipelineAsyncRunner.runPipelineAsync(generation.getId(), context, tx.getId());
 
         log.info("[GenerationService] TikTok Ad zainicjowany — generationId: {}, user: {}",
                 generation.getId(), email);
