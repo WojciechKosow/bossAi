@@ -154,8 +154,10 @@ public class VideoProductionOrchestrator {
         String renderId = renderJob.getId().toString();
 
         try {
-            // Serializuj EDL do Map (Remotion oczekuje raw JSON object)
-            Map<String, Object> edlMap = objectMapper.convertValue(edl, Map.class);
+            // Serializuj EDL do Map (Remotion oczekuje raw JSON object, null → Zod error)
+            ObjectMapper nonNullMapper = objectMapper.copy()
+                    .setSerializationInclusion(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL);
+            Map<String, Object> edlMap = nonNullMapper.convertValue(edl, Map.class);
 
             RemotionRenderRequest request = RemotionRenderRequest.builder()
                     .renderId(renderId)
