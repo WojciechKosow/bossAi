@@ -50,6 +50,7 @@ public class VideoProductionOrchestrator {
     private final VideoProjectService videoProjectService;
     private final ProjectAssetService projectAssetService;
     private final RenderJobService renderJobService;
+    private final EditDnaGenerator editDnaGenerator;
     private final ObjectMapper objectMapper;
 
     /**
@@ -72,10 +73,13 @@ public class VideoProductionOrchestrator {
             // 2. Pobierz assety projektu z bazy
             List<ProjectAsset> projectAssets = projectAssetService.getProjectAssetEntities(projectId);
 
-            // 3. Generuj EDL
-            EdlDto edl = edlGeneratorService.generateEdl(context, audioAnalysis, projectAssets);
+            // 3. Generuj EditDna (LLM Director — osobowość montażu)
+            EditDna editDna = editDnaGenerator.generate(context, audioAnalysis);
 
-            // 4. Waliduj
+            // 4. Generuj EDL z edit_dna
+            EdlDto edl = edlGeneratorService.generateEdl(context, audioAnalysis, projectAssets, editDna);
+
+            // 5. Waliduj
             EdlValidator.ValidationResult validation = edlValidator.validate(edl);
             if (!validation.valid()) {
                 log.error("[Orchestrator] EDL validation failed: {}", validation.errors());
@@ -83,11 +87,11 @@ public class VideoProductionOrchestrator {
                 return;
             }
 
-            // 5. Serializuj i zapisz EDL
+            // 6. Serializuj i zapisz EDL
             String edlJson = objectMapper.writeValueAsString(edl);
             EditDecisionListEntity edlEntity = edlService.saveNewVersion(projectId, edlJson, EdlSource.AI_GENERATED);
 
-            // 6. Renderuj przez Remotion
+            // 7. Renderuj przez Remotion
             renderViaRemotion(projectId, edlEntity, edl);
 
         } catch (Exception e) {
