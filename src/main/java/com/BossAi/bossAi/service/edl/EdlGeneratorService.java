@@ -82,6 +82,9 @@ public class EdlGeneratorService {
         // Inject whisper words — GPT nie generuje per-word timings, mamy je z Whisper
         injectWhisperWords(edl, context);
 
+        // Inject color grade from EditDna (GPT doesn't generate this)
+        injectColorGrade(edl, editDna);
+
         // Uzupelnij brakujace nested objects (GPT czesto pomija style/position/effects)
         ensureNestedDefaults(edl);
 
@@ -710,6 +713,28 @@ public class EdlGeneratorService {
 
         log.info("[EdlGenerator] Injected {} whisper words, subtitles enabled: {}",
                 whisperWords.size(), subtitleConfig.isEnabled());
+    }
+
+    /**
+     * Wstrzykuje color grade z EditDna do metadata EDL.
+     * Remotion uzywa tego do CSS filters (brightness, contrast, saturate, vignette).
+     */
+    private void injectColorGrade(EdlDto edl, EditDna editDna) {
+        if (editDna == null || editDna.getColorGrade() == null) return;
+        if (edl.getMetadata() == null) return;
+
+        var dnaColor = editDna.getColorGrade();
+        edl.getMetadata().setColorGrade(EdlColorGrade.builder()
+                .preset(dnaColor.getPreset() != null ? dnaColor.getPreset() : "neutral")
+                .contrastBoost(dnaColor.getContrastBoost())
+                .saturation(dnaColor.getSaturation())
+                .brightness(dnaColor.getBrightness())
+                .vignette(dnaColor.getVignette())
+                .build());
+
+        log.info("[EdlGenerator] Injected color grade: preset={}, contrast={}, saturation={}, brightness={}, vignette={}",
+                dnaColor.getPreset(), dnaColor.getContrastBoost(), dnaColor.getSaturation(),
+                dnaColor.getBrightness(), dnaColor.getVignette());
     }
 
     // =========================================================================
