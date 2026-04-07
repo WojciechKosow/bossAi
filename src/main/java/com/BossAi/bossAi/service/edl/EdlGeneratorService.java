@@ -50,16 +50,26 @@ public class EdlGeneratorService {
     // =========================================================================
 
     /**
-     * Generuje EDL przez GPT-4o z pelnym kontekstem audio + wideo.
+     * Generuje EDL przez GPT-4o z pelnym kontekstem audio + wideo (bez edit_dna — backwards compat).
      */
     public EdlDto generateEdl(GenerationContext context,
                               AudioAnalysisResponse audioAnalysis,
                               List<ProjectAsset> projectAssets) {
+        return generateEdl(context, audioAnalysis, projectAssets, null);
+    }
 
-        log.info("[EdlGenerator] Generating EDL via GPT — scenes: {}, hasAudio: {}",
-                context.sceneCount(), audioAnalysis != null);
+    /**
+     * Generuje EDL przez GPT-4o z pelnym kontekstem audio + wideo + EditDna (osobowość montażu).
+     */
+    public EdlDto generateEdl(GenerationContext context,
+                              AudioAnalysisResponse audioAnalysis,
+                              List<ProjectAsset> projectAssets,
+                              EditDna editDna) {
 
-        String prompt = buildGptPrompt(context, audioAnalysis, projectAssets);
+        log.info("[EdlGenerator] Generating EDL via GPT — scenes: {}, hasAudio: {}, hasEditDna: {}",
+                context.sceneCount(), audioAnalysis != null, editDna != null);
+
+        String prompt = buildGptPrompt(context, audioAnalysis, projectAssets, editDna);
 
         String rawJson = openAiService.generateDirectorPlan(prompt);
 
@@ -608,9 +618,19 @@ public class EdlGeneratorService {
         }
     }
 
+    /**
+     * Backwards-compat wrapper (bez editDna).
+     */
     private String buildGptPrompt(GenerationContext context,
                                   AudioAnalysisResponse audioAnalysis,
                                   List<ProjectAsset> projectAssets) {
+        return buildGptPrompt(context, audioAnalysis, projectAssets, null);
+    }
+
+    private String buildGptPrompt(GenerationContext context,
+                                  AudioAnalysisResponse audioAnalysis,
+                                  List<ProjectAsset> projectAssets,
+                                  EditDna editDna) {
 
         StringBuilder sb = new StringBuilder();
 
@@ -725,6 +745,47 @@ public class EdlGeneratorService {
             sb.append("\n");
         }
 
+        // EditDna — creative brief from LLM Director
+        if (editDna != null) {
+            sb.append("=== EDIT DNA (Creative Director's brief — FOLLOW THIS) ===\n");
+            sb.append("Edit personality: ").append(editDna.getEditPersonality()).append("\n");
+            sb.append("Hook strategy: ").append(editDna.getHookStrategy()).append("\n");
+
+            if (editDna.getCutRhythm() != null) {
+                var rhythm = editDna.getCutRhythm();
+                sb.append("Cut rhythm:\n");
+                sb.append("  Mode: ").append(rhythm.getMode()).append("\n");
+                sb.append("  Burst trigger: ").append(rhythm.getBurstTrigger()).append(" sections\n");
+                sb.append("  Humanize: ±").append(rhythm.getHumanizeMs()).append("ms (shift cuts slightly off-beat for human feel)\n");
+                sb.append("  Cut length range: ").append(rhythm.getMinCutMs()).append("ms – ").append(rhythm.getMaxCutMs()).append("ms\n");
+            }
+
+            if (editDna.getEffectPalette() != null) {
+                var palette = editDna.getEffectPalette();
+                sb.append("Effect palette:\n");
+                sb.append("  Primary effect (use most): ").append(palette.getPrimary()).append("\n");
+                sb.append("  Secondary effect: ").append(palette.getSecondary()).append("\n");
+                sb.append("  Drop/peak signature effect: ").append(palette.getDropSignature()).append("\n");
+                sb.append("  FORBIDDEN effects (NEVER use these): ").append(palette.getForbidden()).append("\n");
+                sb.append("  Base intensity: ").append(String.format("%.1f", palette.getBaseIntensity())).append("\n");
+            }
+
+            if (editDna.getColorGrade() != null) {
+                var color = editDna.getColorGrade();
+                sb.append("Color grade: ").append(color.getPreset())
+                        .append(" (contrast: ").append(color.getContrastBoost())
+                        .append(", saturation: ").append(color.getSaturation())
+                        .append(", brightness: ").append(color.getBrightness())
+                        .append(", vignette: ").append(color.getVignette())
+                        .append(")\n");
+            }
+
+            if (editDna.getReasoning() != null) {
+                sb.append("Director's reasoning: ").append(editDna.getReasoning()).append("\n");
+            }
+            sb.append("\n");
+        }
+
         // Editing rules — more specific TikTok guidance
         sb.append("""
                 EDITING RULES:
@@ -733,8 +794,9 @@ public class EdlGeneratorService {
                 - VARY effects — NEVER use the same effect on 3 consecutive segments
                 - VARY intensity — drops/peaks get 0.8-1.0, builds get 0.5-0.7, quiet sections get 0.2-0.5
                 - Beat-sync: align segment cuts to beat positions from the music analysis
-                - HOOK: first 2 seconds MUST have aggressive effects (fast_zoom, shake, bounce, flash)
-                - Match effects to music: drops→fast_zoom/shake/bounce, builds→zoom_in/drift, quiet→pan_*/zoom_out
+                - HOOK: first 2 seconds MUST grab attention (follow hook_strategy from Edit DNA if provided)
+                - Match effects to music: drops→use drop_signature from Edit DNA, builds→zoom_in/drift, quiet→pan_*/zoom_out
+                - If Edit DNA is provided: STRICTLY follow the effect_palette (primary/secondary/forbidden) and cut_rhythm mode
                 - Transitions: drops→cut/wipe, builds→dissolve/fade, calm→fade/fade_black
                 - Text overlays: group narration into 2-3 word phrases, use "karaoke" animation
                 - total_duration_ms must equal sum of all scene durations
