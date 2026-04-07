@@ -686,6 +686,11 @@ public class EdlGeneratorService {
         return result;
     }
 
+    /** Default TikTok subtitle color palette — rotated per sentence. */
+    private static final List<String> DEFAULT_HIGHLIGHT_PALETTE = List.of(
+            "#FFD700", "#FF6B6B", "#4ECDC4", "#45B7D1", "#F7DC6F"
+    );
+
     private EdlSubtitleConfig buildSubtitleConfig(GenerationContext context) {
         boolean hasWords = context.getWordTimings() != null && !context.getWordTimings().isEmpty();
 
@@ -693,6 +698,7 @@ public class EdlGeneratorService {
                 .enabled(hasWords)
                 .position("bottom_third")
                 .highlightColor("#FFD700")
+                .highlightColors(DEFAULT_HIGHLIGHT_PALETTE)
                 .fontSize(42)
                 .fontFamily("Inter")
                 .strokeColor("#000000")

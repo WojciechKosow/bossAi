@@ -7,6 +7,8 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.util.List;
+
 /**
  * Konfiguracja napisow per-word (Whisper-based subtitles).
  * Remotion uzywa tego w komponencie SubtitleTrack z KaraokeHighlight.
@@ -29,6 +31,10 @@ public class EdlSubtitleConfig {
     @JsonProperty("highlight_color")
     @Builder.Default
     private String highlightColor = "#FFD700";
+
+    /** Multiple highlight colors — rotated per sentence for visual variety. */
+    @JsonProperty("highlight_colors")
+    private List<String> highlightColors;
 
     @JsonProperty("font_size")
     @Builder.Default
