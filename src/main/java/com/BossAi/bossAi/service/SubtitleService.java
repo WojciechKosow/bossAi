@@ -30,6 +30,12 @@ public class SubtitleService {
     /**
      * Generuje liste slow z timingiem word-by-word.
      * Kazda scena ma subtitleText rozbijany na slowa dystrybuowane rownomiernie.
+     *
+     * Ulepszenia:
+     *   - Elementy wyliczeń (po przecinku) dostają krótszą pauzę między sobą
+     *   - Słowa po kropce/wykrzykniku dostają dłuższą przerwę (natural sentence break)
+     *   - Krótkie słowa (1-3 znaki: "a", "to", "etc") dostają mniej czasu
+     *   - Długie słowa dostają proporcjonalnie więcej czasu
      */
     public List<WordTiming> generateWordTimings(ScriptResult script) {
         List<WordTiming> timings = new ArrayList<>();
@@ -48,42 +54,57 @@ public class SubtitleService {
                 continue;
             }
 
-            // TTS speaks at ~170 wpm = ~350ms per word. Use 70% of scene duration
-            // so words finish before scene ends, matching TTS pacing.
+            // Calculate weighted durations based on word length
             int usableDuration = (int) (scene.durationMs() * 0.70);
-            int msPerWord = Math.max(200, Math.min(500, usableDuration / words.length));
+            int[] wordWeights = new int[words.length];
+            int totalWeight = 0;
 
-            int totalWordsMs = msPerWord * words.length;
-            if (totalWordsMs > usableDuration) {
-                msPerWord = Math.max(200, usableDuration / words.length);
+            for (int i = 0; i < words.length; i++) {
+                String cleanWord = words[i].replaceAll("[.,;:!?]", "");
+                int len = cleanWord.length();
+                // Short words (a, to, the) = weight 2, normal = weight 3, long = weight 4
+                wordWeights[i] = len <= 3 ? 2 : (len <= 7 ? 3 : 4);
+                totalWeight += wordWeights[i];
             }
 
-            int wordOffset = sceneStartMs + 50; // minimal offset (was 150)
+            int wordOffset = sceneStartMs + 50;
+            int sceneEnd = sceneStartMs + scene.durationMs();
 
-            for (String word : words) {
+            for (int i = 0; i < words.length; i++) {
+                String word = words[i];
+
+                // Proportional duration based on weight
+                int wordDuration = totalWeight > 0
+                        ? (int) ((long) usableDuration * wordWeights[i] / totalWeight)
+                        : usableDuration / words.length;
+                wordDuration = Math.max(150, Math.min(600, wordDuration));
+
+                // Add pause after sentence-ending punctuation
+                boolean endsSentence = word.matches(".*[.!?]$");
+                int pauseAfter = endsSentence ? 120 : 0;
+
+                // Slight pause after comma (enumeration pacing)
+                boolean endsWithComma = word.endsWith(",");
+                if (endsWithComma) pauseAfter = Math.max(pauseAfter, 60);
+
                 int wordStart = wordOffset;
-                int wordEnd = wordStart + msPerWord;
+                int wordEnd = wordStart + wordDuration;
 
-                int sceneEnd = sceneStartMs + scene.durationMs();
-                if (wordEnd > sceneEnd) {
-                    wordEnd = sceneEnd;
-                }
+                if (wordEnd > sceneEnd) wordEnd = sceneEnd;
 
-                // Always add the word (even if clipped) so no words are silently dropped
                 if (wordEnd > wordStart) {
                     timings.add(new WordTiming(word, wordStart, wordEnd));
                 } else if (wordStart < sceneEnd) {
-                    // Last resort: give it minimum 80ms
                     timings.add(new WordTiming(word, wordStart, wordStart + 80));
                 }
 
-                wordOffset = wordEnd;
+                wordOffset = wordEnd + pauseAfter;
             }
 
             sceneStartMs += scene.durationMs();
         }
 
-        log.info("[SubtitleService] Word-by-word: {} slow z timingiem", timings.size());
+        log.info("[SubtitleService] Word-by-word: {} slow z timingiem (weighted)", timings.size());
         return timings;
     }
 

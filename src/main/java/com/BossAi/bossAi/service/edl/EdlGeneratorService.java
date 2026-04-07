@@ -40,6 +40,9 @@ public class EdlGeneratorService {
     /** Sentence-ending punctuation for splitting narration into display sentences. */
     private static final Set<Character> SENTENCE_ENDS = Set.of('.', '!', '?', ';');
 
+    /** Characters that signal enumeration boundaries (comma-separated lists). */
+    private static final Set<Character> ENUM_BREAKS = Set.of(',', ';');
+
     private final OpenAiService openAiService;
     private final ObjectMapper objectMapper;
     private final EffectRegistry effectRegistry;
@@ -631,13 +634,15 @@ public class EdlGeneratorService {
     /**
      * Konwertuje WordTiming z GenerationContext na EdlWhisperWord z sentence_index.
      *
-     * Sentence grouping: dzieli slowa na zdania na podstawie:
-     *   1. Interpunkcji (. ! ? ;) na koncu slowa
-     *   2. Pauzy > 700ms miedzy slowami (natural sentence break)
-     *   3. Max ~8 slow na zdanie (aby nie przekroczyc szerokosci ekranu)
+     * Sentence grouping (word-by-word karaoke):
+     *   1. Max 5 slow na grupe (aby kazde slowo mialo miejsce na ekranie)
+     *   2. Interpunkcja koncowa (. ! ? ;) → nowa grupa
+     *   3. Przecinek/srednik + pauza > 200ms → nowa grupa (wyliczenia: "essays, captions, etc.")
+     *   4. Pauza > 400ms → nowa grupa (natural speech break)
      *
-     * Remotion SubtitleTrack wyswietla tylko slowa z aktywnego sentence_index,
-     * podswietlajac aktualnie wypowiadane slowo.
+     * Grupy sa celowo MALE (max 5 slow), bo Remotion SubtitleTrack
+     * wyswietla cala grupe i podswietla aktualnie mowione slowo.
+     * Im mniejsza grupa, tym lepsza czytelnosc word-by-word.
      */
     private List<EdlWhisperWord> buildWhisperWords(GenerationContext context) {
         if (context.getWordTimings() == null || context.getWordTimings().isEmpty()) {
@@ -662,25 +667,32 @@ public class EdlGeneratorService {
 
             wordsInCurrentSentence++;
 
-            // Detect sentence boundary
-            boolean endsWithPunctuation = !word.isEmpty()
-                    && SENTENCE_ENDS.contains(word.charAt(word.length() - 1));
+            if (i >= words.size() - 1) break; // last word, no boundary check needed
 
-            boolean longPauseAfter = false;
-            if (i + 1 < words.size()) {
-                int gap = words.get(i + 1).startMs() - wt.endMs();
-                longPauseAfter = gap > 700;
-            }
+            // --- Sentence/group boundary detection ---
+            char lastChar = word.isEmpty() ? ' ' : word.charAt(word.length() - 1);
+            int gapToNext = words.get(i + 1).startMs() - wt.endMs();
 
-            boolean sentenceTooLong = wordsInCurrentSentence >= 8;
+            // 1. Hard sentence end (. ! ?)
+            boolean hardSentenceEnd = SENTENCE_ENDS.contains(lastChar);
 
-            if ((endsWithPunctuation || longPauseAfter || sentenceTooLong) && i < words.size() - 1) {
+            // 2. Enumeration break: comma/semicolon + pause > 200ms
+            //    Handles "essays, captions, blog posts, etc." — each item = own group
+            boolean enumBreak = ENUM_BREAKS.contains(lastChar) && gapToNext > 200;
+
+            // 3. Natural speech pause > 400ms (lowered from 700ms for tighter groups)
+            boolean naturalPause = gapToNext > 400;
+
+            // 4. Group too long — max 5 words for readable word-by-word
+            boolean groupTooLong = wordsInCurrentSentence >= 5;
+
+            if (hardSentenceEnd || enumBreak || naturalPause || groupTooLong) {
                 sentenceIndex++;
                 wordsInCurrentSentence = 0;
             }
         }
 
-        log.info("[EdlGenerator] Built {} whisper words in {} sentences",
+        log.info("[EdlGenerator] Built {} whisper words in {} groups (word-by-word mode)",
                 result.size(), sentenceIndex + 1);
 
         return result;
@@ -699,6 +711,8 @@ public class EdlGeneratorService {
                 .position("bottom_third")
                 .highlightColor("#FFD700")
                 .highlightColors(DEFAULT_HIGHLIGHT_PALETTE)
+                .highlightMode("word")      // word-by-word karaoke (not whole sentence)
+                .maxWordsPerGroup(5)         // small groups for readable word-by-word
                 .fontSize(42)
                 .fontFamily("Inter")
                 .strokeColor("#000000")

@@ -48,9 +48,10 @@ public class RenderStep implements GenerationStep {
     private final AssetService assetService;
     private final OverlayEngine overlayEngine;
 
-    // Word-by-word subtitle config — TikTok style (big, bold, centered)
+    // Word-by-word subtitle config — TikTok karaoke style
     private static final int WORD_FONT_SIZE = 60;
-    private static final String WORD_FONT_COLOR = "white";
+    private static final String WORD_FONT_COLOR = "white";        // base (inactive) word color
+    private static final String WORD_HIGHLIGHT_COLOR = "yellow";  // active word highlight
     private static final String WORD_BORDER_COLOR = "black";
     private static final int WORD_BORDER_WIDTH = 5;
     private static final String WORD_FONT = "Arial";
@@ -443,16 +444,25 @@ public class RenderStep implements GenerationStep {
     }
 
     // =========================================================================
-    // PHRASE-BY-PHRASE SUBTITLE CHAIN (TikTok style)
+    // WORD-BY-WORD KARAOKE SUBTITLE CHAIN (TikTok style)
     // =========================================================================
-// WORD-BY-WORD DRAWTEXT CHAIN
-// =========================================================================
 
     /**
-     * Max words per subtitle phrase — TikTok shows 2-3 words at a time
+     * Max words per subtitle group — displayed together, highlighted one by one.
+     * TikTok standard: show 3-5 words, highlight the currently spoken one.
      */
-    private static final int WORDS_PER_PHRASE = 2;
+    private static final int MAX_WORDS_PER_GROUP = 5;
 
+    /**
+     * Buduje karaoke-style word-by-word subtitles:
+     *   - Słowa są grupowane w małe grupy (max 5 słów)
+     *   - Cała grupa jest widoczna na ekranie (białe litery)
+     *   - Aktualnie mówione słowo jest podświetlone (żółte) — nakładane jako osobny drawtext
+     *
+     * Struktura FFmpeg filter chain:
+     *   [in] → drawtext(grupa1, white, enable=between) → drawtext(word1, yellow, enable=between)
+     *        → drawtext(word2, yellow, enable=between) → ... → [out]
+     */
     private String buildWordByWordFilter(
             List<SubtitleService.WordTiming> words,
             String inputLabel,
@@ -460,137 +470,240 @@ public class RenderStep implements GenerationStep {
     ) {
         if (words.isEmpty()) return "";
 
-        // Group words into phrases of WORDS_PER_PHRASE
-        List<Phrase> phrases = groupIntoPhrases(words);
+        // Grupuj słowa w grupy po MAX_WORDS_PER_GROUP
+        List<WordGroup> groups = groupWordsForKaraoke(words);
 
-        if (phrases.isEmpty()) {
-            log.warn("[RenderStep] 0 phrases po grupowaniu — brak napisów");
+        if (groups.isEmpty()) {
+            log.warn("[RenderStep] 0 groups po grupowaniu — brak napisów");
             return "";
         }
 
         StringBuilder chain = new StringBuilder();
         String currentInput = inputLabel;
+        int nodeIndex = 0;
+        int totalNodes = countTotalNodes(groups);
 
-        for (int i = 0; i < phrases.size(); i++) {
-            Phrase phrase = phrases.get(i);
-            String currentOutput = (i == phrases.size() - 1) ? outputLabel : "[p" + i + "]";
+        for (WordGroup group : groups) {
+            // --- Warstwa bazowa: cała grupa w białym kolorze ---
+            boolean isLastNode = (nodeIndex == totalNodes - 1) && group.wordEntries.size() == 0;
+            String groupOutput = isLastNode ? outputLabel : "[n" + nodeIndex + "]";
 
-            int fontSize = phrase.escapedText.length() <= 8 ? 80 :
-                    phrase.escapedText.length() <= 14 ? 65 :
-                            phrase.escapedText.length() <= 20 ? 52 : 44;
-
-            String alpha = String.format(Locale.US,
-                    "if(lt(t,%s),min(1,(t-%s)/%s),1)",
-                    f(phrase.startSec + WORD_FADE_IN), f(phrase.startSec), f(WORD_FADE_IN)
-            );
+            int groupFontSize = calculateFontSize(group.fullText);
 
             chain.append(currentInput)
                     .append("drawtext=")
-                    .append("text='").append(phrase.escapedText).append("':")
+                    .append("text='").append(escapeDrawtext(group.fullText)).append("':")
                     .append("font='").append(WORD_FONT).append("':")
-                    .append("fontsize=").append(fontSize).append(":")
-                    .append("fontcolor=").append(WORD_FONT_COLOR).append(":")
+                    .append("fontsize=").append(groupFontSize).append(":")
+                    .append("fontcolor=").append(WORD_FONT_COLOR).append("@0.6:")  // dimmed base
                     .append("bordercolor=").append(WORD_BORDER_COLOR).append(":")
-                    .append("borderw=").append(WORD_BORDER_WIDTH).append(":")
-                    .append("shadowcolor=black@0.6:shadowx=2:shadowy=2:")
+                    .append("borderw=").append(WORD_BORDER_WIDTH - 1).append(":")
+                    .append("shadowcolor=black@0.4:shadowx=1:shadowy=1:")
                     .append("x=(W-tw)/2:")
                     .append("y=(H*0.72):")
-                    .append("line_spacing=10:")
-                    .append("enable='between(t,").append(f(phrase.startSec)).append(",").append(f(phrase.endSec)).append(")':")
-                    .append("alpha='").append(alpha).append("'")
-                    .append(currentOutput);
+                    .append("enable='between(t,").append(f(group.startSec)).append(",").append(f(group.endSec)).append(")'")
+                    .append(groupOutput);
 
-            if (i < phrases.size() - 1) {
+            currentInput = groupOutput;
+            nodeIndex++;
+
+            // --- Warstwy podświetlenia: każde słowo osobno w highlight color ---
+            for (int w = 0; w < group.wordEntries.size(); w++) {
+                WordEntry entry = group.wordEntries.get(w);
+                boolean isLast = (nodeIndex == totalNodes - 1);
+                String wordOutput = isLast ? outputLabel : "[n" + nodeIndex + "]";
+
+                // Oblicz pozycję X słowa w grupie
+                // Używamy proporcjonalnego przesunięcia opartego na znakach
+                String xExpr = calculateWordXPosition(entry, group);
+
+                String alpha = String.format(Locale.US,
+                        "if(lt(t,%s),min(1,(t-%s)/%s),1)",
+                        f(entry.startSec + WORD_FADE_IN), f(entry.startSec), f(WORD_FADE_IN)
+                );
+
                 chain.append(";");
+                chain.append(currentInput)
+                        .append("drawtext=")
+                        .append("text='").append(escapeDrawtext(entry.word)).append("':")
+                        .append("font='").append(WORD_FONT).append("':")
+                        .append("fontsize=").append(groupFontSize).append(":")
+                        .append("fontcolor=").append(WORD_HIGHLIGHT_COLOR).append(":")
+                        .append("bordercolor=").append(WORD_BORDER_COLOR).append(":")
+                        .append("borderw=").append(WORD_BORDER_WIDTH).append(":")
+                        .append("shadowcolor=black@0.6:shadowx=2:shadowy=2:")
+                        .append("x=").append(xExpr).append(":")
+                        .append("y=(H*0.72):")
+                        .append("enable='between(t,").append(f(entry.startSec)).append(",").append(f(entry.endSec)).append(")':")
+                        .append("alpha='").append(alpha).append("'")
+                        .append(wordOutput);
+
+                currentInput = wordOutput;
+                nodeIndex++;
             }
 
-            currentInput = currentOutput;
+            if (nodeIndex < totalNodes) {
+                chain.append(";");
+            }
         }
 
-        log.info("[RenderStep] Phrase subtitles: {} phrases ({} words → {} drawtext nodes), {} chars",
-                phrases.size(), words.size(), phrases.size(), chain.length());
+        log.info("[RenderStep] Karaoke subtitles: {} groups, {} highlight nodes, {} chars",
+                groups.size(), totalNodes, chain.length());
 
         return chain.toString();
     }
 
-    private record Phrase(String escapedText, double startSec, double endSec) {
+    /** Oblicza fontSize na podstawie długości tekstu grupy. */
+    private int calculateFontSize(String text) {
+        int len = text.length();
+        if (len <= 8) return 80;
+        if (len <= 14) return 65;
+        if (len <= 20) return 52;
+        if (len <= 28) return 44;
+        return 38;
     }
 
     /**
-     * Grupuje WordTimings w frazy po WORDS_PER_PHRASE (2-3 słowa).
-     * Każda fraza: start = start pierwszego słowa, end = end ostatniego.
-     * Rozdziela frazy na granicach scen (duże przerwy > 500ms).
+     * Oblicza wyrażenie FFmpeg dla pozycji X słowa wewnątrz wycentrowanej grupy.
+     *
+     * Strategia: znamy pozycję znakową słowa w grupie (charOffset / totalChars).
+     * Obliczamy proporcjonalną pozycję X używając text_w grupy.
+     *
+     * X = (W - groupTextWidth) / 2 + charOffset / totalChars * groupTextWidth
+     *
+     * W FFmpeg nie mamy groupTextWidth wprost, ale wiemy, że drawtext grupy
+     * używa tego samego fontu/rozmiaru, więc approx:
+     *   groupTextWidth ≈ totalChars * (tw / wordChars)
+     *   ale tw dotyczy AKTUALNEGO drawtext, nie grupy.
+     *
+     * Najprostsze podejście: zakładamy średnią szerokość znaku i liczymy pixel offset.
+     * Przy foncie 60px Arial, średnia szerokość znaku ≈ 0.55 * fontSize.
      */
-    private List<Phrase> groupIntoPhrases(List<SubtitleService.WordTiming> words) {
-        List<Phrase> phrases = new ArrayList<>();
+    private String calculateWordXPosition(WordEntry entry, WordGroup group) {
+        int totalChars = group.fullText.length();
+        if (totalChars == 0) return "(W-tw)/2";
+
+        int fontSize = calculateFontSize(group.fullText);
+        double avgCharWidth = fontSize * 0.55;  // approximate for Arial
+
+        double groupTextWidth = totalChars * avgCharWidth;
+        double wordOffset = entry.charOffset * avgCharWidth;
+        double groupStartX = (1080.0 - groupTextWidth) / 2.0;  // 1080 = TikTok width
+
+        double wordX = groupStartX + wordOffset;
+        // Clamp to reasonable range
+        wordX = Math.max(10, Math.min(1070, wordX));
+
+        return String.valueOf((int) wordX);
+    }
+
+    private record WordEntry(String word, double startSec, double endSec, int charOffset) {}
+
+    private record WordGroup(
+            String fullText,
+            double startSec,
+            double endSec,
+            List<WordEntry> wordEntries
+    ) {}
+
+    private int countTotalNodes(List<WordGroup> groups) {
+        int count = 0;
+        for (WordGroup g : groups) {
+            count += 1 + g.wordEntries.size();  // 1 base + N highlights
+        }
+        return count;
+    }
+
+    /**
+     * Grupuje WordTimings w grupy do MAX_WORDS_PER_GROUP.
+     * Rozdziela na granicach scen (przerwa > 800ms) i przy interpunkcji.
+     * Każda grupa zawiera: pełny tekst, timing, i per-word entries z charOffset.
+     */
+    private List<WordGroup> groupWordsForKaraoke(List<SubtitleService.WordTiming> words) {
+        List<WordGroup> groups = new ArrayList<>();
         int i = 0;
 
         while (i < words.size()) {
-            StringBuilder text = new StringBuilder();
-            double phraseStart = words.get(i).startMs() / 1000.0;
-            double phraseEnd = words.get(i).endMs() / 1000.0;
-            int wordsInPhrase = 0;
+            List<SubtitleService.WordTiming> groupWords = new ArrayList<>();
+            double groupStart = words.get(i).startMs() / 1000.0;
+            double groupEnd = words.get(i).endMs() / 1000.0;
 
-            while (i < words.size() && wordsInPhrase < WORDS_PER_PHRASE) {
+            while (i < words.size() && groupWords.size() < MAX_WORDS_PER_GROUP) {
                 SubtitleService.WordTiming wt = words.get(i);
 
-                if (wordsInPhrase > 0) {
-                    double gap = (wt.startMs() / 1000.0) - phraseEnd;
-                    if (gap > 1.5) break;
-                    String candidate = text + " " + wt.word().trim().toUpperCase();
-                    if (candidate.length() > 22) break;
+                if (!groupWords.isEmpty()) {
+                    double gap = (wt.startMs() / 1000.0) - groupEnd;
+                    // Przerwij grupę przy dużej pauzie (koniec zdania/myśli)
+                    if (gap > 0.8) break;
+
+                    // Przerwij przy interpunkcji końcowej poprzedniego słowa
+                    String prevWord = groupWords.get(groupWords.size() - 1).word();
+                    if (!prevWord.isEmpty()) {
+                        char lastChar = prevWord.charAt(prevWord.length() - 1);
+                        if (lastChar == '.' || lastChar == '!' || lastChar == '?') break;
+                    }
                 }
 
-                if (wordsInPhrase > 0) text.append(" ");
-                text.append(wt.word().trim().toUpperCase());
-                phraseEnd = wt.endMs() / 1000.0;
-                wordsInPhrase++;
+                groupWords.add(wt);
+                groupEnd = wt.endMs() / 1000.0;
                 i++;
             }
 
-            // Minimum display time — ale nie przekraczaj startu następnego słowa
-            double minEnd = phraseStart + MIN_WORD_DISPLAY_MS / 1000.0;
-            if (phraseEnd < minEnd) {
-                if (i < words.size()) {
-                    double nextStart = words.get(i).startMs() / 1000.0;
-                    phraseEnd = Math.min(minEnd, nextStart - 0.02);
-                } else {
-                    phraseEnd = minEnd;
+            if (groupWords.isEmpty()) continue;
+
+            // Buduj fullText i wordEntries z charOffset
+            StringBuilder fullText = new StringBuilder();
+            List<WordEntry> entries = new ArrayList<>();
+
+            for (int w = 0; w < groupWords.size(); w++) {
+                SubtitleService.WordTiming wt = groupWords.get(w);
+                String wordUpper = wt.word().trim().toUpperCase();
+
+                int charOffset = fullText.length();
+                if (w > 0) {
+                    fullText.append(" ");
+                    charOffset = fullText.length();
                 }
+                fullText.append(wordUpper);
+
+                // Timing per word — ensure min display time
+                double wordStart = wt.startMs() / 1000.0;
+                double wordEnd = wt.endMs() / 1000.0;
+                double minEnd = wordStart + MIN_WORD_DISPLAY_MS / 1000.0;
+                if (wordEnd < minEnd) {
+                    if (w + 1 < groupWords.size()) {
+                        double nextStart = groupWords.get(w + 1).startMs() / 1000.0;
+                        wordEnd = Math.min(minEnd, nextStart - 0.02);
+                    } else {
+                        wordEnd = minEnd;
+                    }
+                }
+                if (wordEnd <= wordStart) wordEnd = wordStart + 0.15;
+
+                entries.add(new WordEntry(wordUpper, wordStart, wordEnd, charOffset));
             }
-            if (phraseEnd <= phraseStart) phraseEnd = phraseStart + 0.15;
 
-            String rawText = text.toString();
-            String[] words2 = rawText.split(" ");
+            // Extend group end to cover all words + small buffer
+            double actualGroupEnd = entries.get(entries.size() - 1).endSec + 0.05;
+            if (actualGroupEnd < groupEnd) actualGroupEnd = groupEnd;
 
-            String displayText;
-            if (words2.length >= 2) {
-                int mid = (int) Math.ceil(words2.length / 2.0);
-                String line1 = String.join(" ", Arrays.copyOfRange(words2, 0, mid));
-                String line2 = String.join(" ", Arrays.copyOfRange(words2, mid, words2.length));
-                displayText = line1 + "\n" + line2;
-            } else {
-                displayText = rawText;
-            }
-
-            phrases.add(new Phrase(escapeDrawtext(displayText), phraseStart, phraseEnd));
+            groups.add(new WordGroup(fullText.toString(), groupStart, actualGroupEnd, entries));
         }
 
-        // === DRUGI PASS: usuń nakładanie się fraz ===
-        for (int j = 0; j < phrases.size() - 1; j++) {
-            Phrase curr = phrases.get(j);
-            Phrase next = phrases.get(j + 1);
-            // Jeśli fraza kończy się po starcie następnej, przytnij ją
-            if (curr.endSec() > next.startSec() - 0.02) {
-                double newEnd = next.startSec() - 0.02;
-                if (newEnd > curr.startSec() + 0.05) { // zostaw minimum 50ms
-                    phrases.set(j, new Phrase(curr.escapedText(), curr.startSec(), newEnd));
+        // Remove overlapping groups — trim end of current to start of next
+        for (int j = 0; j < groups.size() - 1; j++) {
+            WordGroup curr = groups.get(j);
+            WordGroup next = groups.get(j + 1);
+            if (curr.endSec > next.startSec - 0.02) {
+                double newEnd = next.startSec - 0.02;
+                if (newEnd > curr.startSec + 0.1) {
+                    groups.set(j, new WordGroup(curr.fullText, curr.startSec, newEnd, curr.wordEntries));
                 }
             }
         }
 
-        log.info("[groupIntoPhrases] {} phrases from {} words", phrases.size(), words.size());
-        return phrases;
+        log.info("[groupWordsForKaraoke] {} groups from {} words", groups.size(), words.size());
+        return groups;
     }
 
     // =========================================================================
