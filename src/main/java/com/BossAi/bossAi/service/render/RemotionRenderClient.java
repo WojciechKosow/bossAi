@@ -91,6 +91,7 @@ public class RemotionRenderClient {
     /**
      * Polluje status renderowania aż do zakończenia (completed/failed).
      * Używa konfiguracji z RemotionRendererProperties (maxAttempts, intervalMs).
+     * Odporny na transient network errors (Connection reset, timeout) — retry do 3 razy per attempt.
      *
      * @param renderId identyfikator renderowania
      * @return ostateczny RemotionRenderStatusResponse
@@ -102,24 +103,39 @@ public class RemotionRenderClient {
 
         int maxAttempts = properties.getPolling().getMaxAttempts();
         long intervalMs = properties.getPolling().getIntervalMs();
+        int consecutiveErrors = 0;
+        int maxConsecutiveErrors = 5;
 
         for (int attempt = 1; attempt <= maxAttempts; attempt++) {
-            RemotionRenderStatusResponse status = getStatus(renderId);
+            RemotionRenderStatusResponse status = getStatusWithRetry(renderId);
 
-            if (status.isCompleted()) {
-                log.info("[RemotionRenderClient] Render completed — renderId: {}, outputUrl: {}",
-                        renderId, status.outputUrl());
-                return status;
+            if (status == null) {
+                // Transient error — retry after interval
+                consecutiveErrors++;
+                if (consecutiveErrors >= maxConsecutiveErrors) {
+                    throw new RenderFailedException(renderId,
+                            "Remotion unreachable — " + maxConsecutiveErrors + " consecutive connection errors");
+                }
+                log.warn("[RemotionRenderClient] Status check failed — renderId: {}, consecutive errors: {}/{}, retrying...",
+                        renderId, consecutiveErrors, maxConsecutiveErrors);
+            } else {
+                consecutiveErrors = 0;
+
+                if (status.isCompleted()) {
+                    log.info("[RemotionRenderClient] Render completed — renderId: {}, outputUrl: {}",
+                            renderId, status.outputUrl());
+                    return status;
+                }
+
+                if (status.isFailed()) {
+                    log.error("[RemotionRenderClient] Render failed — renderId: {}, error: {}",
+                            renderId, status.error());
+                    throw new RenderFailedException(renderId, status.error());
+                }
+
+                log.debug("[RemotionRenderClient] Render in progress — renderId: {}, progress: {}%, attempt: {}/{}",
+                        renderId, String.format("%.1f", status.progress() * 100), attempt, maxAttempts);
             }
-
-            if (status.isFailed()) {
-                log.error("[RemotionRenderClient] Render failed — renderId: {}, error: {}",
-                        renderId, status.error());
-                throw new RenderFailedException(renderId, status.error());
-            }
-
-            log.debug("[RemotionRenderClient] Render in progress — renderId: {}, progress: {}%, attempt: {}/{}",
-                    renderId, String.format("%.1f", status.progress() * 100), attempt, maxAttempts);
 
             try {
                 Thread.sleep(intervalMs);
@@ -130,6 +146,31 @@ public class RemotionRenderClient {
         }
 
         throw new RenderTimeoutException(renderId, maxAttempts);
+    }
+
+    /**
+     * Pobiera status z retry na transient errors (Connection reset, timeout).
+     * Zwraca null jeśli wszystkie próby zawiodły (caller decyduje co dalej).
+     */
+    private RemotionRenderStatusResponse getStatusWithRetry(String renderId) {
+        int retries = 3;
+        for (int i = 0; i < retries; i++) {
+            try {
+                return getStatus(renderId);
+            } catch (Exception e) {
+                log.warn("[RemotionRenderClient] Status check error (attempt {}/{}): {}",
+                        i + 1, retries, e.getMessage());
+                if (i < retries - 1) {
+                    try {
+                        Thread.sleep(2000L * (i + 1)); // 2s, 4s backoff
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        return null;
+                    }
+                }
+            }
+        }
+        return null;
     }
 
     public static class RenderFailedException extends RuntimeException {
