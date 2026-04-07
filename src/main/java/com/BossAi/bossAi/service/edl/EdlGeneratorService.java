@@ -82,6 +82,9 @@ public class EdlGeneratorService {
         // Inject whisper words — GPT nie generuje per-word timings, mamy je z Whisper
         injectWhisperWords(edl, context);
 
+        // Inject color grade from EditDna (GPT doesn't generate this)
+        injectColorGrade(edl, editDna);
+
         // Uzupelnij brakujace nested objects (GPT czesto pomija style/position/effects)
         ensureNestedDefaults(edl);
 
@@ -683,6 +686,11 @@ public class EdlGeneratorService {
         return result;
     }
 
+    /** Default TikTok subtitle color palette — rotated per sentence. */
+    private static final List<String> DEFAULT_HIGHLIGHT_PALETTE = List.of(
+            "#FFD700", "#FF6B6B", "#4ECDC4", "#45B7D1", "#F7DC6F"
+    );
+
     private EdlSubtitleConfig buildSubtitleConfig(GenerationContext context) {
         boolean hasWords = context.getWordTimings() != null && !context.getWordTimings().isEmpty();
 
@@ -690,6 +698,7 @@ public class EdlGeneratorService {
                 .enabled(hasWords)
                 .position("bottom_third")
                 .highlightColor("#FFD700")
+                .highlightColors(DEFAULT_HIGHLIGHT_PALETTE)
                 .fontSize(42)
                 .fontFamily("Inter")
                 .strokeColor("#000000")
@@ -710,6 +719,28 @@ public class EdlGeneratorService {
 
         log.info("[EdlGenerator] Injected {} whisper words, subtitles enabled: {}",
                 whisperWords.size(), subtitleConfig.isEnabled());
+    }
+
+    /**
+     * Wstrzykuje color grade z EditDna do metadata EDL.
+     * Remotion uzywa tego do CSS filters (brightness, contrast, saturate, vignette).
+     */
+    private void injectColorGrade(EdlDto edl, EditDna editDna) {
+        if (editDna == null || editDna.getColorGrade() == null) return;
+        if (edl.getMetadata() == null) return;
+
+        var dnaColor = editDna.getColorGrade();
+        edl.getMetadata().setColorGrade(EdlColorGrade.builder()
+                .preset(dnaColor.getPreset() != null ? dnaColor.getPreset() : "neutral")
+                .contrastBoost(dnaColor.getContrastBoost())
+                .saturation(dnaColor.getSaturation())
+                .brightness(dnaColor.getBrightness())
+                .vignette(dnaColor.getVignette())
+                .build());
+
+        log.info("[EdlGenerator] Injected color grade: preset={}, contrast={}, saturation={}, brightness={}, vignette={}",
+                dnaColor.getPreset(), dnaColor.getContrastBoost(), dnaColor.getSaturation(),
+                dnaColor.getBrightness(), dnaColor.getVignette());
     }
 
     // =========================================================================

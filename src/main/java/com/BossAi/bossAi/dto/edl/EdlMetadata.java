@@ -40,4 +40,7 @@ public class EdlMetadata {
 
     @JsonProperty("pacing")
     private String pacing;
+
+    @JsonProperty("color_grade")
+    private EdlColorGrade colorGrade;
 }
