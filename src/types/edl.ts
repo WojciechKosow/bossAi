@@ -148,6 +148,8 @@ export const SubtitleConfigSchema = z.object({
   enabled: z.boolean().default(false),
   position: z.string().default("bottom_third"),
   highlight_color: z.string().default("#FFD700"),
+  /** Multiple highlight colors — rotated per sentence for visual variety. */
+  highlight_colors: z.array(z.string()).optional(),
   font_size: z.number().default(48),
   font_family: z.string().default("Inter"),
   stroke_color: z.string().default("#000000"),

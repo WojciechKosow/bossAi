@@ -109,7 +109,7 @@ function wrapWithEffect(
       return (
         <ShakeOnBeat
           amplitude={p.amplitude as number}
-          frequency={p.frequency as number}
+          bpm={bpm}
         >
           {element}
         </ShakeOnBeat>
