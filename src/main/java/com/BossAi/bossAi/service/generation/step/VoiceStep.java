@@ -98,6 +98,10 @@ public class VoiceStep implements GenerationStep {
      * NIE scalamy na podstawie mikro-przerwy — TTS naturalnie ma
      * < 80ms przerwy między oddzielnymi słowami, co powodowało
      * łączenie WSZYSTKICH słów w jeden ciąg (VOICESYOULITERALLYCANT...).
+     *
+     * NIGDY nie scalamy tokenów kończących się lub zaczynających interpunkcją
+     * (przecinek, kropka, etc.) — to osobne elementy wyliczeń, muszą mieć
+     * osobne timingi, żeby word-by-word podświetlanie działało poprawnie.
      */
     private List<SubtitleService.WordTiming> mergeWhisperTokens(
             List<SubtitleService.WordTiming> tokens) {
@@ -108,15 +112,26 @@ public class VoiceStep implements GenerationStep {
             String word = token.word();
             if (word == null || word.isBlank()) continue;
 
-            // Usuń wiodące/końcowe spacje, zachowaj słowo
             String trimmed = word.trim();
             if (trimmed.isEmpty()) continue;
 
-            // Whisper word-level API zwraca gotowe słowa — żadnego scalania
-            // Scalamy TYLKO gdy przerwa < 30ms (dosłownie ten sam fonem podzielony)
+            // Nigdy nie scalaj tokenów z interpunkcją — to osobne elementy wyliczeń
+            // np. "essays," "captions," "etc." muszą być osobnymi słowami
+            boolean hasPunctuation = trimmed.matches(".*[.,;:!?]$")
+                    || trimmed.matches("^[.,;:!?].*");
+
+            // Nigdy nie scalaj powtarzających się słów (np. "etc." + "etc.")
+            boolean isDuplicate = !result.isEmpty()
+                    && trimmed.equalsIgnoreCase(result.get(result.size() - 1).word());
+
+            // Scalamy TYLKO gdy przerwa < 30ms (ten sam fonem podzielony)
+            // i żaden z tokenów nie ma interpunkcji i nie jest duplikatem
             boolean isSamePhoneme = !result.isEmpty()
                     && token.startMs() - result.get(result.size() - 1).endMs() < 30
-                    && !trimmed.matches("[A-Z].*"); // nie scalaj nowych zdań
+                    && !trimmed.matches("[A-Z].*")   // nie scalaj nowych zdań
+                    && !hasPunctuation               // nie scalaj elementów wyliczeń
+                    && !isDuplicate                   // nie scalaj duplikatów
+                    && !result.get(result.size() - 1).word().matches(".*[.,;:!?]$");
 
             if (isSamePhoneme) {
                 SubtitleService.WordTiming prev = result.remove(result.size() - 1);

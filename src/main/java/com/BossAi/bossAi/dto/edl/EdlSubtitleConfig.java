@@ -51,4 +51,21 @@ public class EdlSubtitleConfig {
     @JsonProperty("stroke_width")
     @Builder.Default
     private int strokeWidth = 3;
+
+    /**
+     * Highlight mode: "word" = highlight each word individually as spoken (karaoke),
+     *                 "sentence" = highlight the whole sentence at once (legacy).
+     * Remotion SubtitleTrack uses this to decide how to animate highlighting.
+     */
+    @JsonProperty("highlight_mode")
+    @Builder.Default
+    private String highlightMode = "word";
+
+    /**
+     * Max words displayed on screen at once (per subtitle group).
+     * Remotion uses sentence_index grouping; this hints the desired group size.
+     */
+    @JsonProperty("max_words_per_group")
+    @Builder.Default
+    private int maxWordsPerGroup = 5;
 }
