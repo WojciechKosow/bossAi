@@ -118,6 +118,16 @@ export const TextOverlaySchema = z.object({
   position: TextPositionSchema.optional(),
 });
 
+// --- Color grade ---
+
+export const ColorGradeSchema = z.object({
+  preset: z.string().default("neutral"),
+  contrast_boost: z.number().default(1.0),
+  saturation: z.number().default(1.0),
+  brightness: z.number().default(1.0),
+  vignette: z.number().default(0.0),
+});
+
 // --- EDL Metadata ---
 
 export const MetadataSchema = z.object({
@@ -129,6 +139,7 @@ export const MetadataSchema = z.object({
   fps: z.number().default(30),
   bpm: z.number().optional(),
   pacing: z.string().optional(),
+  color_grade: ColorGradeSchema.optional(),
 });
 
 // --- Subtitle config ---
@@ -149,6 +160,7 @@ export const WhisperWordSchema = z.object({
   word: z.string(),
   start_ms: z.number(),
   end_ms: z.number(),
+  sentence_index: z.number().default(0),
 });
 
 // --- EDL root ---
@@ -191,6 +203,7 @@ export type TextStyle = z.infer<typeof TextStyleSchema>;
 export type TextPosition = z.infer<typeof TextPositionSchema>;
 export type TextOverlay = z.infer<typeof TextOverlaySchema>;
 export type Metadata = z.infer<typeof MetadataSchema>;
+export type ColorGrade = z.infer<typeof ColorGradeSchema>;
 export type SubtitleConfig = z.infer<typeof SubtitleConfigSchema>;
 export type WhisperWord = z.infer<typeof WhisperWordSchema>;
 export type Edl = z.infer<typeof EdlSchema>;
