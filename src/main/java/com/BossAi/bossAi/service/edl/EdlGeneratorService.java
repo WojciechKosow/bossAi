@@ -37,7 +37,8 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class EdlGeneratorService {
 
-    private static final int WORDS_PER_PHRASE = 3;
+    /** Sentence-ending punctuation for splitting narration into display sentences. */
+    private static final Set<Character> SENTENCE_ENDS = Set.of('.', '!', '?', ';');
 
     private final OpenAiService openAiService;
     private final ObjectMapper objectMapper;
@@ -83,6 +84,9 @@ public class EdlGeneratorService {
 
         // Uzupelnij brakujace nested objects (GPT czesto pomija style/position/effects)
         ensureNestedDefaults(edl);
+
+        // Snap segment cuts to nearest beat positions
+        beatSnapSegments(edl, audioAnalysis);
 
         EdlValidator.ValidationResult result = edlValidator.validate(edl);
         if (!result.valid()) {
@@ -174,7 +178,7 @@ public class EdlGeneratorService {
 
         int totalDuration = segments.isEmpty() ? 0 : segments.get(segments.size() - 1).getEndMs();
 
-        return EdlDto.builder()
+        EdlDto edl = EdlDto.builder()
                 .version(EdlDto.CURRENT_VERSION)
                 .metadata(EdlMetadata.builder()
                         .title(context.getPrompt())
@@ -192,6 +196,69 @@ public class EdlGeneratorService {
                 .subtitleConfig(subtitleConfig)
                 .whisperWords(whisperWords)
                 .build();
+
+        beatSnapSegments(edl, audioAnalysis);
+        return edl;
+    }
+
+    // =========================================================================
+    // BEAT-SNAP — post-process segment boundaries to nearest beat
+    // =========================================================================
+
+    /**
+     * Przesuwa granice segmentow (cut points) do najblizszych pozycji beatow.
+     * Nie rusza pierwszego segmentu start (0ms) ani ostatniego segmentu end (total_duration).
+     * Zapewnia ciaglosc timeline'u (end[i] == start[i+1]).
+     */
+    private void beatSnapSegments(EdlDto edl, AudioAnalysisResponse audioAnalysis) {
+        if (audioAnalysis == null || audioAnalysis.beats() == null || audioAnalysis.beats().isEmpty()) {
+            return;
+        }
+        List<EdlSegment> segments = edl.getSegments();
+        if (segments == null || segments.size() < 2) {
+            return;
+        }
+
+        // Convert beat positions (seconds) to milliseconds
+        List<Integer> beatMs = audioAnalysis.beats().stream()
+                .map(b -> (int) Math.round(b * 1000))
+                .toList();
+
+        // Snap each internal cut point (between segments) to nearest beat
+        // Skip first start (0) and last end (total_duration)
+        for (int i = 0; i < segments.size() - 1; i++) {
+            EdlSegment current = segments.get(i);
+            EdlSegment next = segments.get(i + 1);
+
+            int cutPoint = current.getEndMs();
+            int snapped = snapToNearestBeat(cutPoint, beatMs);
+
+            // Don't snap if it would make a segment shorter than 500ms
+            int currentDuration = snapped - current.getStartMs();
+            int nextDuration = next.getEndMs() - snapped;
+            if (currentDuration >= 500 && nextDuration >= 500) {
+                current.setEndMs(snapped);
+                next.setStartMs(snapped);
+            }
+        }
+
+        log.info("[EdlGenerator] Beat-snapped {} cut points", segments.size() - 1);
+    }
+
+    private int snapToNearestBeat(int timeMs, List<Integer> beatMs) {
+        int closest = beatMs.get(0);
+        int minDist = Math.abs(timeMs - closest);
+
+        for (int beat : beatMs) {
+            int dist = Math.abs(timeMs - beat);
+            if (dist < minDist) {
+                minDist = dist;
+                closest = beat;
+            }
+            // Beats are sorted, so once we start getting farther away, break
+            if (beat > timeMs + minDist) break;
+        }
+        return closest;
     }
 
     // =========================================================================
@@ -489,7 +556,7 @@ public class EdlGeneratorService {
 
         String callbackBase = remotionProperties.getCallbackBaseUrl();
 
-        // Voice track
+        // Voice track — full volume
         ProjectAsset voiceAsset = projectAssets.stream()
                 .filter(a -> "VOICE".equals(a.getType().name()))
                 .findFirst().orElse(null);
@@ -504,18 +571,19 @@ public class EdlGeneratorService {
                     .build());
         }
 
-        // Music track
+        // Music track — with ducking based on voice activity
         ProjectAsset musicAsset = projectAssets.stream()
                 .filter(a -> "MUSIC".equals(a.getType().name()))
                 .findFirst().orElse(null);
         if (musicAsset != null) {
+            double duckVolume = calculateMusicDuckVolume(context);
             audioTracks.add(EdlAudioTrack.builder()
                     .id(UUID.randomUUID().toString())
                     .assetId(musicAsset.getId().toString())
                     .assetUrl(buildAssetUrl(callbackBase, musicAsset.getId().toString(), musicAsset.getStorageUrl()))
                     .type("music")
                     .startMs(0)
-                    .volume(0.3)
+                    .volume(duckVolume)
                     .fadeInMs(500)
                     .fadeOutMs(1000)
                     .trimInMs(context.getMusicStartOffsetMs())
@@ -525,70 +593,32 @@ public class EdlGeneratorService {
         return audioTracks;
     }
 
+    /**
+     * Oblicza glosnosc muzyki na podstawie obecnosci voiceover.
+     * Jesli jest voiceover (word timings) → muzyka cichsza (0.15).
+     * Jesli brak voiceover → muzyka glosniejsza (0.45) jako glowny dzwiek.
+     */
+    private double calculateMusicDuckVolume(GenerationContext context) {
+        boolean hasVoiceover = context.getWordTimings() != null && !context.getWordTimings().isEmpty();
+        // With voiceover: keep music low so voice is clear
+        // Without voiceover: music is the primary audio
+        return hasVoiceover ? 0.15 : 0.45;
+    }
+
     // =========================================================================
-    // SUBTITLES — phrase-grouped, karaoke animation, TikTok styling
+    // SUBTITLES — sentence-based display, word-level highlight via SubtitleTrack
     // =========================================================================
 
     /**
-     * Grupuje word timings w frazy (WORDS_PER_PHRASE slow na fraze),
-     * uzywa karaoke animation zamiast prostego word_by_word.
-     * Styl: duzy tekst, stroke + shadow, pill background.
+     * Text overlays are NOT used for subtitles anymore.
+     * Subtitles are handled entirely by SubtitleTrack + whisper_words with sentence_index.
+     * This method only returns GPT-generated text overlays (titles, CTAs, section headers).
+     * For deterministic EDL, returns empty list (no GPT-generated titles).
      */
     private List<EdlTextOverlay> buildSubtitleOverlays(GenerationContext context) {
-        if (context.getWordTimings() == null || context.getWordTimings().isEmpty()) {
-            return List.of();
-        }
-
-        List<EdlTextOverlay> overlays = new ArrayList<>();
-        var words = context.getWordTimings();
-
-        for (int i = 0; i < words.size(); i += WORDS_PER_PHRASE) {
-            int end = Math.min(i + WORDS_PER_PHRASE, words.size());
-            var phraseWords = words.subList(i, end);
-
-            String phraseText = phraseWords.stream()
-                    .map(wt -> wt.word())
-                    .collect(Collectors.joining(" "));
-
-            int phraseStartMs = phraseWords.get(0).startMs();
-            int phraseEndMs = phraseWords.get(phraseWords.size() - 1).endMs();
-
-            // Font size skalowany do dlugosci frazy
-            int fontSize = phraseText.length() <= 10 ? 72
-                    : phraseText.length() <= 18 ? 60
-                    : phraseText.length() <= 28 ? 48
-                    : 40;
-
-            overlays.add(EdlTextOverlay.builder()
-                    .id(UUID.randomUUID().toString())
-                    .text(phraseText)
-                    .type("subtitle")
-                    .startMs(phraseStartMs)
-                    .endMs(phraseEndMs)
-                    .animation(EffectRegistry.TEXT_ANIM_KARAOKE)
-                    .style(EdlTextOverlay.TextStyle.builder()
-                            .fontFamily("Inter")
-                            .fontSize(fontSize)
-                            .fontWeight("bold")
-                            .color("#FFFFFF")
-                            .strokeColor("#000000")
-                            .strokeWidth(3)
-                            .backgroundColor("rgba(0,0,0,0.3)")
-                            .backgroundPadding(12)
-                            .build())
-                    .position(EdlTextOverlay.TextPosition.builder()
-                            .x("center")
-                            .y("75%")
-                            .maxWidth("85%")
-                            .textAlign("center")
-                            .build())
-                    .build());
-        }
-
-        log.info("[EdlGenerator] Built {} subtitle phrases from {} words",
-                overlays.size(), words.size());
-
-        return overlays;
+        // Subtitles now handled by whisper_words + SubtitleTrack in Remotion.
+        // No more text overlay phrases — they duplicate subtitles and look bad.
+        return List.of();
     }
 
     // =========================================================================
@@ -596,22 +626,61 @@ public class EdlGeneratorService {
     // =========================================================================
 
     /**
-     * Konwertuje WordTiming z GenerationContext na EdlWhisperWord.
-     * Remotion uzywa tego w SubtitleTrack → KaraokeHighlight
-     * do podswietlania aktywnego slowa w real-time (dokladny sync z voice-over).
+     * Konwertuje WordTiming z GenerationContext na EdlWhisperWord z sentence_index.
+     *
+     * Sentence grouping: dzieli slowa na zdania na podstawie:
+     *   1. Interpunkcji (. ! ? ;) na koncu slowa
+     *   2. Pauzy > 700ms miedzy slowami (natural sentence break)
+     *   3. Max ~8 slow na zdanie (aby nie przekroczyc szerokosci ekranu)
+     *
+     * Remotion SubtitleTrack wyswietla tylko slowa z aktywnego sentence_index,
+     * podswietlajac aktualnie wypowiadane slowo.
      */
     private List<EdlWhisperWord> buildWhisperWords(GenerationContext context) {
         if (context.getWordTimings() == null || context.getWordTimings().isEmpty()) {
             return List.of();
         }
 
-        return context.getWordTimings().stream()
-                .map(wt -> EdlWhisperWord.builder()
-                        .word(wt.word())
-                        .startMs(wt.startMs())
-                        .endMs(wt.endMs())
-                        .build())
-                .toList();
+        var words = context.getWordTimings();
+        List<EdlWhisperWord> result = new ArrayList<>();
+        int sentenceIndex = 0;
+        int wordsInCurrentSentence = 0;
+
+        for (int i = 0; i < words.size(); i++) {
+            var wt = words.get(i);
+            String word = wt.word();
+
+            result.add(EdlWhisperWord.builder()
+                    .word(word)
+                    .startMs(wt.startMs())
+                    .endMs(wt.endMs())
+                    .sentenceIndex(sentenceIndex)
+                    .build());
+
+            wordsInCurrentSentence++;
+
+            // Detect sentence boundary
+            boolean endsWithPunctuation = !word.isEmpty()
+                    && SENTENCE_ENDS.contains(word.charAt(word.length() - 1));
+
+            boolean longPauseAfter = false;
+            if (i + 1 < words.size()) {
+                int gap = words.get(i + 1).startMs() - wt.endMs();
+                longPauseAfter = gap > 700;
+            }
+
+            boolean sentenceTooLong = wordsInCurrentSentence >= 8;
+
+            if ((endsWithPunctuation || longPauseAfter || sentenceTooLong) && i < words.size() - 1) {
+                sentenceIndex++;
+                wordsInCurrentSentence = 0;
+            }
+        }
+
+        log.info("[EdlGenerator] Built {} whisper words in {} sentences",
+                result.size(), sentenceIndex + 1);
+
+        return result;
     }
 
     private EdlSubtitleConfig buildSubtitleConfig(GenerationContext context) {
@@ -747,22 +816,43 @@ public class EdlGeneratorService {
             sb.append("NARRATION:\n").append(context.getScript().narration()).append("\n\n");
         }
 
-        // Available assets
-        sb.append("AVAILABLE ASSETS (use these exact asset_id values):\n");
+        // Available assets + scenes with visual descriptions
+        sb.append("AVAILABLE ASSETS & SCENES (use these exact asset_id values):\n");
+        Map<Integer, ProjectAsset> sceneAssetMap = new HashMap<>();
+        int saIdx = 0;
         for (ProjectAsset asset : projectAssets) {
-            sb.append("  - id: ").append(asset.getId())
-                    .append(", type: ").append(asset.getType())
-                    .append(", duration: ").append(asset.getDurationSeconds() != null ? asset.getDurationSeconds() + "s" : "static image")
-                    .append("\n");
+            String typeName = asset.getType().name();
+            if ("VIDEO".equals(typeName) || "IMAGE".equals(typeName)) {
+                sceneAssetMap.put(saIdx++, asset);
+            }
         }
-        sb.append("\n");
 
-        // Scenes with durations
-        sb.append("SCENES:\n");
         for (int i = 0; i < context.getScenes().size(); i++) {
             SceneAsset scene = context.getScenes().get(i);
-            sb.append("  Scene ").append(i)
-                    .append(": duration=").append(scene.getDurationMs()).append("ms\n");
+            ProjectAsset asset = sceneAssetMap.get(i);
+            sb.append("  Scene ").append(i).append(":\n");
+            sb.append("    asset_id: ").append(asset != null ? asset.getId() : "MISSING").append("\n");
+            sb.append("    asset_type: ").append(asset != null ? asset.getType() : "UNKNOWN").append("\n");
+            sb.append("    duration: ").append(scene.getDurationMs()).append("ms\n");
+            if (scene.getImagePrompt() != null) {
+                sb.append("    visual_content: \"").append(scene.getImagePrompt()).append("\"\n");
+            }
+            if (scene.getMotionPrompt() != null) {
+                sb.append("    camera_motion: \"").append(scene.getMotionPrompt()).append("\"\n");
+            }
+            if (scene.getSubtitleText() != null) {
+                sb.append("    narration_fragment: \"").append(scene.getSubtitleText()).append("\"\n");
+            }
+        }
+        // Non-visual assets (voice, music)
+        for (ProjectAsset asset : projectAssets) {
+            String typeName = asset.getType().name();
+            if ("VOICE".equals(typeName) || "MUSIC".equals(typeName)) {
+                sb.append("  Audio: id=").append(asset.getId())
+                        .append(", type=").append(typeName)
+                        .append(", duration=").append(asset.getDurationSeconds() != null ? asset.getDurationSeconds() + "s" : "unknown")
+                        .append("\n");
+            }
         }
         sb.append("\n");
 
@@ -776,9 +866,16 @@ public class EdlGeneratorService {
             sb.append("Danceability: ").append(String.format("%.2f", audioAnalysis.danceability())).append(" (0=low, 1=high)\n");
 
             if (audioAnalysis.beats() != null && !audioAnalysis.beats().isEmpty()) {
-                sb.append("First 20 beat positions (seconds): ");
-                audioAnalysis.beats().stream().limit(20).forEach(b -> sb.append(String.format("%.2f ", b)));
+                // Calculate total video duration to filter relevant beats
+                int totalMs = context.getScenes().stream().mapToInt(SceneAsset::getDurationMs).sum();
+                double totalSec = totalMs / 1000.0;
+                List<Double> relevantBeats = audioAnalysis.beats().stream()
+                        .filter(b -> b <= totalSec + 1.0)
+                        .toList();
+                sb.append("Beat positions within video (").append(relevantBeats.size()).append(" beats, seconds): ");
+                relevantBeats.forEach(b -> sb.append(String.format("%.2f ", b)));
                 sb.append("\n");
+                sb.append("IMPORTANT: Align segment cut points to these beat positions for professional rhythm!\n");
             }
 
             if (audioAnalysis.sections() != null) {
@@ -832,23 +929,47 @@ public class EdlGeneratorService {
             sb.append("\n");
         }
 
-        // Editing rules — more specific TikTok guidance
+        // Editing rules — TikTok-grade quality
         sb.append("""
-                EDITING RULES:
-                - Segments must cover the full timeline continuously (NO gaps, NO overlaps on same layer)
-                - Each segment MUST reference an existing asset_id from the list above
-                - VARY effects — NEVER use the same effect on 3 consecutive segments
-                - VARY intensity — drops/peaks get 0.8-1.0, builds get 0.5-0.7, quiet sections get 0.2-0.5
-                - Beat-sync: align segment cuts to beat positions from the music analysis
-                - HOOK: first 2 seconds MUST grab attention (follow hook_strategy from Edit DNA if provided)
-                - Match effects to music: drops→use drop_signature from Edit DNA, builds→zoom_in/drift, quiet→pan_*/zoom_out
-                - If Edit DNA is provided: STRICTLY follow the effect_palette (primary/secondary/forbidden) and cut_rhythm mode
-                - Transitions: drops→cut/wipe, builds→dissolve/fade, calm→fade/fade_black
-                - Text overlays: group narration into 2-3 word phrases, use "karaoke" animation
-                - total_duration_ms must equal sum of all scene durations
-                - Music volume should duck to 0.2-0.3 during voiceover, 0.5-0.7 during pauses
+                === EDITING RULES (MANDATORY) ===
 
-                Return ONLY the JSON — no markdown, no explanations.
+                TIMELINE:
+                - Segments must cover the full timeline continuously (NO gaps, NO overlaps)
+                - Each segment MUST use an asset_id from the SCENES list above
+                - total_duration_ms MUST equal the sum of all scene durations
+                - ALIGN segment cut points to beat positions from the music analysis — this is critical for rhythm
+
+                EFFECTS:
+                - VARY effects — NEVER use the same effect on 3+ consecutive segments
+                - Match effects to visual content: close-ups→zoom_in, wide shots→pan_*, action→shake/fast_zoom
+                - Match effects to music: drops→use drop_signature from Edit DNA, builds→zoom_in/drift, quiet→pan_*/ken_burns
+                - VARY intensity: drops/peaks 0.8-1.0, builds 0.5-0.7, quiet 0.2-0.5
+                - If Edit DNA is provided: STRICTLY follow effect_palette (primary/secondary/forbidden) and cut_rhythm mode
+
+                TRANSITIONS:
+                - Drops/high-energy → cut or wipe_left/wipe_right (sharp, punchy)
+                - Builds/crescendo → dissolve or fade (smooth progression)
+                - Calm/outro → fade_black (cinematic feel)
+                - Default: cut (clean, professional)
+
+                HOOK (first 2 seconds):
+                - Must grab attention immediately
+                - Use fast_zoom or shake effect, intensity 0.8-1.0
+                - Follow hook_strategy from Edit DNA if provided
+
+                TEXT OVERLAYS (NOT subtitles — subtitles are handled separately by whisper_words):
+                - Generate a TITLE overlay: short catchy title for the video (type: "title", animation: "bounce" or "slide_up")
+                  Position at y: "15%", show for first 2-3 seconds, large font (72px+), bold, white with black stroke
+                - Generate SECTION HEADERS if narration has multiple topics (type: "section", animation: "slide_up")
+                  e.g. "#1 AI At Work", "#2 The Future" — positioned at y: "20%", 48px font
+                - DO NOT generate subtitle text overlays — subtitles are word-level via whisper_words
+                - Keep text overlays minimal (max 3-5 total) — they should accent, not overwhelm
+
+                AUDIO:
+                - voiceover: volume 1.0
+                - music: volume 0.15 (ducked under voice — handled separately, you don't need to set this)
+
+                Return ONLY the JSON — no markdown, no explanations, no code fences.
                 """);
 
         return sb.toString();

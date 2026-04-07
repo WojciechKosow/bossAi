@@ -27,4 +27,12 @@ public class EdlWhisperWord {
 
     @JsonProperty("end_ms")
     private int endMs;
+
+    /**
+     * Index zdania do ktorego nalezy to slowo.
+     * Remotion SubtitleTrack wyswietla tylko slowa z aktywnego zdania.
+     */
+    @JsonProperty("sentence_index")
+    @Builder.Default
+    private int sentenceIndex = 0;
 }
