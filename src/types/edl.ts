@@ -150,6 +150,10 @@ export const SubtitleConfigSchema = z.object({
   highlight_color: z.string().default("#FFD700"),
   /** Multiple highlight colors — rotated per sentence for visual variety. */
   highlight_colors: z.array(z.string()).optional(),
+  /** "word" = karaoke word-by-word highlight, "sentence" = highlight whole sentence (legacy). */
+  highlight_mode: z.enum(["word", "sentence"]).default("word"),
+  /** Max words displayed on screen at once per subtitle group. */
+  max_words_per_group: z.number().default(5),
   font_size: z.number().default(48),
   font_family: z.string().default("Inter"),
   stroke_color: z.string().default("#000000"),

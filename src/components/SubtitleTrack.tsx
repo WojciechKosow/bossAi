@@ -11,6 +11,12 @@ interface SubtitleTrackProps {
 const DEFAULT_PALETTE = ["#FFD700", "#FF6B6B", "#4ECDC4", "#45B7D1", "#F7DC6F"];
 
 /**
+ * Anticipation offset — highlight leads the voice slightly
+ * to prevent perceived subtitle lag.
+ */
+const ANTICIPATION_MS = 30;
+
+/**
  * Groups words by sentence_index for quick lookup.
  */
 function groupBySentence(words: WhisperWord[]): Map<number, WhisperWord[]> {
@@ -25,14 +31,14 @@ function groupBySentence(words: WhisperWord[]): Map<number, WhisperWord[]> {
 
 /**
  * Find the active sentence index based on current time.
- * Uses a small look-ahead (50ms) so the sentence appears slightly before
- * the first word starts speaking — prevents perceived subtitle lag.
+ * Uses look-ahead so the sentence appears slightly before
+ * the first word starts speaking.
  */
 function findActiveSentenceIndex(
   sentences: Map<number, WhisperWord[]>,
   currentTimeMs: number
 ): number | null {
-  const LOOK_AHEAD_MS = 50;
+  const LOOK_AHEAD_MS = 80;
 
   for (const [idx, words] of sentences) {
     if (words.length === 0) continue;
@@ -57,13 +63,10 @@ function getHighlightColor(
     config.highlight_colors && config.highlight_colors.length > 0
       ? config.highlight_colors
       : config.highlight_color
-      ? [config.highlight_color]
-      : DEFAULT_PALETTE;
+        ? [config.highlight_color]
+        : DEFAULT_PALETTE;
 
-  // If only one color, always use it (user explicitly chose one color)
   if (palette.length === 1) return palette[0];
-
-  // Rotate through palette
   return palette[sentenceIndex % palette.length];
 }
 
@@ -95,6 +98,21 @@ function getSubtitlePositionStyle(position: string): React.CSSProperties {
   }
 }
 
+/**
+ * Word-by-word karaoke subtitle component.
+ *
+ * Renders the current sentence group on screen and highlights each word
+ * individually as it's spoken — synced via Whisper word-level timestamps.
+ *
+ * Visual states for each word:
+ *   - UPCOMING: dim white (waiting to be spoken)
+ *   - ACTIVE:   highlight color + scale pulse + glow (currently being spoken)
+ *   - PAST:     bright white (already spoken, clearly visible)
+ *
+ * highlight_mode:
+ *   - "word" (default): per-word karaoke highlighting
+ *   - "sentence": all words in the sentence highlighted at once (legacy)
+ */
 export const SubtitleTrack: React.FC<SubtitleTrackProps> = ({
   config,
   words,
@@ -106,12 +124,12 @@ export const SubtitleTrack: React.FC<SubtitleTrackProps> = ({
 
   const currentTimeMs = (frame / fps) * 1000;
   const positionStyle = getSubtitlePositionStyle(config.position);
+  const highlightMode = config.highlight_mode ?? "word";
 
   // Group words by sentence
   const sentences = groupBySentence(words);
   const activeSentenceIdx = findActiveSentenceIndex(sentences, currentTimeMs);
 
-  // Don't render anything if no sentence is active
   if (activeSentenceIdx === null) return null;
 
   const sentenceWords = sentences.get(activeSentenceIdx) ?? [];
@@ -134,13 +152,13 @@ export const SubtitleTrack: React.FC<SubtitleTrackProps> = ({
   const totalChars = sentenceWords.reduce((sum, w) => sum + w.word.length, 0);
   const baseFontSize = config.font_size;
   const fontSize =
-    totalChars <= 12
-      ? baseFontSize * 1.3
-      : totalChars <= 25
-      ? baseFontSize * 1.1
-      : totalChars <= 40
-      ? baseFontSize
-      : baseFontSize * 0.85;
+    totalChars <= 10
+      ? baseFontSize * 1.4
+      : totalChars <= 18
+        ? baseFontSize * 1.2
+        : totalChars <= 30
+          ? baseFontSize * 1.0
+          : baseFontSize * 0.85;
 
   return (
     <div
@@ -162,49 +180,84 @@ export const SubtitleTrack: React.FC<SubtitleTrackProps> = ({
         }}
       >
         {sentenceWords.map((w, i) => {
-          // Word highlight timing:
-          // - 30ms anticipation so highlight leads the voice slightly
-          // - This prevents the "subtitle lagging behind" feeling
-          const ANTICIPATION_MS = 30;
+          if (highlightMode === "sentence") {
+            // Legacy mode: all words highlighted in the sentence color
+            return (
+              <span
+                key={`${activeSentenceIdx}-${i}`}
+                style={{
+                  color: highlightColor,
+                  display: "inline-block",
+                  marginRight: "0.3em",
+                }}
+              >
+                {w.word}
+              </span>
+            );
+          }
+
+          // --- Word-by-word karaoke mode ---
           const wordStartAdj = w.start_ms - ANTICIPATION_MS;
-
-          const isActive = currentTimeMs >= wordStartAdj && currentTimeMs <= w.end_ms;
+          const isActive =
+            currentTimeMs >= wordStartAdj && currentTimeMs <= w.end_ms;
           const isPast = currentTimeMs > w.end_ms;
+          const isUpcoming = !isActive && !isPast;
 
-          // Active word: scale pulse using interpolation (no CSS transition in Remotion)
+          // Active word: smooth scale pulse
           let wordScale = 1;
+          let glowShadow = "";
+
           if (isActive) {
             const wordDurationMs = w.end_ms - wordStartAdj;
             const wordProgress = Math.min(
               (currentTimeMs - wordStartAdj) / Math.max(wordDurationMs, 1),
               1
             );
-            // Quick scale up at start, hold, slight decrease at end
-            if (wordProgress < 0.15) {
-              wordScale = interpolate(wordProgress, [0, 0.15], [1, 1.15], {
+
+            // Smooth scale: quick up → hold → ease out
+            if (wordProgress < 0.12) {
+              wordScale = interpolate(wordProgress, [0, 0.12], [1, 1.18], {
                 extrapolateRight: "clamp",
               });
-            } else if (wordProgress > 0.85) {
-              wordScale = interpolate(wordProgress, [0.85, 1], [1.15, 1.05], {
+            } else if (wordProgress > 0.8) {
+              wordScale = interpolate(wordProgress, [0.8, 1], [1.18, 1.0], {
                 extrapolateLeft: "clamp",
               });
             } else {
-              wordScale = 1.15;
+              wordScale = 1.18;
             }
+
+            // Glow effect on active word
+            glowShadow = `0 0 20px ${highlightColor}80, 0 0 40px ${highlightColor}40`;
           }
+
+          // Past word: subtle scale-down for visual rhythm
+          if (isPast) {
+            wordScale = 1.0;
+          }
+
+          // Color: active = highlight, past = white, upcoming = dim
+          const wordColor = isActive
+            ? highlightColor
+            : isPast
+              ? "#FFFFFF"
+              : "rgba(255, 255, 255, 0.35)";
+
+          // Opacity: upcoming words are dimmer to create focus on the active word
+          const wordOpacity = isUpcoming ? 0.5 : 1.0;
 
           return (
             <span
               key={`${activeSentenceIdx}-${i}`}
               style={{
-                color: isActive
-                  ? highlightColor
-                  : isPast
-                  ? "#FFFFFF"
-                  : "rgba(255, 255, 255, 0.45)",
+                color: wordColor,
+                opacity: wordOpacity,
                 transform: `scale(${wordScale})`,
                 display: "inline-block",
                 marginRight: "0.3em",
+                textShadow: glowShadow
+                  ? `${glowShadow}, 0 2px 10px rgba(0,0,0,0.8)`
+                  : undefined,
               }}
             >
               {w.word}
