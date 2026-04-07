@@ -284,15 +284,55 @@ public class EdlGeneratorService {
     // DEFAULTS — uzupelnia null nested objects po GPT response
     // =========================================================================
 
+    // Valid types according to Remotion Zod schema
+    private static final Set<String> VALID_TRANSITIONS = Set.of(
+            "cut", "fade", "fade_white", "fade_black", "dissolve",
+            "wipe_left", "wipe_right", "slide_left", "slide_right"
+    );
+
+    private static final Set<String> VALID_EFFECTS = Set.of(
+            "zoom_in", "zoom_out", "fast_zoom",
+            "pan_left", "pan_right", "pan_up", "pan_down",
+            "shake", "slow_motion", "speed_ramp", "zoom_pulse", "ken_burns",
+            "glitch", "flash", "bounce", "drift", "zoom_in_offset"
+    );
+
+    private static final Set<String> VALID_TEXT_ANIMATIONS = Set.of(
+            "fade_in", "slide_up", "typewriter", "bounce", "word_by_word", "karaoke"
+    );
+
     /**
      * GPT czesto pomija style/position na text overlays i effects na segmentach.
      * Remotion Zod schema wymaga obiektow (nie null) — uzupelniamy defaultami.
+     * Sanityzuje tez transition/effect types — GPT moze wygenerowac typy spoza Zod enum.
      */
     private void ensureNestedDefaults(EdlDto edl) {
         if (edl.getSegments() != null) {
             for (EdlSegment seg : edl.getSegments()) {
                 if (seg.getEffects() == null) {
                     seg.setEffects(List.of());
+                } else {
+                    // Remove effects with invalid types
+                    List<EdlEffect> validEffects = new ArrayList<>();
+                    for (EdlEffect effect : seg.getEffects()) {
+                        if (effect.getType() != null && VALID_EFFECTS.contains(effect.getType())) {
+                            validEffects.add(effect);
+                        } else {
+                            log.warn("[EdlGenerator] Removing invalid effect type '{}' from segment {}",
+                                    effect.getType(), seg.getId());
+                        }
+                    }
+                    seg.setEffects(validEffects);
+                }
+
+                // Sanitize transition type
+                if (seg.getTransition() != null) {
+                    String transType = seg.getTransition().getType();
+                    if (transType != null && !VALID_TRANSITIONS.contains(transType)) {
+                        log.warn("[EdlGenerator] Replacing invalid transition type '{}' with 'cut' in segment {}",
+                                transType, seg.getId());
+                        seg.getTransition().setType("cut");
+                    }
                 }
             }
         }
@@ -304,6 +344,12 @@ public class EdlGeneratorService {
                 }
                 if (overlay.getPosition() == null) {
                     overlay.setPosition(EdlTextOverlay.TextPosition.builder().build());
+                }
+                // Sanitize text animation type
+                if (overlay.getAnimation() != null && !VALID_TEXT_ANIMATIONS.contains(overlay.getAnimation())) {
+                    log.warn("[EdlGenerator] Replacing invalid text animation '{}' with 'fade_in'",
+                            overlay.getAnimation());
+                    overlay.setAnimation("fade_in");
                 }
             }
         }
