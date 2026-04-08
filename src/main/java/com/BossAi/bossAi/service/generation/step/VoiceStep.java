@@ -6,6 +6,8 @@ import com.BossAi.bossAi.service.AssetService;
 import com.BossAi.bossAi.service.OpenAiService;
 import com.BossAi.bossAi.service.StorageService;
 import com.BossAi.bossAi.service.SubtitleService;
+import com.BossAi.bossAi.service.audio.AudioAnalysisClient;
+import com.BossAi.bossAi.service.audio.WhisperXAlignResponse;
 import com.BossAi.bossAi.service.generation.GenerationContext;
 import com.BossAi.bossAi.service.generation.GenerationStepName;
 import lombok.RequiredArgsConstructor;
@@ -26,8 +28,13 @@ import java.util.List;
  *   1. User upload  → kopiuje plik z Storage do katalogu roboczego FFmpeg
  *   2. AI TTS       → wywołuje OpenAI TTS z narracji ScriptResult
  *
+ * Word timing pipeline (priorytet):
+ *   1. WhisperX forced alignment via audio-analysis-service (<20ms accuracy)
+ *   2. OpenAI Whisper word timestamps (fallback, ~50-100ms)
+ *   3. Estimated timings from SubtitleService (last resort)
+ *
  * Input:  context.script.narration(), context.userVoiceAsset (może być null)
- * Output: context.voiceLocalPath (ścieżka do pliku MP3 gotowego dla FFmpeg)
+ * Output: context.voiceLocalPath, context.wordTimings
  */
 @Slf4j
 @Service
@@ -37,9 +44,11 @@ public class VoiceStep implements GenerationStep {
     private final OpenAiService openAiService;
     private final StorageService storageService;
     private final AssetService assetService;
+    private final AudioAnalysisClient audioAnalysisClient;
 
     @Value("${ffmpeg.temp.dir:/tmp/bossai/render}")
     private String tempDir;
+
     @Override
     public void execute(GenerationContext context) throws Exception {
         context.updateProgress(
@@ -62,46 +71,94 @@ public class VoiceStep implements GenerationStep {
 
         context.setVoiceLocalPath(voiceLocalPath);
 
-        if (!context.hasUserVoice()) {
-            try {
-                byte[] audioBytes = Files.readAllBytes(Path.of(voiceLocalPath));
-                List<SubtitleService.WordTiming> timings = transcribeWithRetry(audioBytes);
+        // Extract word-level timestamps for subtitles
+        byte[] audioBytes = Files.readAllBytes(Path.of(voiceLocalPath));
+        String narration = context.getScript().narration();
 
-                if (!timings.isEmpty()) {
-                    // Scal tokeny Whisper w czytelne słowa przed zapisem do kontekstu
-                    List<SubtitleService.WordTiming> merged = mergeWhisperTokens(timings);
-                    context.setWordTimings(merged);
-                    log.info("[VoiceStep] Whisper OK — {} tokenów → {} słów po merge",
-                            timings.size(), merged.size());
-                } else {
-                    log.warn("[VoiceStep] Whisper zwrócił 0 tokenów — RenderStep użyje estimated timings");
-                }
-            } catch (Exception e) {
-                log.warn("[VoiceStep] Whisper transcription failed — fallback: {}", e.getMessage());
-            }
+        List<SubtitleService.WordTiming> wordTimings = extractWordTimings(audioBytes, narration);
+
+        if (!wordTimings.isEmpty()) {
+            context.setWordTimings(wordTimings);
+            log.info("[VoiceStep] Word timings OK — {} słów, {}ms–{}ms",
+                    wordTimings.size(),
+                    wordTimings.get(0).startMs(),
+                    wordTimings.get(wordTimings.size() - 1).endMs());
+        } else {
+            log.warn("[VoiceStep] Brak word timings — RenderStep użyje estimated timings");
         }
 
         log.info("[VoiceStep] DONE — voiceLocalPath: {}", voiceLocalPath);
     }
 
+    // =========================================================================
+    // WORD TIMING EXTRACTION (WhisperX → Whisper → fallback)
+    // =========================================================================
+
+    /**
+     * Wyciąga per-word timestamps z audio. Priorytet:
+     *   1. WhisperX forced alignment (najlepsza jakość, <20ms)
+     *   2. OpenAI Whisper (fallback, ~50-100ms)
+     */
+    private List<SubtitleService.WordTiming> extractWordTimings(
+            byte[] audioBytes, String narration) {
+
+        // 1. Try WhisperX forced alignment (best quality)
+        List<SubtitleService.WordTiming> whisperXTimings = tryWhisperXAlign(audioBytes, narration);
+        if (!whisperXTimings.isEmpty()) {
+            return whisperXTimings;
+        }
+
+        // 2. Fallback: OpenAI Whisper
+        log.info("[VoiceStep] WhisperX unavailable — falling back to OpenAI Whisper");
+        List<SubtitleService.WordTiming> whisperTimings = transcribeWithRetry(audioBytes);
+        if (!whisperTimings.isEmpty()) {
+            return mergeWhisperTokens(whisperTimings);
+        }
+
+        return List.of();
+    }
+
+    /**
+     * WhisperX forced alignment via audio-analysis-service.
+     * Sends audio + known transcript → gets precise per-word timestamps.
+     */
+    private List<SubtitleService.WordTiming> tryWhisperXAlign(
+            byte[] audioBytes, String narration) {
+        try {
+            log.info("[VoiceStep] Trying WhisperX alignment — {} bytes audio, {} chars transcript",
+                    audioBytes.length, narration != null ? narration.length() : 0);
+
+            WhisperXAlignResponse response = audioAnalysisClient.alignWords(
+                    audioBytes,
+                    "voice.mp3",
+                    null,       // auto-detect language
+                    narration   // known transcript for forced alignment
+            );
+
+            if (response != null && response.words() != null && !response.words().isEmpty()) {
+                List<SubtitleService.WordTiming> timings = response.toWordTimings();
+                log.info("[VoiceStep] WhisperX OK — {} words, model={}, duration={}ms",
+                        timings.size(), response.model(), response.durationMs());
+                return timings;
+            }
+
+            log.warn("[VoiceStep] WhisperX returned 0 words");
+            return List.of();
+
+        } catch (Exception e) {
+            log.warn("[VoiceStep] WhisperX alignment failed — will fallback to Whisper: {}",
+                    e.getMessage());
+            return List.of();
+        }
+    }
+
+    // =========================================================================
+    // OPENAI WHISPER FALLBACK
+    // =========================================================================
+
     /**
      * Scala tokeny Whisper w czytelne słowa wyświetlane na ekranie.
-     *
-     * Whisper zwraca podtokeny z wiodącą spacją oznaczającą nowe słowo:
-     *   " max" (spacja = nowe słowo)  → osobny token
-     *   "2"    (brak spacji = kontynuacja) → scala z poprzednim
-     *
-     * Przykład: [" max"(0-300), "2"(300-400), " seconds"(400-700)]
-     *         → ["max2"(0-400), "seconds"(400-700)]
-     *
-     * WAŻNE: scalamy TYLKO subtokeny (brak wiodącej spacji).
-     * NIE scalamy na podstawie mikro-przerwy — TTS naturalnie ma
-     * < 80ms przerwy między oddzielnymi słowami, co powodowało
-     * łączenie WSZYSTKICH słów w jeden ciąg (VOICESYOULITERALLYCANT...).
-     *
-     * NIGDY nie scalamy tokenów kończących się lub zaczynających interpunkcją
-     * (przecinek, kropka, etc.) — to osobne elementy wyliczeń, muszą mieć
-     * osobne timingi, żeby word-by-word podświetlanie działało poprawnie.
+     * Używane TYLKO jako fallback gdy WhisperX jest niedostępny.
      */
     private List<SubtitleService.WordTiming> mergeWhisperTokens(
             List<SubtitleService.WordTiming> tokens) {
@@ -115,22 +172,17 @@ public class VoiceStep implements GenerationStep {
             String trimmed = word.trim();
             if (trimmed.isEmpty()) continue;
 
-            // Nigdy nie scalaj tokenów z interpunkcją — to osobne elementy wyliczeń
-            // np. "essays," "captions," "etc." muszą być osobnymi słowami
             boolean hasPunctuation = trimmed.matches(".*[.,;:!?]$")
                     || trimmed.matches("^[.,;:!?].*");
 
-            // Nigdy nie scalaj powtarzających się słów (np. "etc." + "etc.")
             boolean isDuplicate = !result.isEmpty()
                     && trimmed.equalsIgnoreCase(result.get(result.size() - 1).word());
 
-            // Scalamy TYLKO gdy przerwa < 30ms (ten sam fonem podzielony)
-            // i żaden z tokenów nie ma interpunkcji i nie jest duplikatem
             boolean isSamePhoneme = !result.isEmpty()
                     && token.startMs() - result.get(result.size() - 1).endMs() < 30
-                    && !trimmed.matches("[A-Z].*")   // nie scalaj nowych zdań
-                    && !hasPunctuation               // nie scalaj elementów wyliczeń
-                    && !isDuplicate                   // nie scalaj duplikatów
+                    && !trimmed.matches("[A-Z].*")
+                    && !hasPunctuation
+                    && !isDuplicate
                     && !result.get(result.size() - 1).word().matches(".*[.,;:!?]$");
 
             if (isSamePhoneme) {
@@ -164,25 +216,25 @@ public class VoiceStep implements GenerationStep {
             try { Thread.sleep(500L * attempt); } catch (InterruptedException ignored) {}
         }
 
-        log.error("[VoiceStep] Whisper failed po 3 próbach — RenderStep użyje estimated timings");
+        log.error("[VoiceStep] Whisper failed po 3 próbach");
         return List.of();
     }
-    // -------------------------------------------------------------------------
+
+    // =========================================================================
+    // TTS GENERATION + USER VOICE
+    // =========================================================================
 
     private String generateAiTts(GenerationContext context) throws Exception {
         String narration = context.getScript().narration();
         log.info("[VoiceStep] Generuję AI TTS — {} znaków", narration.length());
 
-        // Wywołanie OpenAI TTS — Resilience4j retry w OpenAiService
         byte[] audioBytes = openAiService.generateTts(narration);
 
-        // Zapisz do katalogu roboczego FFmpeg
         String filename = "voice_" + context.getGenerationId() + ".mp3";
         Path outputPath = getWorkingDir(context).resolve(filename);
         Files.createDirectories(outputPath.getParent());
         Files.write(outputPath, audioBytes);
 
-        // Zapisz też jako Asset w bazie
         assetService.createAsset(
                 context.getUserId(),
                 AssetType.VOICE,
@@ -214,6 +266,4 @@ public class VoiceStep implements GenerationStep {
     private Path getWorkingDir(GenerationContext context) {
         return Paths.get(tempDir, context.getGenerationId().toString());
     }
-
-
 }
