@@ -8,7 +8,6 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from app.analyzers.beat_analyzer import analyze_beats
 from app.analyzers.mood_analyzer import analyze_mood
 from app.analyzers.section_detector import detect_sections
-from app.analyzers.whisperx_aligner import align_words
 from app.config import settings
 from app.models.schemas import (
     AlignResponse,
@@ -131,6 +130,8 @@ async def align_audio(
             language or "auto",
             "yes" if transcript else "no",
         )
+
+        from app.analyzers.whisperx_aligner import align_words
 
         word_dicts = align_words(
             audio_path=tmp_path,
