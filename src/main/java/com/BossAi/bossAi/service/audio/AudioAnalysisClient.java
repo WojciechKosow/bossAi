@@ -65,4 +65,54 @@ public class AudioAnalysisClient {
 
         return response;
     }
+
+    /**
+     * WhisperX forced alignment — precyzyjne per-word timestamps (<20ms).
+     *
+     * @param audioBytes  plik audio TTS (MP3)
+     * @param filename    nazwa pliku (np. "voice.mp3")
+     * @param language    kod języka (np. "en", "pl") — null = auto-detect
+     * @param transcript  znany tekst narracji (z TTS) — null = pełna transkrypcja
+     * @return WhisperXAlignResponse z per-word timestamps
+     */
+    public WhisperXAlignResponse alignWords(
+            byte[] audioBytes,
+            String filename,
+            String language,
+            String transcript
+    ) {
+        log.info("[AudioAnalysisClient] WhisperX align — file: {}, size: {} bytes, lang: {}, transcript: {}",
+                filename, audioBytes.length, language != null ? language : "auto",
+                transcript != null ? transcript.length() + " chars" : "none");
+
+        MultipartBodyBuilder bodyBuilder = new MultipartBodyBuilder();
+        bodyBuilder.part("file", new ByteArrayResource(audioBytes) {
+            @Override
+            public String getFilename() {
+                return filename;
+            }
+        }).contentType(MediaType.APPLICATION_OCTET_STREAM);
+
+        if (language != null && !language.isBlank()) {
+            bodyBuilder.part("language", language);
+        }
+        if (transcript != null && !transcript.isBlank()) {
+            bodyBuilder.part("transcript", transcript);
+        }
+
+        WhisperXAlignResponse response = webClient.post()
+                .uri("/api/v1/align")
+                .contentType(MediaType.MULTIPART_FORM_DATA)
+                .body(BodyInserters.fromMultipartData(bodyBuilder.build()))
+                .retrieve()
+                .bodyToMono(WhisperXAlignResponse.class)
+                .block();
+
+        if (response != null && response.words() != null) {
+            log.info("[AudioAnalysisClient] WhisperX OK — {} words, duration={}ms, model={}",
+                    response.words().size(), response.durationMs(), response.model());
+        }
+
+        return response;
+    }
 }
