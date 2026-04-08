@@ -25,7 +25,15 @@ import numpy as np
 import noisereduce as nr
 import soundfile as sf
 import torch
-import whisperx
+
+# --- torchaudio compatibility shim ---
+# pyannote.audio (WhisperX dependency) calls torchaudio.set_audio_backend()
+# which was removed in torchaudio >= 2.2. Patch it before importing whisperx.
+import torchaudio
+if not hasattr(torchaudio, "set_audio_backend"):
+    torchaudio.set_audio_backend = lambda backend: None
+
+import whisperx  # noqa: E402 — must be after torchaudio shim
 
 from app.config import settings
 
