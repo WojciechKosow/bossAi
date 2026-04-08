@@ -1,0 +1,24 @@
+FROM nvidia/cuda:12.1.0-runtime-ubuntu22.04
+
+# Python 3.11
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3.11 python3.11-venv python3-pip \
+    libsndfile1 ffmpeg git \
+    && rm -rf /var/lib/apt/lists/* \
+    && ln -sf /usr/bin/python3.11 /usr/bin/python3
+
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir torch torchaudio --index-url https://download.pytorch.org/whl/cu121 \
+    && pip install --no-cache-dir -r requirements.txt
+
+COPY . .
+
+EXPOSE 8000
+
+ENV HF_HOME=/app/.cache/huggingface
+ENV AUDIO_WHISPERX_DEVICE=cuda
+ENV AUDIO_WHISPERX_COMPUTE_TYPE=float16
+
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
