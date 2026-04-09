@@ -19,9 +19,48 @@ Usage:
 import logging
 import re
 import tempfile
+from importlib import metadata
 from pathlib import Path
 
 import numpy as np
+
+# pyannote.audio<4 may still reference np.NaN. Keep compatibility if NumPy 2 sneaks in.
+if not hasattr(np, "NaN"):
+    np.NaN = np.nan
+
+
+def _parse_major_minor(version: str) -> tuple[int, int]:
+    parts = version.split(".")
+    major = int(parts[0]) if parts and parts[0].isdigit() else 0
+    minor = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 0
+    return major, minor
+
+
+def _validate_runtime_dependencies() -> None:
+    """
+    Fail early with a clear message for the most common WhisperX env mismatch:
+      - NumPy 2.x with older binary wheels
+      - PyTorch < 2.4 (WhisperX/Transformers runtime requirement)
+    """
+    numpy_version = metadata.version("numpy")
+    numpy_major, _ = _parse_major_minor(numpy_version)
+    if numpy_major >= 2:
+        raise RuntimeError(
+            "Unsupported NumPy version for this service: "
+            f"{numpy_version}. Install numpy<2 (recommended: 1.26.4)."
+        )
+
+    torch_version = metadata.version("torch")
+    torch_major, torch_minor = _parse_major_minor(torch_version)
+    if (torch_major, torch_minor) < (2, 4):
+        raise RuntimeError(
+            "Unsupported PyTorch version for WhisperX: "
+            f"{torch_version}. Install torch>=2.4 and matching torchaudio."
+        )
+
+
+_validate_runtime_dependencies()
+
 import noisereduce as nr
 import soundfile as sf
 import torch
