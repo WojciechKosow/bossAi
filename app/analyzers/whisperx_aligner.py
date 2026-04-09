@@ -47,7 +47,9 @@ def _validate_runtime_dependencies() -> None:
     if numpy_major >= 2:
         raise RuntimeError(
             "Unsupported NumPy version for this service: "
-            f"{numpy_version}. Install numpy<2 (recommended: 1.26.4)."
+            f"{numpy_version}. This API requires numpy<2 because WhisperX dependencies "
+            "(e.g. pyannote/audio wheels) are not yet compatible with NumPy 2.x. "
+            "Fix: `pip install 'numpy<2'` (recommended: 1.26.4) and restart the service."
         )
 
     torch_version = metadata.version("torch")

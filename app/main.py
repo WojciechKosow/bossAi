@@ -153,6 +153,13 @@ async def align_audio(
 
     except HTTPException:
         raise
+    except RuntimeError as e:
+        # Dependency/environment mismatch (e.g. unsupported NumPy/Torch for WhisperX)
+        logger.exception("[align] WhisperX runtime dependency check failed")
+        raise HTTPException(
+            status_code=503,
+            detail=f"WhisperX runtime dependency error: {e}",
+        )
     except Exception as e:
         logger.exception("[align] WhisperX alignment failed")
         raise HTTPException(
