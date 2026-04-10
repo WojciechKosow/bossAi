@@ -121,6 +121,13 @@ public class GenerationContext {
     private boolean reuseAssets;
 
     /**
+     * TEST ONLY — Forces 100% asset reuse with zero new generation.
+     * Bypasses GPT matching, plan checks, and minimum thresholds.
+     * No fal.ai API calls are made. DO NOT use in production.
+     */
+    private boolean forceReuseForTesting;
+
+    /**
      * Assety (IMAGE) dopasowane tematycznie do nowego promptu przez AssetReuseService.
      * Mapowanie: imagePrompt → Asset z poprzednich generacji.
      * Jeśli scena ma match w tej mapie, ImageStep pomija generację i używa istniejącego URL.

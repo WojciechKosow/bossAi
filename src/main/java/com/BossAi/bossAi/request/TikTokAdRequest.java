@@ -35,4 +35,13 @@ public class TikTokAdRequest {
      * Domyślnie true — oszczędza kredyty. Dostępne dla planów > BASIC.
      */
     private boolean reuseAssets = true;
+
+    /**
+     * TEST ONLY — Forces 100% asset reuse with zero new generation.
+     * When true, bypasses GPT matching, plan checks, and minimum thresholds.
+     * Assigns existing user assets directly to scenes (round-robin).
+     * No fal.ai API calls are made — saves money during testing.
+     * DO NOT use in production.
+     */
+    private boolean forceReuseForTesting = false;
 }

@@ -21,4 +21,11 @@ public interface AssetRepository extends JpaRepository<Asset, UUID> {
     List<Asset> findByUserAndReusableTrueAndTypeAndPromptIsNotNull(User user, AssetType type);
 
     List<Asset> findByUserAndReusableTrueAndTypeInAndPromptIsNotNull(User user, List<AssetType> types);
+
+    /**
+     * TEST ONLY — Fetches ALL user assets of given type that have a prompt,
+     * regardless of reusable flag. Used by forceReuseForTesting mode
+     * to bypass the reusable=true filter.
+     */
+    List<Asset> findByUserAndTypeAndPromptIsNotNull(User user, AssetType type);
 }

@@ -487,9 +487,18 @@ public class GenerationServiceImpl implements GenerationService {
 
         StyleConfig styleConfig = styleService.getConfig(request.getStyle());
 
-        // Asset reuse dostępny tylko dla planów > BASIC (PRO, CREATOR)
-        boolean reuseEnabled = request.isReuseAssets()
-                && userPlan.getPlanType().ordinal() > PlanType.BASIC.ordinal();
+        // TEST ONLY: forceReuseForTesting bypasses plan check
+        boolean forceReuse = request.isForceReuseForTesting();
+
+        // Asset reuse dostępny tylko dla planów > BASIC (PRO, CREATOR), or forced for testing
+        boolean reuseEnabled = forceReuse
+                || (request.isReuseAssets()
+                    && userPlan.getPlanType().ordinal() > PlanType.BASIC.ordinal());
+
+        if (forceReuse) {
+            log.warn("[GenerationService] ⚠ TEST MODE: forceReuseForTesting=true — " +
+                    "no new assets will be generated, using existing assets only");
+        }
 
         return GenerationContext.builder()
                 .generationId(generation.getId())
@@ -502,6 +511,7 @@ public class GenerationServiceImpl implements GenerationService {
                 .userVoiceAsset(userVoiceAsset)
                 .userImageAssets(userImageAssets)
                 .reuseAssets(reuseEnabled)
+                .forceReuseForTesting(forceReuse)
                 .styleConfig(styleConfig)
                 .style(request.getStyle())
                 .build();
