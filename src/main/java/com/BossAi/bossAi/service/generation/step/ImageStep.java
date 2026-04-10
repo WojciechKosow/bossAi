@@ -25,6 +25,9 @@ import java.util.Map;
  *
  * Asset Reuse: jeśli AssetReuseStep dopasował istniejący asset IMAGE,
  * pomija generację i używa zapisanego URL z lokalnego storage.
+ *
+ * TEST MODE (forceReuseForTesting): NEVER generates new images.
+ * If reuse fails for any scene, throws an exception.
  */
 @Slf4j
 @Service
@@ -41,10 +44,17 @@ public class ImageStep implements GenerationStep {
         List<SceneAsset> scenes = context.getScenes();
         String modelId = modelSelector.imageModel(context.getPlanType());
         Map<String, Asset> reusedImages = context.getReusedImageAssets();
+        boolean forceReuse = context.isForceReuseForTesting();
 
-        log.info("[ImageStep] START — {} scen, model: {}, reuse: {} dopasowań, generationId: {}",
-                scenes.size(), modelId, reusedImages != null ? reusedImages.size() : 0,
+        log.info("[ImageStep] START — {} scen, model: {}, reuse: {} dopasowań, forceReuse: {}, generationId: {}",
+                scenes.size(), modelId,
+                reusedImages != null ? reusedImages.size() : 0,
+                forceReuse,
                 context.getGenerationId());
+
+        if (forceReuse) {
+            log.warn("[ImageStep] TEST MODE — no new images will be generated");
+        }
 
         int reusedCount = 0;
 
@@ -73,14 +83,31 @@ public class ImageStep implements GenerationStep {
                             i + 1, scenes.size(), reusedAsset.getId(), resolvedUrl);
                     continue;
                 }
-                log.warn("[ImageStep] Scena {}/{} — reuse failed (brak danych w storage), generuję nowy",
-                        i + 1, scenes.size());
+                log.warn("[ImageStep] Scena {}/{} — reuse failed (brak danych w storage), asset: {}",
+                        i + 1, scenes.size(), reusedAsset.getId());
+
+                // TEST MODE: if reuse was forced but URL resolution failed, error out
+                if (forceReuse) {
+                    throw new IllegalStateException(
+                            "[ImageStep] TEST MODE FAILED — scene " + (i + 1) +
+                            " reuse asset " + reusedAsset.getId() +
+                            " has no resolvable URL (storageKey: " + reusedAsset.getStorageKey() +
+                            ", originalFilename: " + reusedAsset.getOriginalFilename() + "). " +
+                            "Ensure assets have valid storage data before using forceReuseForTesting.");
+                }
+            } else if (forceReuse) {
+                // TEST MODE: no reused asset assigned at all for this scene
+                throw new IllegalStateException(
+                        "[ImageStep] TEST MODE FAILED — scene " + (i + 1) +
+                        " has no reused IMAGE asset assigned. " +
+                        "AssetReuseService should have assigned one in forceReuse mode. " +
+                        "Check that user has IMAGE assets with prompts in the database.");
             }
 
+            // Normal mode — generate new image via fal.ai
             log.info("[ImageStep] Scena {}/{} — prompt: {}",
                     i + 1, scenes.size(), scene.getImagePrompt());
 
-            // Generuj obraz przez fal.ai
             String imageUrl = falAiService.generateImage(scene.getImagePrompt(), modelId);
             scene.setImageUrl(imageUrl);
 

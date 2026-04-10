@@ -41,6 +41,11 @@ import java.util.stream.Collectors;
  *
  *   Fallback: jeśli mediaAssignments null/empty (stary format) → używamy
  *   starego zachowania (pierwsze + ostatnie = VIDEO, reszta = IMAGE).
+ *
+ * TEST MODE (forceReuseForTesting):
+ *   All scenes become IMAGE (FFmpeg loop from reused images) — zero fal.ai calls.
+ *   If reused VIDEO assets exist, they are used directly.
+ *   No new video generation via API.
  */
 @Slf4j
 @Service
@@ -63,9 +68,10 @@ public class VideoStep implements GenerationStep {
     public void execute(GenerationContext context) throws Exception {
         List<SceneAsset> scenes = context.getScenes();
         String modelId          = modelSelector.videoModel(context.getPlanType());
+        boolean forceReuse      = context.isForceReuseForTesting();
 
-        log.info("[VideoStep] START — {} scen, model: {}, generationId: {}",
-                scenes.size(), modelId, context.getGenerationId());
+        log.info("[VideoStep] START — {} scen, model: {}, forceReuse: {}, generationId: {}",
+                scenes.size(), modelId, forceReuse, context.getGenerationId());
 
         // Walidacja — każda scena musi mieć imageUrl z ImageStep
         for (SceneAsset scene : scenes) {
@@ -78,6 +84,89 @@ public class VideoStep implements GenerationStep {
         Path workDir = getWorkingDir(context);
         Files.createDirectories(workDir);
 
+        Map<String, Asset> reusedVideos = context.getReusedVideoAssets();
+
+        // =====================================================================
+        // TEST MODE: all scenes use reused video assets or FFmpeg loop (no API)
+        // =====================================================================
+        if (forceReuse) {
+            log.warn("[VideoStep] TEST MODE — no fal.ai video generation, using reused assets + FFmpeg only");
+            executeForceReuseMode(scenes, reusedVideos, workDir, context);
+            return;
+        }
+
+        // =====================================================================
+        // Normal mode: mixed media pipeline
+        // =====================================================================
+        executeNormalMode(scenes, modelId, reusedVideos, workDir, context);
+    }
+
+    /**
+     * TEST ONLY — Forces reuse of existing video assets or FFmpeg loop.
+     * Zero fal.ai API calls. Saves money during testing.
+     */
+    private void executeForceReuseMode(
+            List<SceneAsset> scenes,
+            Map<String, Asset> reusedVideos,
+            Path workDir,
+            GenerationContext context
+    ) throws Exception {
+        int reusedCount = 0;
+        int ffmpegCount = 0;
+
+        for (int i = 0; i < scenes.size(); i++) {
+            SceneAsset scene = scenes.get(i);
+
+            context.updateProgress(
+                    GenerationStepName.VIDEO,
+                    GenerationStepName.VIDEO.getProgressPercent(),
+                    String.format("TEST MODE: przetwarzam scenę %d/%d...", i + 1, scenes.size())
+            );
+
+            // Try reusing existing VIDEO asset first
+            Asset reusedAsset = reusedVideos != null
+                    ? reusedVideos.get(scene.getImagePrompt())
+                    : null;
+
+            if (reusedAsset != null && reusedAsset.getStorageKey() != null) {
+                try {
+                    byte[] existingBytes = storageService.load(reusedAsset.getStorageKey());
+                    String filename = String.format("scene_%02d_%s.mp4", scene.getIndex(), context.getGenerationId());
+                    Path videoPath = workDir.resolve(filename);
+                    Files.write(videoPath, existingBytes);
+                    scene.setVideoLocalPath(videoPath.toString());
+                    reusedCount++;
+                    log.warn("[VideoStep] TEST MODE — scene {} REUSED VIDEO asset {} ({} bytes)",
+                            scene.getIndex(), reusedAsset.getId(), existingBytes.length);
+                    continue;
+                } catch (Exception e) {
+                    log.warn("[VideoStep] TEST MODE — scene {} VIDEO reuse failed ({}), falling back to FFmpeg",
+                            scene.getIndex(), e.getMessage());
+                }
+            }
+
+            // Fallback: convert image to clip via FFmpeg (free, no API call)
+            log.warn("[VideoStep] TEST MODE — scene {} → FFmpeg Ken Burns (no fal.ai call)",
+                    scene.getIndex());
+            String clipPath = imageToClipStep.convertImageToClip(scene, workDir);
+            scene.setVideoLocalPath(clipPath);
+            ffmpegCount++;
+        }
+
+        log.warn("[VideoStep] TEST MODE DONE — {} reused VIDEO, {} FFmpeg clips, 0 fal.ai API calls",
+                reusedCount, ffmpegCount);
+    }
+
+    /**
+     * Normal mode — mixed media pipeline with fal.ai video generation.
+     */
+    private void executeNormalMode(
+            List<SceneAsset> scenes,
+            String modelId,
+            Map<String, Asset> reusedVideos,
+            Path workDir,
+            GenerationContext context
+    ) throws Exception {
         // Ustal które sceny są VIDEO (animowane) a które IMAGE (statyczne)
         Set<Integer> videoSceneIndices = resolveVideoSceneIndices(context);
 
@@ -87,8 +176,6 @@ public class VideoStep implements GenerationStep {
                         .map(SceneAsset::getIndex)
                         .filter(i -> !videoSceneIndices.contains(i))
                         .collect(Collectors.toList()));
-
-        Map<String, Asset> reusedVideos = context.getReusedVideoAssets();
 
         // Przetwarzaj każdą scenę
         int videoCount = 0;

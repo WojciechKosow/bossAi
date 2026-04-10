@@ -10,7 +10,6 @@ import com.BossAi.bossAi.service.generation.context.SceneAsset;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.BossAi.bossAi.config.properties.OpenAiProperties;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
@@ -29,9 +28,14 @@ import java.util.stream.Collectors;
  *   3. GPT zwraca mapowanie: sceneIndex → assetId (lub null jeśli brak dopasowania)
  *   4. Wynik trafia do GenerationContext.reusedImageAssets / reusedVideoAssets
  *
- * Minimalne wymagania do reuse:
- *   - User musi mieć min. 3 reusable IMAGE assety (inaczej za mało materiału)
+ * Minimalne wymagania do reuse (normal mode):
+ *   - User musi mieć min. 1 reusable IMAGE asset (changed from 3)
  *   - Plan > BASIC (STARTER i FREE nie mają dostępu)
+ *
+ * TEST MODE (forceReuseForTesting):
+ *   - Bypasses all thresholds and GPT matching
+ *   - Directly assigns available assets to scenes (round-robin)
+ *   - No fal.ai API calls are made
  */
 @Slf4j
 @Service
@@ -43,7 +47,8 @@ public class AssetReuseService {
     private final OpenAiProperties properties;
     private final ObjectMapper objectMapper;
 
-    private static final int MIN_REUSABLE_IMAGES = 3;
+    /** Lowered from 3 → 1: even a single reusable image is worth reusing */
+    private static final int MIN_REUSABLE_IMAGES = 1;
     private static final int MIN_REUSABLE_VIDEOS = 1;
 
     public AssetReuseService(
@@ -68,6 +73,90 @@ public class AssetReuseService {
         UUID userId = context.getUserId();
         User user = userRepository.findById(userId).orElseThrow();
 
+        boolean forceReuse = context.isForceReuseForTesting();
+
+        // =====================================================================
+        // TEST ONLY: Force reuse mode — bypass GPT, assign directly
+        // =====================================================================
+        if (forceReuse) {
+            log.warn("[AssetReuseService] TEST MODE: forceReuseForTesting=true — " +
+                    "bypassing GPT matching, assigning assets directly");
+            forceAssignAssets(user, context);
+            return;
+        }
+
+        // =====================================================================
+        // Normal mode: GPT-based thematic matching
+        // =====================================================================
+        normalMatchAssets(user, context);
+    }
+
+    /**
+     * TEST ONLY — Forces 100% asset reuse by directly assigning existing assets
+     * to scenes in round-robin fashion. No GPT call, no thresholds, no API costs.
+     *
+     * Bypasses reusable=true filter — uses ALL user assets with prompts.
+     * If user has zero assets, throws an exception (test mode expects assets to exist).
+     */
+    private void forceAssignAssets(User user, GenerationContext context) {
+        // Fetch ALL assets (bypass reusable filter — test mode)
+        List<Asset> allImages = assetRepository
+                .findByUserAndTypeAndPromptIsNotNull(user, AssetType.IMAGE);
+        List<Asset> allVideos = assetRepository
+                .findByUserAndTypeAndPromptIsNotNull(user, AssetType.VIDEO);
+
+        log.warn("[AssetReuseService] TEST MODE — found {} IMAGE, {} VIDEO assets for user {}",
+                allImages.size(), allVideos.size(), context.getUserId());
+
+        if (allImages.isEmpty()) {
+            throw new IllegalStateException(
+                    "[AssetReuseService] TEST MODE FAILED — user has 0 IMAGE assets with prompts. " +
+                    "Cannot force reuse. Run at least one normal generation first to create assets.");
+        }
+
+        List<SceneAsset> scenes = context.getScenes();
+        if (scenes == null || scenes.isEmpty()) {
+            throw new IllegalStateException(
+                    "[AssetReuseService] TEST MODE FAILED — no scenes in context. " +
+                    "ScriptStep must run before AssetReuseStep.");
+        }
+
+        // Assign IMAGE assets round-robin to all scenes
+        Map<String, Asset> imageMatches = new HashMap<>();
+        for (int i = 0; i < scenes.size(); i++) {
+            SceneAsset scene = scenes.get(i);
+            Asset imageAsset = allImages.get(i % allImages.size());
+            imageMatches.put(scene.getImagePrompt(), imageAsset);
+            log.warn("[AssetReuseService] TEST MODE — scene {} → IMAGE asset {} (prompt: {})",
+                    scene.getIndex(), imageAsset.getId(),
+                    truncate(imageAsset.getPrompt(), 60));
+        }
+        context.setReusedImageAssets(imageMatches);
+
+        // Assign VIDEO assets round-robin (if any exist)
+        if (!allVideos.isEmpty()) {
+            Map<String, Asset> videoMatches = new HashMap<>();
+            for (int i = 0; i < scenes.size(); i++) {
+                SceneAsset scene = scenes.get(i);
+                Asset videoAsset = allVideos.get(i % allVideos.size());
+                videoMatches.put(scene.getImagePrompt(), videoAsset);
+                log.warn("[AssetReuseService] TEST MODE — scene {} → VIDEO asset {} (prompt: {})",
+                        scene.getIndex(), videoAsset.getId(),
+                        truncate(videoAsset.getPrompt(), 60));
+            }
+            context.setReusedVideoAssets(videoMatches);
+        }
+
+        log.warn("[AssetReuseService] TEST MODE DONE — {} IMAGE matches, {} VIDEO matches " +
+                "(zero API calls will be made)",
+                imageMatches.size(),
+                allVideos.isEmpty() ? 0 : scenes.size());
+    }
+
+    /**
+     * Normal mode — GPT-based thematic matching with lowered thresholds.
+     */
+    private void normalMatchAssets(User user, GenerationContext context) {
         // Pobierz reusable assety z bazy
         List<Asset> reusableImages = assetRepository
                 .findByUserAndReusableTrueAndTypeAndPromptIsNotNull(user, AssetType.IMAGE);
@@ -75,10 +164,11 @@ public class AssetReuseService {
                 .findByUserAndReusableTrueAndTypeAndPromptIsNotNull(user, AssetType.VIDEO);
 
         log.info("[AssetReuseService] User {} ma {} reusable IMAGE, {} reusable VIDEO",
-                userId, reusableImages.size(), reusableVideos.size());
+                context.getUserId(), reusableImages.size(), reusableVideos.size());
 
         if (reusableImages.size() < MIN_REUSABLE_IMAGES) {
-            log.info("[AssetReuseService] Za mało reusable IMAGE ({} < {}) — pomijam reuse",
+            log.info("[AssetReuseService] Za mało reusable IMAGE ({} < {}) — pomijam reuse. " +
+                    "Tip: assets get reusable=true only for PRO/CREATOR plans.",
                     reusableImages.size(), MIN_REUSABLE_IMAGES);
             return;
         }
@@ -149,11 +239,14 @@ public class AssetReuseService {
             existing visual assets and new scene descriptions.
 
             RULES:
-            - Match ONLY if the asset is thematically VERY SIMILAR to the scene (>80% relevance)
-            - Consider: subject matter, visual style, mood, objects, setting
-            - Do NOT force matches — it's better to return null than a poor match
+            - Match if the asset is thematically RELATED to the scene (>50% relevance)
+            - Consider: subject matter, visual style, mood, objects, setting, product type
+            - Be GENEROUS with matching — reusing an existing asset saves money
+            - If the same product/brand/topic appears in both, that's a match
             - Each asset can be matched to at most ONE scene
             - Prefer matching assets to scenes where the visual content overlaps most
+            - If there are more scenes than assets, match as many as possible
+            - It's OK to match even if style/mood differs slightly — content match is more important
 
             Respond ONLY with valid JSON, no markdown, no explanation.
 
@@ -179,6 +272,7 @@ public class AssetReuseService {
             %s
 
             Match each scene to the best available %s asset, or null if no good match exists.
+            Be generous — reusing saves API costs. Match if the topic/product is the same.
             """, userPrompt, assetType, assetsDescription, scenesDescription, assetType);
 
         Map<String, Object> requestBody = Map.of(
@@ -252,7 +346,7 @@ public class AssetReuseService {
                             usedAssetIds.add(assetId);
                             log.info("[AssetReuseService] Match: scena {} → asset {} (prompt: {})",
                                     sceneIndex, assetId,
-                                    asset.getPrompt().substring(0, Math.min(50, asset.getPrompt().length())));
+                                    truncate(asset.getPrompt(), 50));
                         });
             }
 
@@ -266,5 +360,10 @@ public class AssetReuseService {
         }
 
         return result;
+    }
+
+    private static String truncate(String s, int maxLen) {
+        if (s == null) return "null";
+        return s.length() <= maxLen ? s : s.substring(0, maxLen) + "...";
     }
 }
