@@ -5,6 +5,9 @@ import com.BossAi.bossAi.entity.PlanType;
 import com.BossAi.bossAi.entity.VideoStyle;
 import com.BossAi.bossAi.service.SubtitleService;
 import com.BossAi.bossAi.service.director.DirectorPlan;
+import com.BossAi.bossAi.service.director.JustifiedCut;
+import com.BossAi.bossAi.service.director.NarrationAnalysis;
+import com.BossAi.bossAi.service.director.SpeechTimingAnalysis;
 import com.BossAi.bossAi.service.generation.context.SceneAsset;
 import com.BossAi.bossAi.service.generation.context.ScriptResult;
 import com.BossAi.bossAi.service.music.MusicAnalysisResult;
@@ -250,6 +253,33 @@ public class GenerationContext {
     private VideoStyle style;
 
     private DirectorPlan directorPlan;
+
+    // -------------------------------------------------------------------------
+    // WYNIKI NARRATION ANALYSIS (warstwa A — analiza semantyczna narracji)
+    // -------------------------------------------------------------------------
+
+    /**
+     * Analiza semantyczna narracji — segmenty z topic/energy/importance + EditingIntent.
+     * Generowana przez NarrationAnalyzer (GPT) przed generowaniem EditDna i EDL.
+     * Null jeśli analiza nie została wykonana lub się nie powiodła.
+     */
+    private NarrationAnalysis narrationAnalysis;
+
+    /**
+     * Analiza timingów mowy z WhisperX — pauzy, granice zdań, tempo.
+     * Generowana przez SpeechAnalyzer po VoiceStep (potrzebuje wordTimings).
+     * Null jeśli brak word timings lub analiza nie została wykonana.
+     */
+    private SpeechTimingAnalysis speechTimingAnalysis;
+
+    /**
+     * Lista uzasadnionych cięć wygenerowana przez CutEngine.
+     * Każde cięcie ma powód (dlaczego ciąć teraz?) i klasyfikację (HARD/SOFT/MICRO).
+     * Używana przez EdlGeneratorService do budowy segmentów EDL.
+     * Null jeśli CutEngine nie został uruchomiony.
+     */
+    @Builder.Default
+    private List<JustifiedCut> justifiedCuts = new ArrayList<>();
 
     // -------------------------------------------------------------------------
     // METODY POMOCNICZE

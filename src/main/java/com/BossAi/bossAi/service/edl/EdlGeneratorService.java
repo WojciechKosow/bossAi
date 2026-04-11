@@ -6,6 +6,8 @@ import com.BossAi.bossAi.entity.ProjectAsset;
 import com.BossAi.bossAi.service.OpenAiService;
 import com.BossAi.bossAi.service.audio.AudioAnalysisResponse;
 import com.BossAi.bossAi.service.director.EffectType;
+import com.BossAi.bossAi.service.director.JustifiedCut;
+import com.BossAi.bossAi.service.director.NarrationAnalysis;
 import com.BossAi.bossAi.service.generation.GenerationContext;
 import com.BossAi.bossAi.service.generation.context.SceneAsset;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -113,12 +115,15 @@ public class EdlGeneratorService {
 
     /**
      * Deterministic fallback — buduje EDL bez GPT, na podstawie scen i beat map.
+     * Jeśli dostępne są justified cuts z CutEngine — używa ich jako punktów cięcia.
      */
     public EdlDto buildDeterministicEdl(GenerationContext context,
                                         AudioAnalysisResponse audioAnalysis,
                                         List<ProjectAsset> projectAssets) {
 
-        log.info("[EdlGenerator] Building deterministic EDL — scenes: {}", context.sceneCount());
+        log.info("[EdlGenerator] Building deterministic EDL — scenes: {}, justifiedCuts: {}",
+                context.sceneCount(),
+                context.getJustifiedCuts() != null ? context.getJustifiedCuts().size() : 0);
 
         // Build asset lookup by type
         Map<Integer, ProjectAsset> assetBySceneIndex = new HashMap<>();
@@ -135,41 +140,49 @@ public class EdlGeneratorService {
         }
 
         List<EdlSegment> segments = new ArrayList<>();
-        int timelineMs = 0;
 
-        for (int i = 0; i < context.getScenes().size(); i++) {
-            SceneAsset scene = context.getScenes().get(i);
-            ProjectAsset asset = assetBySceneIndex.get(i);
-            if (asset == null) continue;
+        // === NOWA ŚCIEŻKA: buduj segmenty z justified cuts ===
+        List<JustifiedCut> justifiedCuts = context.getJustifiedCuts();
+        if (justifiedCuts != null && !justifiedCuts.isEmpty()) {
+            segments = buildSegmentsFromJustifiedCuts(justifiedCuts, context, audioAnalysis,
+                    assetBySceneIndex, projectAssets);
+        } else {
+            // === STARA ŚCIEŻKA: buduj segmenty ze scen (1 scena = 1 segment) ===
+            int timelineMs = 0;
+            for (int i = 0; i < context.getScenes().size(); i++) {
+                SceneAsset scene = context.getScenes().get(i);
+                ProjectAsset asset = assetBySceneIndex.get(i);
+                if (asset == null) continue;
 
-            int durationMs = scene.getDurationMs();
+                int durationMs = scene.getDurationMs();
 
-            // Music-aware effect z DirectorPlan (po EffectAssigner)
-            List<EdlEffect> effects = buildEffectsForScene(context, audioAnalysis, i);
+                // Music-aware effect z DirectorPlan (po EffectAssigner)
+                List<EdlEffect> effects = buildEffectsForScene(context, audioAnalysis, i);
 
-            // Music-aware transition
-            EdlTransition transition = null;
-            if (i < context.getScenes().size() - 1) {
-                String transType = resolveTransitionForScene(context, i);
-                int transDur = resolveTransitionDuration(transType);
-                transition = EdlTransition.builder()
-                        .type(transType)
-                        .durationMs(transDur)
-                        .build();
+                // Music-aware transition
+                EdlTransition transition = null;
+                if (i < context.getScenes().size() - 1) {
+                    String transType = resolveTransitionForScene(context, i);
+                    int transDur = resolveTransitionDuration(transType);
+                    transition = EdlTransition.builder()
+                            .type(transType)
+                            .durationMs(transDur)
+                            .build();
+                }
+
+                segments.add(EdlSegment.builder()
+                        .id(UUID.randomUUID().toString())
+                        .assetId(asset.getId().toString())
+                        .assetUrl(buildAssetUrl(remotionProperties.getCallbackBaseUrl(), asset.getId().toString(), asset.getStorageUrl()))
+                        .assetType(asset.getType().name())
+                        .startMs(timelineMs)
+                        .endMs(timelineMs + durationMs)
+                        .effects(effects)
+                        .transition(transition)
+                        .build());
+
+                timelineMs += durationMs;
             }
-
-            segments.add(EdlSegment.builder()
-                    .id(UUID.randomUUID().toString())
-                    .assetId(asset.getId().toString())
-                    .assetUrl(buildAssetUrl(remotionProperties.getCallbackBaseUrl(), asset.getId().toString(), asset.getStorageUrl()))
-                    .assetType(asset.getType().name())
-                    .startMs(timelineMs)
-                    .endMs(timelineMs + durationMs)
-                    .effects(effects)
-                    .transition(transition)
-                    .build());
-
-            timelineMs += durationMs;
         }
 
         // Audio tracks
@@ -265,6 +278,119 @@ public class EdlGeneratorService {
             if (beat > timeMs + minDist) break;
         }
         return closest;
+    }
+
+    // =========================================================================
+    // JUSTIFIED CUTS → SEGMENTS — buduje segmenty z uzasadnionych cięć
+    // =========================================================================
+
+    /**
+     * Buduje segmenty EDL na podstawie justified cuts z CutEngine.
+     *
+     * Każdy JustifiedCut definiuje punkt cięcia z uzasadnieniem.
+     * Ta metoda mapuje cięcia na assety (sceny) i dodaje efekty/przejścia
+     * bazując na klasyfikacji cięcia (HARD/SOFT/MICRO).
+     */
+    private List<EdlSegment> buildSegmentsFromJustifiedCuts(
+            List<JustifiedCut> cuts,
+            GenerationContext context,
+            AudioAnalysisResponse audioAnalysis,
+            Map<Integer, ProjectAsset> assetBySceneIndex,
+            List<ProjectAsset> projectAssets) {
+
+        List<EdlSegment> segments = new ArrayList<>();
+        String callbackBase = remotionProperties.getCallbackBaseUrl();
+
+        // Oblicz granice scen (kumulatywne duracje)
+        List<int[]> sceneBounds = new ArrayList<>();
+        int cumMs = 0;
+        for (int i = 0; i < context.getScenes().size(); i++) {
+            int dur = context.getScenes().get(i).getDurationMs();
+            sceneBounds.add(new int[]{cumMs, cumMs + dur, i});
+            cumMs += dur;
+        }
+
+        for (int i = 0; i < cuts.size(); i++) {
+            JustifiedCut cut = cuts.get(i);
+
+            // Znajdź scenę, do której należy ten segment (na podstawie środka segmentu)
+            int midpoint = (cut.getStartMs() + cut.getEndMs()) / 2;
+            int sceneIndex = findSceneAtMs(midpoint, sceneBounds);
+            ProjectAsset asset = assetBySceneIndex.get(sceneIndex);
+
+            if (asset == null) {
+                // Fallback na ostatni dostępny asset
+                for (int s = assetBySceneIndex.size() - 1; s >= 0; s--) {
+                    if (assetBySceneIndex.containsKey(s)) {
+                        asset = assetBySceneIndex.get(s);
+                        break;
+                    }
+                }
+            }
+            if (asset == null) continue;
+
+            // Efekt z sugestii CutEngine lub z DirectorPlan
+            List<EdlEffect> effects = new ArrayList<>();
+            String effectType = cut.getSuggestedEffect();
+            if (effectType != null && effectRegistry.isValidEffect(effectType)) {
+                double intensity = resolveIntensityFromCut(cut);
+                effects.add(effectRegistry.createEffect(effectType, intensity, null));
+            } else {
+                effects = buildEffectsForScene(context, audioAnalysis, sceneIndex);
+            }
+
+            // Przejście z klasyfikacji cięcia
+            EdlTransition transition = null;
+            if (i < cuts.size() - 1) {
+                String transType = cut.getSuggestedTransition() != null
+                        ? cut.getSuggestedTransition() : resolveTransitionFromCut(cut);
+                int transDur = resolveTransitionDuration(transType);
+                transition = EdlTransition.builder()
+                        .type(transType)
+                        .durationMs(transDur)
+                        .build();
+            }
+
+            segments.add(EdlSegment.builder()
+                    .id(UUID.randomUUID().toString())
+                    .assetId(asset.getId().toString())
+                    .assetUrl(buildAssetUrl(callbackBase, asset.getId().toString(), asset.getStorageUrl()))
+                    .assetType(asset.getType().name())
+                    .startMs(cut.getStartMs())
+                    .endMs(cut.getEndMs())
+                    .effects(effects)
+                    .transition(transition)
+                    .build());
+        }
+
+        log.info("[EdlGenerator] Built {} segments from {} justified cuts", segments.size(), cuts.size());
+        return segments;
+    }
+
+    private int findSceneAtMs(int timeMs, List<int[]> sceneBounds) {
+        for (int[] bound : sceneBounds) {
+            if (timeMs >= bound[0] && timeMs < bound[1]) {
+                return bound[2];
+            }
+        }
+        // Fallback na ostatnią scenę
+        return sceneBounds.isEmpty() ? 0 : sceneBounds.get(sceneBounds.size() - 1)[2];
+    }
+
+    private double resolveIntensityFromCut(JustifiedCut cut) {
+        return switch (cut.getClassification()) {
+            case HARD -> 0.9;
+            case SOFT -> 0.5;
+            case MICRO -> 1.0;
+        };
+    }
+
+    private String resolveTransitionFromCut(JustifiedCut cut) {
+        return switch (cut.getClassification()) {
+            case HARD -> EffectRegistry.TRANSITION_CUT;
+            case SOFT -> EffectRegistry.TRANSITION_FADE;
+            case MICRO -> EffectRegistry.TRANSITION_CUT;
+        };
     }
 
     // =========================================================================
@@ -974,6 +1100,56 @@ public class EdlGeneratorService {
             sb.append("\n");
         }
 
+        // === JUSTIFIED CUTS — the core intelligence ===
+        List<JustifiedCut> justifiedCuts = context.getJustifiedCuts();
+        if (justifiedCuts != null && !justifiedCuts.isEmpty()) {
+            sb.append("=== JUSTIFIED CUT PLAN (from CutEngine — FOLLOW THIS) ===\n");
+            sb.append("Each cut has a REASON. Your segments MUST align with these cut points.\n");
+            sb.append("This is not a suggestion — this is the edited timeline from the cut engine.\n\n");
+
+            for (int i = 0; i < justifiedCuts.size(); i++) {
+                JustifiedCut cut = justifiedCuts.get(i);
+                sb.append(String.format("  Segment %d: %dms–%dms (%dms) | %s | reason: %s | confidence: %.2f",
+                        i, cut.getStartMs(), cut.getEndMs(), cut.getEndMs() - cut.getStartMs(),
+                        cut.getClassification(), cut.getPrimaryReason(), cut.getConfidence()));
+                if (cut.getSuggestedEffect() != null) {
+                    sb.append(" | effect: ").append(cut.getSuggestedEffect());
+                }
+                if (cut.getSuggestedTransition() != null) {
+                    sb.append(" | transition: ").append(cut.getSuggestedTransition());
+                }
+                if (cut.getEditingPhase() != null) {
+                    sb.append(" | phase: ").append(cut.getEditingPhase());
+                }
+                sb.append("\n");
+            }
+            sb.append("\n");
+            sb.append("""
+                    IMPORTANT — CUT PLAN RULES:
+                    - Your EDL segments MUST start/end at the cut points above (±50ms tolerance)
+                    - Use the suggested effects unless you have a strong creative reason to override
+                    - HARD cuts → use "cut" transition, strong effects (fast_zoom, shake)
+                    - SOFT cuts → use "fade" or "dissolve" transition, gentle effects (drift, pan_*)
+                    - MICRO cuts → use "cut" transition, rapid effects (fast_zoom, bounce)
+                    - Match each segment to the appropriate asset based on scene/narration alignment
+
+                    """);
+        }
+
+        // Narration analysis — segment context
+        NarrationAnalysis narrationAnalysis = context.getNarrationAnalysis();
+        if (narrationAnalysis != null && narrationAnalysis.getSegments() != null) {
+            sb.append("=== NARRATION STRUCTURE (semantic segments) ===\n");
+            for (var seg : narrationAnalysis.getSegments()) {
+                sb.append(String.format("  [%d] %s (importance=%.1f, energy=%.1f, topic=%s): \"%s\"\n",
+                        seg.getIndex(), seg.getType(), seg.getImportance(), seg.getEnergy(),
+                        seg.getTopic(),
+                        seg.getText() != null && seg.getText().length() > 50
+                                ? seg.getText().substring(0, 50) + "..." : seg.getText()));
+            }
+            sb.append("\n");
+        }
+
         // Editing rules — TikTok-grade quality
         sb.append("""
                 === EDITING RULES (MANDATORY) ===
@@ -982,7 +1158,14 @@ public class EdlGeneratorService {
                 - Segments must cover the full timeline continuously (NO gaps, NO overlaps)
                 - Each segment MUST use an asset_id from the SCENES list above
                 - total_duration_ms MUST equal the sum of all scene durations
-                - ALIGN segment cut points to beat positions from the music analysis — this is critical for rhythm
+                - If a JUSTIFIED CUT PLAN is provided above: ALIGN segments to those cut points
+                - If no cut plan: ALIGN segment cut points to beat positions from music analysis
+
+                FILM GRAMMAR (CRITICAL):
+                - NEVER cut in the middle of a word
+                - NEVER cut in the middle of a thought/sentence
+                - CUT on: sentence boundaries, keyword emphasis, topic changes, dramatic pauses
+                - Each cut must have a PURPOSE — not just timing-based
 
                 EFFECTS:
                 - VARY effects — NEVER use the same effect on 3+ consecutive segments
@@ -992,10 +1175,10 @@ public class EdlGeneratorService {
                 - If Edit DNA is provided: STRICTLY follow effect_palette (primary/secondary/forbidden) and cut_rhythm mode
 
                 TRANSITIONS:
-                - Drops/high-energy → cut or wipe_left/wipe_right (sharp, punchy)
-                - Builds/crescendo → dissolve or fade (smooth progression)
-                - Calm/outro → fade_black (cinematic feel)
-                - Default: cut (clean, professional)
+                - HARD cuts → "cut" (instant, punchy)
+                - SOFT cuts → "fade" or "dissolve" (smooth, flowing)
+                - Drops/high-energy → "cut" or "wipe_left"/"wipe_right"
+                - Calm/outro → "fade_black" (cinematic)
 
                 HOOK (first 2 seconds):
                 - Must grab attention immediately
