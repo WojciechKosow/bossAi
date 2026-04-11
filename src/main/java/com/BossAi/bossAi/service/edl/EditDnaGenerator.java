@@ -2,6 +2,7 @@ package com.BossAi.bossAi.service.edl;
 
 import com.BossAi.bossAi.service.OpenAiService;
 import com.BossAi.bossAi.service.audio.AudioAnalysisResponse;
+import com.BossAi.bossAi.service.director.NarrationAnalysis;
 import com.BossAi.bossAi.service.generation.GenerationContext;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -28,24 +29,52 @@ public class EditDnaGenerator {
     private final ObjectMapper objectMapper;
 
     /**
-     * Generuje EditDna na podstawie analizy audio + kontekstu użytkownika.
-     * Jeśli wywołanie GPT się nie powiedzie — zwraca sensowny fallback.
+     * Generuje EditDna na podstawie analizy audio + kontekstu użytkownika (backwards compat).
      */
     public EditDna generate(GenerationContext context, AudioAnalysisResponse audioAnalysis) {
+        return generate(context, audioAnalysis, null);
+    }
+
+    /**
+     * Generuje EditDna na podstawie analizy audio + narracji + kontekstu użytkownika.
+     *
+     * NarrationAnalysis daje GPT głębsze zrozumienie treści:
+     *   - jakie tematy są poruszane
+     *   - gdzie są najważniejsze momenty
+     *   - jaki jest rozkład energii w narracji
+     *   - jaki editing intent pasuje do treści
+     *
+     * To pozwala GPT generować EditDna które jest UZASADNIONE treścią,
+     * a nie losowe/schematyczne.
+     */
+    public EditDna generate(GenerationContext context, AudioAnalysisResponse audioAnalysis,
+                            NarrationAnalysis narrationAnalysis) {
         long seed = ThreadLocalRandom.current().nextLong(100_000, 999_999);
-        log.info("[EditDnaGenerator] Generating edit DNA — seed: {}, style: {}", seed, context.getStyle());
+        log.info("[EditDnaGenerator] Generating edit DNA — seed: {}, style: {}, hasNarrationAnalysis: {}",
+                seed, context.getStyle(), narrationAnalysis != null);
 
         try {
-            String prompt = buildPrompt(context, audioAnalysis, seed);
+            String prompt = buildPrompt(context, audioAnalysis, seed, narrationAnalysis);
             String rawJson = openAiService.generateDirectorPlan(prompt);
             EditDna dna = parse(rawJson);
             dna.setSeed(seed);
 
-            log.info("[EditDnaGenerator] Edit DNA generated — personality: {}, rhythm: {}, primary effect: {}, color: {}",
+            // Jeśli NarrationAnalysis dostarczył EditingIntent, a GPT nie wygenerował — wstrzyknij
+            if (dna.getEditingIntent() == null && narrationAnalysis != null
+                    && narrationAnalysis.getEditingIntent() != null) {
+                var naIntent = narrationAnalysis.getEditingIntent();
+                dna.setEditingIntent(EditDna.EditingIntent.builder()
+                        .intent(naIntent.getIntent())
+                        .pattern(naIntent.getPattern())
+                        .reasoning(naIntent.getReasoning())
+                        .build());
+            }
+
+            log.info("[EditDnaGenerator] Edit DNA generated — personality: {}, rhythm: {}, intent: {}, pattern: {}",
                     dna.getEditPersonality(),
                     dna.getCutRhythm() != null ? dna.getCutRhythm().getMode() : "null",
-                    dna.getEffectPalette() != null ? dna.getEffectPalette().getPrimary() : "null",
-                    dna.getColorGrade() != null ? dna.getColorGrade().getPreset() : "null");
+                    dna.getEditingIntent() != null ? dna.getEditingIntent().getIntent() : "null",
+                    dna.getEditingIntent() != null ? dna.getEditingIntent().getPattern() : "null");
 
             return dna;
 
@@ -77,6 +106,13 @@ public class EditDnaGenerator {
     private String buildPrompt(GenerationContext context,
                                AudioAnalysisResponse audioAnalysis,
                                long seed) {
+        return buildPrompt(context, audioAnalysis, seed, null);
+    }
+
+    private String buildPrompt(GenerationContext context,
+                               AudioAnalysisResponse audioAnalysis,
+                               long seed,
+                               NarrationAnalysis narrationAnalysis) {
 
         StringBuilder sb = new StringBuilder();
 
@@ -87,11 +123,17 @@ public class EditDnaGenerator {
                 You are NOT editing the video — you are creating the CREATIVE BRIEF that another
                 editor (AI) will follow. Your decisions make each video feel different and human.
 
+                CRITICAL PHILOSOPHY — "DLACZEGO ciąć?" not "KIEDY ciąć?"
+                Every cut must have a REASON. You're defining the intent behind cuts, not a schedule.
+                Think about WHY each cut happens: topic change? emphasis? attention reset? rhythm? emotion?
+
                 THINK ABOUT:
                 - What makes this music/mood/topic special?
                 - What editing rhythm would SURPRISE viewers for this genre?
                 - What effects would a top TikTok editor choose (not the obvious ones)?
                 - How should the first 2 seconds HOOK the viewer?
+                - What EDITING INTENT fits this specific content? (tension? revelation? flow?)
+                - What PATTERN should the cuts follow? (not schematic — intentional)
 
                 Return ONLY valid JSON matching this schema:
                 {
@@ -109,6 +151,14 @@ public class EditDnaGenerator {
                     "drop_signature": "<effect_name: special effect for drops/peaks>",
                     "forbidden": ["<effect1>", "<effect2>"],
                     "base_intensity": <0.3-1.0>
+                  },
+                  "editing_intent": {
+                    "intent": "<build_tension | rhythmic_pulse | contrast_shock | flowing_narrative | staccato_energy | emotional_wave | reveal_punctuate>",
+                    "pattern": "<slow_to_fast | fast_to_slow | wave | constant_high | on_beat_consistent | long_hold_then_burst | breathing_with_pauses>",
+                    "arc": [
+                      { "phase": "<opening|buildup|middle|climax|resolution|outro>", "density": "<very_low|low|medium|high|very_high>", "mood": "<curious|building|intense|euphoric|reflective|urgent>", "start_pct": <0.0-1.0> }
+                    ],
+                    "reasoning": "<WHY this intent/pattern fits this content + music>"
                   },
                   "color_grade": {
                     "preset": "<cold_matte | warm_golden | high_contrast | desaturated | vibrant_pop | moody_dark | clean_bright>",
@@ -165,14 +215,37 @@ public class EditDnaGenerator {
             sb.append("\n");
         }
 
+        // Narration analysis — semantic context
+        if (narrationAnalysis != null && narrationAnalysis.getSegments() != null) {
+            sb.append("=== NARRATION ANALYSIS (semantic structure) ===\n");
+            for (var seg : narrationAnalysis.getSegments()) {
+                sb.append(String.format("  [%d] type=%s, importance=%.1f, energy=%.1f, topic=%s: \"%s\"\n",
+                        seg.getIndex(), seg.getType(), seg.getImportance(), seg.getEnergy(),
+                        seg.getTopic(),
+                        seg.getText() != null && seg.getText().length() > 60
+                                ? seg.getText().substring(0, 60) + "..." : seg.getText()));
+            }
+
+            if (narrationAnalysis.getEditingIntent() != null) {
+                var naIntent = narrationAnalysis.getEditingIntent();
+                sb.append("  Suggested intent: ").append(naIntent.getIntent())
+                        .append(", pattern: ").append(naIntent.getPattern()).append("\n");
+                sb.append("  (You may follow or DELIBERATELY CONTRAST this suggestion — surprise is key)\n");
+            }
+            sb.append("\n");
+        }
+
         sb.append("""
                 CONSTRAINTS:
                 - effect_palette.forbidden MUST have exactly 3-4 effects (to ensure variety between projects)
                 - drop_signature MUST be different from primary and secondary
                 - cut_rhythm.mode MUST match the music — don't use on_beat_strict for calm ambient music
                 - hook_strategy must be specific and actionable (not generic "grab attention")
+                - editing_intent.arc MUST have 3-5 phases covering the full video (start_pct from 0.0 to near 1.0)
+                - editing_intent.reasoning MUST explain WHY this intent fits THIS specific content
                 - Be CREATIVE — avoid the obvious. If the music is aggressive, maybe try a CONTRAST (slow elegant cuts)
                   instead of the expected fast cuts. Surprise is what makes TikTok content viral.
+                - EACH generation must feel UNIQUE — no two videos should have the same editing personality
 
                 Return ONLY the JSON — no markdown, no explanations outside the JSON.
                 """);

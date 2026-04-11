@@ -6,7 +6,9 @@ import com.BossAi.bossAi.entity.*;
 import com.BossAi.bossAi.service.*;
 import com.BossAi.bossAi.service.audio.AudioAnalysisClient;
 import com.BossAi.bossAi.service.audio.AudioAnalysisResponse;
+import com.BossAi.bossAi.service.director.*;
 import com.BossAi.bossAi.service.generation.GenerationContext;
+import com.BossAi.bossAi.service.generation.context.SceneAsset;
 import com.BossAi.bossAi.service.render.RemotionRenderClient;
 import com.BossAi.bossAi.service.render.RemotionRenderRequest;
 import com.BossAi.bossAi.service.render.RemotionRenderResponse;
@@ -51,6 +53,9 @@ public class VideoProductionOrchestrator {
     private final ProjectAssetService projectAssetService;
     private final RenderJobService renderJobService;
     private final EditDnaGenerator editDnaGenerator;
+    private final NarrationAnalyzer narrationAnalyzer;
+    private final SpeechAnalyzer speechAnalyzer;
+    private final CutEngine cutEngine;
     private final ObjectMapper objectMapper;
 
     /**
@@ -73,13 +78,26 @@ public class VideoProductionOrchestrator {
             // 2. Pobierz assety projektu z bazy
             List<ProjectAsset> projectAssets = projectAssetService.getProjectAssetEntities(projectId);
 
-            // 3. Generuj EditDna (LLM Director — osobowość montażu)
-            EditDna editDna = editDnaGenerator.generate(context, audioAnalysis);
+            // 3. WARSTWA A: Analiza narracji (GPT — semantyczne segmenty + editing intent)
+            NarrationAnalysis narrationAnalysis = analyzeNarration(context, audioAnalysis);
+            context.setNarrationAnalysis(narrationAnalysis);
 
-            // 4. Generuj EDL z edit_dna
+            // 4. WARSTWA B: Analiza timingów mowy (WhisperX — pauzy, zdania, tempo)
+            SpeechTimingAnalysis speechAnalysis = analyzeSpeechTiming(context);
+            context.setSpeechTimingAnalysis(speechAnalysis);
+
+            // 5. Generuj EditDna z narration analysis (LLM Director — osobowość montażu)
+            EditDna editDna = editDnaGenerator.generate(context, audioAnalysis, narrationAnalysis);
+
+            // 6. WARSTWA C: CutEngine — "mózg montażysty" (uzasadnione cięcia)
+            List<JustifiedCut> justifiedCuts = generateJustifiedCuts(
+                    context, narrationAnalysis, speechAnalysis, audioAnalysis, editDna);
+            context.setJustifiedCuts(justifiedCuts);
+
+            // 7. Generuj EDL z edit_dna + justified cuts
             EdlDto edl = edlGeneratorService.generateEdl(context, audioAnalysis, projectAssets, editDna);
 
-            // 5. Waliduj
+            // 8. Waliduj
             EdlValidator.ValidationResult validation = edlValidator.validate(edl);
             if (!validation.valid()) {
                 log.error("[Orchestrator] EDL validation failed: {}", validation.errors());
@@ -87,11 +105,11 @@ public class VideoProductionOrchestrator {
                 return;
             }
 
-            // 6. Serializuj i zapisz EDL
+            // 9. Serializuj i zapisz EDL
             String edlJson = objectMapper.writeValueAsString(edl);
             EditDecisionListEntity edlEntity = edlService.saveNewVersion(projectId, edlJson, EdlSource.AI_GENERATED);
 
-            // 7. Renderuj przez Remotion
+            // 10. Renderuj przez Remotion
             renderViaRemotion(projectId, edlEntity, edl);
 
         } catch (Exception e) {
@@ -149,6 +167,94 @@ public class VideoProductionOrchestrator {
         } catch (Exception e) {
             log.warn("[Orchestrator] Audio analysis failed — continuing without it", e);
             return null;
+        }
+    }
+
+    /**
+     * WARSTWA A — Analiza narracji przez GPT.
+     * Rozbija scenariusz na semantyczne segmenty z topic/energy/importance.
+     * Generuje EditingIntent (intencja montażowa).
+     */
+    private NarrationAnalysis analyzeNarration(GenerationContext context, AudioAnalysisResponse audioAnalysis) {
+        try {
+            NarrationAnalysis analysis = narrationAnalyzer.analyze(context, audioAnalysis);
+            log.info("[Orchestrator] Narration analysis complete — {} segments, intent: {}",
+                    analysis.getSegments() != null ? analysis.getSegments().size() : 0,
+                    analysis.getEditingIntent() != null ? analysis.getEditingIntent().getIntent() : "none");
+            return analysis;
+        } catch (Exception e) {
+            log.warn("[Orchestrator] Narration analysis failed — continuing without it: {}", e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * WARSTWA B — Analiza timingów mowy z WhisperX.
+     * Wykrywa pauzy, granice zdań, tempo mowy.
+     */
+    private SpeechTimingAnalysis analyzeSpeechTiming(GenerationContext context) {
+        if (context.getWordTimings() == null || context.getWordTimings().isEmpty()) {
+            log.info("[Orchestrator] No word timings — skipping speech analysis");
+            return null;
+        }
+
+        try {
+            SpeechTimingAnalysis analysis = speechAnalyzer.analyze(context.getWordTimings());
+            log.info("[Orchestrator] Speech analysis complete — {} pauses, avg tempo: {} wps",
+                    analysis.getPauses() != null ? analysis.getPauses().size() : 0,
+                    String.format("%.1f", analysis.getAverageTempo()));
+            return analysis;
+        } catch (Exception e) {
+            log.warn("[Orchestrator] Speech analysis failed — continuing without it: {}", e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * WARSTWA C — CutEngine generuje uzasadnione cięcia.
+     * Łączy wszystkie warstwy (narracja + mowa + muzyka + intent)
+     * w listę cięć, z których każde ma powód.
+     */
+    private List<JustifiedCut> generateJustifiedCuts(
+            GenerationContext context,
+            NarrationAnalysis narrationAnalysis,
+            SpeechTimingAnalysis speechAnalysis,
+            AudioAnalysisResponse audioAnalysis,
+            EditDna editDna) {
+
+        if (narrationAnalysis == null) {
+            log.info("[Orchestrator] No narration analysis — skipping CutEngine");
+            return List.of();
+        }
+
+        try {
+            int totalDurationMs = context.getScenes().stream()
+                    .mapToInt(SceneAsset::getDurationMs)
+                    .sum();
+
+            int minCutMs = editDna != null && editDna.getCutRhythm() != null
+                    ? editDna.getCutRhythm().getMinCutMs() : 400;
+            int maxCutMs = editDna != null && editDna.getCutRhythm() != null
+                    ? editDna.getCutRhythm().getMaxCutMs() : 5000;
+
+            List<JustifiedCut> cuts = cutEngine.generateCuts(
+                    narrationAnalysis, speechAnalysis, audioAnalysis,
+                    context.getWordTimings(), totalDurationMs, minCutMs, maxCutMs);
+
+            log.info("[Orchestrator] CutEngine complete — {} justified cuts for {}ms video",
+                    cuts.size(), totalDurationMs);
+
+            // Log cut distribution for debugging
+            long hardCuts = cuts.stream().filter(c -> c.getClassification() == JustifiedCut.CutClassification.HARD).count();
+            long softCuts = cuts.stream().filter(c -> c.getClassification() == JustifiedCut.CutClassification.SOFT).count();
+            long microCuts = cuts.stream().filter(c -> c.getClassification() == JustifiedCut.CutClassification.MICRO).count();
+            log.info("[Orchestrator] Cut distribution — HARD: {}, SOFT: {}, MICRO: {}", hardCuts, softCuts, microCuts);
+
+            return cuts;
+
+        } catch (Exception e) {
+            log.warn("[Orchestrator] CutEngine failed — continuing without justified cuts: {}", e.getMessage());
+            return List.of();
         }
     }
 

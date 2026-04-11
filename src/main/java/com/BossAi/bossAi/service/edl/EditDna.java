@@ -57,6 +57,16 @@ public class EditDna {
     private String hookStrategy;
 
     /**
+     * Intencja montażowa — definiuje CHARAKTER cięć.
+     * Generowana na podstawie analizy narracji + muzyki + nastroju.
+     *
+     * Nie jest losowa — GPT analizuje treść i wybiera konkretną strategię.
+     * Każda generacja ma inny intent = każdy film wygląda inaczej.
+     */
+    @JsonProperty("editing_intent")
+    private EditingIntent editingIntent;
+
+    /**
      * Krótkie uzasadnienie decyzji LLM (do logów/debugowania).
      */
     @JsonProperty("reasoning")
@@ -139,6 +149,63 @@ public class EditDna {
          */
         @JsonProperty("base_intensity")
         private double baseIntensity;
+    }
+
+    /**
+     * Intent-Based Editing — GPT-driven editing philosophy.
+     *
+     * Zamiast losowych cięć, GPT analizuje treść + muzykę i wybiera:
+     *   - intent: filozofia montażu (build_tension, contrast_shock, ...)
+     *   - pattern: rozkład cięć w czasie (slow_to_fast, wave, ...)
+     *   - arc: fazy filmu z gęstością cięć i nastrojem
+     */
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public static class EditingIntent {
+
+        /**
+         * Główna intencja montażu:
+         *   build_tension | rhythmic_pulse | contrast_shock | flowing_narrative |
+         *   staccato_energy | emotional_wave | reveal_punctuate
+         */
+        private String intent;
+
+        /**
+         * Wzorzec tempa cięć:
+         *   slow_to_fast | fast_to_slow | wave | constant_high |
+         *   on_beat_consistent | long_hold_then_burst | breathing_with_pauses
+         */
+        private String pattern;
+
+        /**
+         * Łuk montażowy — jak gęstość cięć zmienia się w czasie.
+         */
+        private List<EditingArc> arc;
+
+        /**
+         * Uzasadnienie wyboru tego intentu/patternu.
+         */
+        private String reasoning;
+    }
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public static class EditingArc {
+        /** Faza: opening, buildup, middle, climax, resolution, outro */
+        private String phase;
+        /** Gęstość cięć: very_low, low, medium, high, very_high */
+        private String density;
+        /** Nastrój: curious, building, intense, euphoric, reflective, urgent */
+        private String mood;
+        /** Procent filmu, w którym zaczyna się faza (0.0-1.0) */
+        @JsonProperty("start_pct")
+        private double startPct;
     }
 
     @Data
