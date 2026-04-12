@@ -33,12 +33,23 @@ public class CutEngine {
     /** Tolerancja trafiania na beat (ms) */
     private static final int BEAT_SNAP_TOLERANCE_MS = 80;
 
-    /** Minimalne ujęcie, poniżej którego nie tniemy (ms) */
-    private static final int ABSOLUTE_MIN_CUT_MS = 200;
+    /** Minimalne ujęcie — poniżej tego NIE tniemy. Jedno słowo + cut = złe. */
+    private static final int ABSOLUTE_MIN_CUT_MS = 1500;
 
     /** Domyślne min/max cut jeśli EditDna nie podaje */
-    private static final int DEFAULT_MIN_CUT_MS = 400;
-    private static final int DEFAULT_MAX_CUT_MS = 5000;
+    private static final int DEFAULT_MIN_CUT_MS = 2000;
+    private static final int DEFAULT_MAX_CUT_MS = 6000;
+
+    /**
+     * Minimalna liczba słów w segmencie.
+     * Segment z 1-2 słowami wygląda źle po cut — wymuszamy min 3 słowa.
+     */
+    private static final int MIN_WORDS_PER_SEGMENT = 3;
+
+    /**
+     * Maksymalna liczba użyć jednego assetu. Więcej = powtórzenia widoczne.
+     */
+    private static final int MAX_ASSET_USES = 2;
 
     /**
      * Generuje listę uzasadnionych cięć.
@@ -50,6 +61,7 @@ public class CutEngine {
      * @param totalDurationMs   łączny czas filmu
      * @param minCutMs          minimalny czas ujęcia (z EditDna)
      * @param maxCutMs          maksymalny czas ujęcia (z EditDna)
+     * @param availableAssetCount  ile unikalnych assetów jest dostępnych
      */
     public List<JustifiedCut> generateCuts(
             NarrationAnalysis narrationAnalysis,
@@ -58,13 +70,23 @@ public class CutEngine {
             List<SubtitleService.WordTiming> wordTimings,
             int totalDurationMs,
             int minCutMs,
-            int maxCutMs) {
+            int maxCutMs,
+            int availableAssetCount) {
 
+        // Enforce sane minimums — nigdy poniżej 1500ms
+        if (minCutMs < ABSOLUTE_MIN_CUT_MS) minCutMs = ABSOLUTE_MIN_CUT_MS;
         if (minCutMs <= 0) minCutMs = DEFAULT_MIN_CUT_MS;
         if (maxCutMs <= 0) maxCutMs = DEFAULT_MAX_CUT_MS;
+        if (maxCutMs < minCutMs * 2) maxCutMs = minCutMs * 3;
 
-        log.info("[CutEngine] Generating justified cuts — duration: {}ms, minCut: {}ms, maxCut: {}ms",
-                totalDurationMs, minCutMs, maxCutMs);
+        // Ile segmentów możemy mieć przy max 2 użyciach per asset?
+        int maxSegments = availableAssetCount > 0
+                ? availableAssetCount * MAX_ASSET_USES
+                : Integer.MAX_VALUE;
+
+        log.info("[CutEngine] Generating justified cuts — duration: {}ms, minCut: {}ms, maxCut: {}ms, " +
+                        "assets: {}, maxSegments: {}",
+                totalDurationMs, minCutMs, maxCutMs, availableAssetCount, maxSegments);
 
         NarrationAnalysis.EditingIntent intent = narrationAnalysis.getEditingIntent();
 
@@ -82,12 +104,31 @@ public class CutEngine {
         // === KROK 3: Scoruj kandydatów na podstawie editing intent ===
         scoreCandidates(candidates, intent, totalDurationMs);
 
-        // === KROK 4: Wybierz finalne cięcia z uwzględnieniem min/max ===
-        List<JustifiedCut> cuts = selectFinalCuts(candidates, totalDurationMs, minCutMs, maxCutMs, intent);
+        // === KROK 4: Wybierz finalne cięcia z uwzględnieniem min/max I limitu assetów ===
+        List<JustifiedCut> cuts = selectFinalCuts(candidates, totalDurationMs, minCutMs, maxCutMs,
+                intent, maxSegments);
 
-        log.info("[CutEngine] Final result: {} justified cuts", cuts.size());
+        // === KROK 5: Waliduj minimalne pokrycie słów per segment ===
+        cuts = enforceMinWordsPerSegment(cuts, wordTimings, minCutMs);
+
+        log.info("[CutEngine] Final result: {} justified cuts (asset limit: {})", cuts.size(), maxSegments);
 
         return cuts;
+    }
+
+    /**
+     * Backwards compat — bez availableAssetCount.
+     */
+    public List<JustifiedCut> generateCuts(
+            NarrationAnalysis narrationAnalysis,
+            SpeechTimingAnalysis speechAnalysis,
+            AudioAnalysisResponse audioAnalysis,
+            List<SubtitleService.WordTiming> wordTimings,
+            int totalDurationMs,
+            int minCutMs,
+            int maxCutMs) {
+        return generateCuts(narrationAnalysis, speechAnalysis, audioAnalysis,
+                wordTimings, totalDurationMs, minCutMs, maxCutMs, 0);
     }
 
     // =========================================================================
@@ -337,7 +378,10 @@ public class CutEngine {
     /**
      * Odsiew kandydatów łamiących zasady "film grammar":
      *   - NIE tnij w połowie słowa
-     *   - NIE tnij w środku myśli (sprawdź czy jest blisko granicy słowa)
+     *   - NIE tnij w środku myśli — preferuj końce zdań i pauzy
+     *   - Bonus za cięcie na interpunkcji kończącej zdanie (. ! ?)
+     *   - Bonus za cięcie w pauzie między słowami
+     *   - Kara za cięcie w środku płynnej mowy
      */
     private List<CutCandidate> applyFilmGrammar(
             List<CutCandidate> candidates,
@@ -358,20 +402,89 @@ public class CutEngine {
             }
 
             if (midWord) {
-                // Przesuń na koniec najbliższego słowa zamiast odrzucać
-                int snapped = snapToWordBoundary(c.timeMs, wordTimings);
-                if (snapped > 0) {
-                    c.timeMs = snapped;
-                    c.score *= 0.9; // lekka kara za konieczność przesunięcia
+                // Przesuń na koniec najbliższego słowa z interpunkcją kończącą zdanie
+                int snappedSentence = snapToSentenceEnd(c.timeMs, wordTimings);
+                if (snappedSentence > 0 && Math.abs(snappedSentence - c.timeMs) < 2000) {
+                    c.timeMs = snappedSentence;
+                    c.score *= 1.1; // BONUS za snap do końca zdania
                     filtered.add(c);
+                } else {
+                    // Fallback na koniec najbliższego słowa
+                    int snapped = snapToWordBoundary(c.timeMs, wordTimings);
+                    if (snapped > 0) {
+                        c.timeMs = snapped;
+                        c.score *= 0.7; // kara — nie jest na końcu zdania
+                        filtered.add(c);
+                    }
                 }
-                // Jeśli snap się nie udał — odrzuć
             } else {
+                // Cięcie nie jest w środku słowa — sprawdź czy jest na granicy zdania
+                if (isAtSentenceEnd(c.timeMs, wordTimings)) {
+                    c.score *= 1.15; // bonus za naturalną granicę zdania
+                } else if (isInPause(c.timeMs, wordTimings)) {
+                    c.score *= 1.05; // mały bonus za pauzę
+                }
                 filtered.add(c);
             }
         }
 
         return filtered;
+    }
+
+    /**
+     * Sprawdza czy timestamp jest tuż po interpunkcji kończącej zdanie.
+     */
+    private boolean isAtSentenceEnd(int timeMs, List<SubtitleService.WordTiming> wordTimings) {
+        for (SubtitleService.WordTiming wt : wordTimings) {
+            if (Math.abs(wt.endMs() - timeMs) < 200) {
+                String word = wt.word();
+                if (!word.isEmpty()) {
+                    char last = word.charAt(word.length() - 1);
+                    if (last == '.' || last == '!' || last == '?' || last == ';') {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Sprawdza czy timestamp jest w pauzie między słowami (>300ms gap).
+     */
+    private boolean isInPause(int timeMs, List<SubtitleService.WordTiming> wordTimings) {
+        for (int i = 0; i < wordTimings.size() - 1; i++) {
+            int gapStart = wordTimings.get(i).endMs();
+            int gapEnd = wordTimings.get(i + 1).startMs();
+            if (gapEnd - gapStart >= 300 && timeMs >= gapStart && timeMs <= gapEnd) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Przesuwa timestamp na koniec najbliższego słowa kończącego zdanie (. ! ? ;).
+     * Jeśli nie ma takiego w zasięgu — zwraca -1.
+     */
+    private int snapToSentenceEnd(int timeMs, List<SubtitleService.WordTiming> wordTimings) {
+        int closest = -1;
+        int minDist = Integer.MAX_VALUE;
+
+        for (SubtitleService.WordTiming wt : wordTimings) {
+            String word = wt.word();
+            if (word.isEmpty()) continue;
+            char last = word.charAt(word.length() - 1);
+            if (last == '.' || last == '!' || last == '?' || last == ';') {
+                int dist = Math.abs(wt.endMs() - timeMs);
+                if (dist < minDist) {
+                    minDist = dist;
+                    closest = wt.endMs();
+                }
+            }
+        }
+
+        return closest;
     }
 
     /**
@@ -481,17 +594,19 @@ public class CutEngine {
     /**
      * Wybiera finalne cięcia z listy kandydatów.
      * Zapewnia:
-     *   - Brak ujęć krótszych niż minCutMs
+     *   - Brak ujęć krótszych niż minCutMs (domyślnie 1500ms+)
      *   - Brak ujęć dłuższych niż maxCutMs (wymusza cut)
      *   - Ciągłość timeline (end[i] = start[i+1])
-     *   - HARD CUTy zawsze przechodzą (priorytet), SOFT i MICRO filtrowane przez score
+     *   - Łączna liczba segmentów ≤ maxSegments (asset limit)
+     *   - HARD CUTy mają priorytet, SOFT i MICRO filtrowane przez score
      */
     private List<JustifiedCut> selectFinalCuts(
             List<CutCandidate> candidates,
             int totalDurationMs,
             int minCutMs,
             int maxCutMs,
-            NarrationAnalysis.EditingIntent intent) {
+            NarrationAnalysis.EditingIntent intent,
+            int maxSegments) {
 
         // Sortuj po score malejąco, potem po czasie rosnąco
         candidates.sort((a, b) -> {
@@ -505,6 +620,14 @@ public class CutEngine {
 
         for (CutCandidate c : candidates) {
             if (c.timeMs <= 0 || c.timeMs >= totalDurationMs) continue;
+
+            // Sprawdź limit segmentów (selectedTimes.size() cut points = size() segments)
+            // +1 bo jeszcze dodamy totalDurationMs na końcu
+            if (selectedTimes.size() >= maxSegments) {
+                log.info("[CutEngine] Asset limit reached — {} segments max (from {} assets)",
+                        maxSegments, maxSegments / MAX_ASSET_USES);
+                break;
+            }
 
             // Sprawdź czy nie jest za blisko istniejącego cuta
             boolean tooClose = false;
@@ -623,6 +746,96 @@ public class CutEngine {
         }
 
         return result;
+    }
+
+    // =========================================================================
+    // KROK 5 — MINIMALNE POKRYCIE SŁÓW PER SEGMENT
+    // =========================================================================
+
+    /**
+     * Merguje segmenty, które pokrywają za mało słów (< MIN_WORDS_PER_SEGMENT).
+     *
+     * Problem: "jedno słowo i cut" — wygląda źle i nie ma sensu wizualnego.
+     * Rozwiązanie: jeśli segment pokrywa < 3 słowa, połącz go z sąsiednim.
+     *
+     * Mergujemy z NASTĘPNYM segmentem (nie z poprzednim), żeby zachować
+     * naturalną kontynuację myśli.
+     */
+    private List<JustifiedCut> enforceMinWordsPerSegment(
+            List<JustifiedCut> cuts,
+            List<SubtitleService.WordTiming> wordTimings,
+            int minCutMs) {
+
+        if (wordTimings == null || wordTimings.isEmpty() || cuts.size() <= 1) return cuts;
+
+        List<JustifiedCut> result = new ArrayList<>();
+        int i = 0;
+
+        while (i < cuts.size()) {
+            JustifiedCut current = cuts.get(i);
+
+            // Policz słowa w tym segmencie
+            int wordCount = countWordsInRange(wordTimings, current.getStartMs(), current.getEndMs());
+
+            // Czy segment jest za krótki (za mało słów LUB za krótki czas)?
+            boolean tooFewWords = wordCount < MIN_WORDS_PER_SEGMENT;
+            boolean tooShortDuration = (current.getEndMs() - current.getStartMs()) < minCutMs;
+
+            if ((tooFewWords || tooShortDuration) && i + 1 < cuts.size()) {
+                // Merguj z następnym segmentem
+                JustifiedCut next = cuts.get(i + 1);
+                JustifiedCut merged = JustifiedCut.builder()
+                        .startMs(current.getStartMs())
+                        .endMs(next.getEndMs())
+                        // Zachowaj silniejsze uzasadnienie
+                        .classification(current.getConfidence() >= next.getConfidence()
+                                ? current.getClassification() : next.getClassification())
+                        .primaryReason(current.getConfidence() >= next.getConfidence()
+                                ? current.getPrimaryReason() : next.getPrimaryReason())
+                        .secondaryReasons(current.getSecondaryReasons() != null
+                                ? current.getSecondaryReasons() : List.of())
+                        .confidence(Math.max(current.getConfidence(), next.getConfidence()))
+                        .narrationSegmentIndex(current.getNarrationSegmentIndex())
+                        .editingPhase(current.getEditingPhase())
+                        .suggestedEffect(current.getSuggestedEffect())
+                        .suggestedTransition(next.getSuggestedTransition())
+                        .build();
+
+                // Zamień next w liście (aby kolejna iteracja mogła sprawdzić merged)
+                if (i + 1 < cuts.size()) {
+                    cuts.set(i + 1, merged);
+                }
+                i++; // pomiń current, merged jest na pozycji i+1
+
+                log.debug("[CutEngine] Merged segment {}ms-{}ms ({} words) with next → {}ms-{}ms",
+                        current.getStartMs(), current.getEndMs(), wordCount,
+                        merged.getStartMs(), merged.getEndMs());
+            } else {
+                result.add(current);
+                i++;
+            }
+        }
+
+        if (result.size() < cuts.size()) {
+            log.info("[CutEngine] Merged {} too-short segments → {} final segments",
+                    cuts.size() - result.size(), result.size());
+        }
+
+        return result;
+    }
+
+    /**
+     * Liczy ile słów z WhisperX mieści się w przedziale [startMs, endMs].
+     */
+    private int countWordsInRange(List<SubtitleService.WordTiming> words, int startMs, int endMs) {
+        int count = 0;
+        for (SubtitleService.WordTiming wt : words) {
+            int wordCenter = (wt.startMs() + wt.endMs()) / 2;
+            if (wordCenter >= startMs && wordCenter < endMs) {
+                count++;
+            }
+        }
+        return count;
     }
 
     // =========================================================================
