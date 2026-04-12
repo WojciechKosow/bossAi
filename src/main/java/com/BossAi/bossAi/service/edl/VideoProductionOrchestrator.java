@@ -91,7 +91,7 @@ public class VideoProductionOrchestrator {
 
             // 6. WARSTWA C: CutEngine — "mózg montażysty" (uzasadnione cięcia)
             List<JustifiedCut> justifiedCuts = generateJustifiedCuts(
-                    context, narrationAnalysis, speechAnalysis, audioAnalysis, editDna);
+                    context, narrationAnalysis, speechAnalysis, audioAnalysis, editDna, projectAssets);
             context.setJustifiedCuts(justifiedCuts);
 
             // 7. Generuj EDL z edit_dna + justified cuts
@@ -220,7 +220,8 @@ public class VideoProductionOrchestrator {
             NarrationAnalysis narrationAnalysis,
             SpeechTimingAnalysis speechAnalysis,
             AudioAnalysisResponse audioAnalysis,
-            EditDna editDna) {
+            EditDna editDna,
+            List<ProjectAsset> projectAssets) {
 
         if (narrationAnalysis == null) {
             log.info("[Orchestrator] No narration analysis — skipping CutEngine");
@@ -237,9 +238,23 @@ public class VideoProductionOrchestrator {
             int maxCutMs = editDna != null && editDna.getCutRhythm() != null
                     ? editDna.getCutRhythm().getMaxCutMs() : 5000;
 
+            // Policz unikalne assety wizualne (VIDEO + IMAGE) — CutEngine potrzebuje tego
+            // żeby nie generować więcej cięć niż assets * 2
+            int availableAssetCount = 0;
+            for (ProjectAsset asset : projectAssets) {
+                String typeName = asset.getType().name();
+                if ("VIDEO".equals(typeName) || "IMAGE".equals(typeName)) {
+                    availableAssetCount++;
+                }
+            }
+
+            log.info("[Orchestrator] Available visual assets: {} — max segments: {}",
+                    availableAssetCount, availableAssetCount * 2);
+
             List<JustifiedCut> cuts = cutEngine.generateCuts(
                     narrationAnalysis, speechAnalysis, audioAnalysis,
-                    context.getWordTimings(), totalDurationMs, minCutMs, maxCutMs);
+                    context.getWordTimings(), totalDurationMs, minCutMs, maxCutMs,
+                    availableAssetCount);
 
             log.info("[Orchestrator] CutEngine complete — {} justified cuts for {}ms video",
                     cuts.size(), totalDurationMs);

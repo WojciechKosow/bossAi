@@ -145,7 +145,7 @@ public class EdlGeneratorService {
         List<JustifiedCut> justifiedCuts = context.getJustifiedCuts();
         if (justifiedCuts != null && !justifiedCuts.isEmpty()) {
             segments = buildSegmentsFromJustifiedCuts(justifiedCuts, context, audioAnalysis,
-                    assetBySceneIndex, projectAssets);
+                    projectAssets);
         } else {
             // === STARA ŚCIEŻKA: buduj segmenty ze scen (1 scena = 1 segment) ===
             int timelineMs = 0;
@@ -284,50 +284,49 @@ public class EdlGeneratorService {
     // JUSTIFIED CUTS → SEGMENTS — buduje segmenty z uzasadnionych cięć
     // =========================================================================
 
+    /** Max uses per single asset — more than this and repetition becomes obvious. */
+    private static final int MAX_ASSET_USES = 2;
+
     /**
      * Buduje segmenty EDL na podstawie justified cuts z CutEngine.
      *
      * Każdy JustifiedCut definiuje punkt cięcia z uzasadnieniem.
-     * Ta metoda mapuje cięcia na assety (sceny) i dodaje efekty/przejścia
-     * bazując na klasyfikacji cięcia (HARD/SOFT/MICRO).
+     * Ta metoda mapuje cięcia na assety z SMART DISTRIBUTION:
+     *   - Round-robin spread — assety równomiernie rozłożone
+     *   - NIGDY ten sam asset pod rząd (consecutive)
+     *   - Max 2 użycia jednego assetu
+     *   - Efekty/przejścia z klasyfikacji cięcia (HARD/SOFT/MICRO)
      */
     private List<EdlSegment> buildSegmentsFromJustifiedCuts(
             List<JustifiedCut> cuts,
             GenerationContext context,
             AudioAnalysisResponse audioAnalysis,
-            Map<Integer, ProjectAsset> assetBySceneIndex,
             List<ProjectAsset> projectAssets) {
 
         List<EdlSegment> segments = new ArrayList<>();
         String callbackBase = remotionProperties.getCallbackBaseUrl();
 
-        // Oblicz granice scen (kumulatywne duracje)
-        List<int[]> sceneBounds = new ArrayList<>();
-        int cumMs = 0;
-        for (int i = 0; i < context.getScenes().size(); i++) {
-            int dur = context.getScenes().get(i).getDurationMs();
-            sceneBounds.add(new int[]{cumMs, cumMs + dur, i});
-            cumMs += dur;
+        // Zbierz unikalne VIDEO/IMAGE assety
+        List<ProjectAsset> visualAssets = new ArrayList<>();
+        for (ProjectAsset asset : projectAssets) {
+            String typeName = asset.getType().name();
+            if ("VIDEO".equals(typeName) || "IMAGE".equals(typeName)) {
+                visualAssets.add(asset);
+            }
         }
+
+        if (visualAssets.isEmpty()) {
+            log.warn("[EdlGenerator] No visual assets available — cannot build segments");
+            return segments;
+        }
+
+        // === SMART ASSET DISTRIBUTION ===
+        // Przypisz assety do segmentów (cuts) z round-robin + no consecutive repeats + max uses
+        List<ProjectAsset> assignedAssets = distributeAssetsToSegments(visualAssets, cuts.size());
 
         for (int i = 0; i < cuts.size(); i++) {
             JustifiedCut cut = cuts.get(i);
-
-            // Znajdź scenę, do której należy ten segment (na podstawie środka segmentu)
-            int midpoint = (cut.getStartMs() + cut.getEndMs()) / 2;
-            int sceneIndex = findSceneAtMs(midpoint, sceneBounds);
-            ProjectAsset asset = assetBySceneIndex.get(sceneIndex);
-
-            if (asset == null) {
-                // Fallback na ostatni dostępny asset
-                for (int s = assetBySceneIndex.size() - 1; s >= 0; s--) {
-                    if (assetBySceneIndex.containsKey(s)) {
-                        asset = assetBySceneIndex.get(s);
-                        break;
-                    }
-                }
-            }
-            if (asset == null) continue;
+            ProjectAsset asset = assignedAssets.get(i);
 
             // Efekt z sugestii CutEngine lub z DirectorPlan
             List<EdlEffect> effects = new ArrayList<>();
@@ -336,6 +335,8 @@ public class EdlGeneratorService {
                 double intensity = resolveIntensityFromCut(cut);
                 effects.add(effectRegistry.createEffect(effectType, intensity, null));
             } else {
+                // Fallback — znajdź scene index na podstawie pozycji w timeline
+                int sceneIndex = Math.min(i, context.getScenes().size() - 1);
                 effects = buildEffectsForScene(context, audioAnalysis, sceneIndex);
             }
 
@@ -363,18 +364,104 @@ public class EdlGeneratorService {
                     .build());
         }
 
-        log.info("[EdlGenerator] Built {} segments from {} justified cuts", segments.size(), cuts.size());
+        // Loguj dystrybucję assetów
+        Map<String, Long> usageCounts = segments.stream()
+                .collect(Collectors.groupingBy(EdlSegment::getAssetId, Collectors.counting()));
+        log.info("[EdlGenerator] Built {} segments from {} justified cuts — asset distribution: {}",
+                segments.size(), cuts.size(), usageCounts);
+
         return segments;
     }
 
-    private int findSceneAtMs(int timeMs, List<int[]> sceneBounds) {
-        for (int[] bound : sceneBounds) {
-            if (timeMs >= bound[0] && timeMs < bound[1]) {
-                return bound[2];
+    /**
+     * Rozprowadza assety po segmentach z zasadami:
+     *   1. Round-robin spread — każdy asset użyty zanim zaczną się powtórzenia
+     *   2. NIGDY ten sam asset pod rząd (po cut)
+     *   3. Max MAX_ASSET_USES użyć jednego assetu
+     *
+     * Algorytm:
+     *   - Faza 1: przypisz każdy asset po kolei (round-robin)
+     *   - Faza 2: jeśli potrzeba więcej — druga runda z shuffle (unikaj consecutive)
+     *   - Faza 3: jeśli nadal za mało — użyj assetu z najniższym usage count (nie consecutive)
+     */
+    private List<ProjectAsset> distributeAssetsToSegments(List<ProjectAsset> assets, int segmentCount) {
+        List<ProjectAsset> result = new ArrayList<>(segmentCount);
+        Map<String, Integer> usageCount = new HashMap<>();
+
+        // Inicjalizuj countery
+        for (ProjectAsset a : assets) {
+            usageCount.put(a.getId().toString(), 0);
+        }
+
+        // Faza 1+2: round-robin z shuffle w drugiej rundzie
+        List<ProjectAsset> pool = new ArrayList<>(assets); // pierwsza runda — oryginalna kolejność
+
+        while (result.size() < segmentCount) {
+            boolean addedAny = false;
+
+            for (ProjectAsset candidate : pool) {
+                if (result.size() >= segmentCount) break;
+
+                String candidateId = candidate.getId().toString();
+                int uses = usageCount.getOrDefault(candidateId, 0);
+
+                // Max uses check
+                if (uses >= MAX_ASSET_USES) continue;
+
+                // Consecutive check — nie ten sam co poprzedni
+                if (!result.isEmpty()) {
+                    String lastId = result.get(result.size() - 1).getId().toString();
+                    if (lastId.equals(candidateId)) continue;
+                }
+
+                result.add(candidate);
+                usageCount.put(candidateId, uses + 1);
+                addedAny = true;
+            }
+
+            if (!addedAny) {
+                // Wszystkie assety na max uses — wymusz z najniższym usage (ignore max)
+                break;
+            }
+
+            // Następna runda — shuffle dla wizualnej różnorodności
+            pool = new ArrayList<>(assets);
+            Collections.shuffle(pool);
+        }
+
+        // Faza 3: emergency fill — jeśli nadal brakuje segmentów
+        if (result.size() < segmentCount) {
+            log.warn("[EdlGenerator] Asset pool exhausted at {} — need {}, force-filling remaining",
+                    result.size(), segmentCount);
+
+            while (result.size() < segmentCount) {
+                // Znajdź asset z najniższym usage, nie-consecutive
+                ProjectAsset best = null;
+                int bestUses = Integer.MAX_VALUE;
+                String lastId = result.isEmpty() ? "" : result.get(result.size() - 1).getId().toString();
+
+                for (ProjectAsset a : assets) {
+                    String aId = a.getId().toString();
+                    if (aId.equals(lastId)) continue; // NIGDY consecutive
+                    int uses = usageCount.getOrDefault(aId, 0);
+                    if (uses < bestUses) {
+                        bestUses = uses;
+                        best = a;
+                    }
+                }
+
+                if (best == null) {
+                    // Ekstremalny edge case — tylko 1 asset, musi być consecutive
+                    best = assets.get(result.size() % assets.size());
+                }
+
+                result.add(best);
+                usageCount.put(best.getId().toString(),
+                        usageCount.getOrDefault(best.getId().toString(), 0) + 1);
             }
         }
-        // Fallback na ostatnią scenę
-        return sceneBounds.isEmpty() ? 0 : sceneBounds.get(sceneBounds.size() - 1)[2];
+
+        return result;
     }
 
     private double resolveIntensityFromCut(JustifiedCut cut) {
