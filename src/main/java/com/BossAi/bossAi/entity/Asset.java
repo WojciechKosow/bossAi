@@ -42,6 +42,12 @@ public class Asset {
     private boolean reusable;
 
     /**
+     * User-defined ordering for custom assets (images, videos, TTS).
+     * Null for AI-generated assets. 0-based index.
+     */
+    private Integer orderIndex;
+
+    /**
      * Prompt/opis użyty do wygenerowania tego assetu.
      * Używany przez AssetReuseService do tematycznego dopasowania.
      */

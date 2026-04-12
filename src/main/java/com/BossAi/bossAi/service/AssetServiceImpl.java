@@ -75,20 +75,25 @@ public class AssetServiceImpl implements AssetService {
 
     @Override
     public AssetDTO createUserUpload(String email, AssetType type, MultipartFile file) throws Exception {
+        return createUserUpload(email, type, file, null);
+    }
+
+    @Override
+    public AssetDTO createUserUpload(String email, AssetType type, MultipartFile file, Integer orderIndex) throws Exception {
 
         User user = userRepository.findByEmail(email).orElseThrow();
 
         UserPlan userPlan = planSelectionService.selectHighestPlan(user);
 
-        if (!userPlan.getPlanType().equals(PlanType.CREATOR)) {
-            throw new RuntimeException("You cannot upload files. Please upgrade your plan.");
+        if (userPlan.getPlanType().ordinal() < PlanType.PRO.ordinal()) {
+            throw new RuntimeException("Custom asset uploads require PRO plan or higher. Please upgrade your plan.");
         }
 
         Asset asset = new Asset();
         asset.setUser(user);
         asset.setType(type);
         asset.setCreatedAt(LocalDateTime.now());
-
+        asset.setOrderIndex(orderIndex);
 
         asset.setSizeBytes(file.getSize());
         asset.setReusable(true);
@@ -188,7 +193,9 @@ public class AssetServiceImpl implements AssetService {
         return new AssetDTO(
                 asset.getId(),
                 asset.getType(),
+                asset.getSource(),
                 storageService.generateUrl(asset.getStorageKey()),
+                asset.getOrderIndex(),
                 asset.getDurationSeconds(),
                 asset.getWidth(),
                 asset.getHeight(),

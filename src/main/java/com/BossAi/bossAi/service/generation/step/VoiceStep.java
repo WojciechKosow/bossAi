@@ -1,5 +1,6 @@
 package com.BossAi.bossAi.service.generation.step;
 
+import com.BossAi.bossAi.entity.Asset;
 import com.BossAi.bossAi.entity.AssetSource;
 import com.BossAi.bossAi.entity.AssetType;
 import com.BossAi.bossAi.service.AssetService;
@@ -49,6 +50,9 @@ public class VoiceStep implements GenerationStep {
     @Value("${ffmpeg.temp.dir:/tmp/bossai/render}")
     private String tempDir;
 
+    @Value("${ffmpeg.binary.path:/usr/bin/ffmpeg}")
+    private String ffmpegBinaryPath;
+
     @Override
     public void execute(GenerationContext context) throws Exception {
         context.updateProgress(
@@ -57,13 +61,17 @@ public class VoiceStep implements GenerationStep {
                 GenerationStepName.VOICE.getDisplayMessage()
         );
 
-        log.info("[VoiceStep] START — generationId: {}, userVoice: {}",
+        log.info("[VoiceStep] START — generationId: {}, customTts: {}, userVoice: {}",
                 context.getGenerationId(),
+                context.hasCustomTts() ? context.getCustomTtsAssets().size() + " clips" : "nie",
                 context.hasUserVoice() ? "tak" : "nie (AI TTS)");
 
         String voiceLocalPath;
 
-        if (context.hasUserVoice()) {
+        if (context.hasCustomTts()) {
+            // User provided custom TTS — concatenate clips, skip AI generation
+            voiceLocalPath = concatenateCustomTts(context);
+        } else if (context.hasUserVoice()) {
             voiceLocalPath = copyUserVoice(context);
         } else {
             voiceLocalPath = generateAiTts(context);
@@ -73,7 +81,10 @@ public class VoiceStep implements GenerationStep {
 
         // Extract word-level timestamps for subtitles
         byte[] audioBytes = Files.readAllBytes(Path.of(voiceLocalPath));
-        String narration = context.getScript().narration();
+
+        // For custom TTS we don't have the transcript text, so WhisperX does full transcription.
+        // For AI TTS or user voice we have the narration text for forced alignment.
+        String narration = context.hasCustomTts() ? null : context.getScript().narration();
 
         List<SubtitleService.WordTiming> wordTimings = extractWordTimings(audioBytes, narration);
 
@@ -260,6 +271,80 @@ public class VoiceStep implements GenerationStep {
         Files.write(outputPath, audioBytes);
 
         log.info("[VoiceStep] User voice skopiowany — {} bytes → {}", audioBytes.length, outputPath);
+        return outputPath.toString();
+    }
+
+    /**
+     * Concatenates user-provided custom TTS clips into a single MP3 file.
+     * Clips are ordered by their orderIndex (already sorted in GenerationContext).
+     * Uses FFmpeg concat demuxer for lossless concatenation.
+     *
+     * If only one TTS clip is provided, it's copied directly (no FFmpeg needed).
+     */
+    private String concatenateCustomTts(GenerationContext context) throws Exception {
+        List<Asset> ttsAssets = context.getCustomTtsAssets();
+        Path workDir = getWorkingDir(context);
+        Files.createDirectories(workDir);
+
+        log.info("[VoiceStep] Concatenating {} custom TTS clips", ttsAssets.size());
+
+        if (ttsAssets.size() == 1) {
+            // Single TTS clip — just copy it
+            Asset single = ttsAssets.get(0);
+            byte[] audioBytes = storageService.load(single.getStorageKey());
+            String filename = "voice_" + context.getGenerationId() + ".mp3";
+            Path outputPath = workDir.resolve(filename);
+            Files.write(outputPath, audioBytes);
+            log.info("[VoiceStep] Single custom TTS copied — {} bytes → {}", audioBytes.length, outputPath);
+            return outputPath.toString();
+        }
+
+        // Multiple TTS clips — write each to temp, then FFmpeg concat
+        List<Path> clipPaths = new ArrayList<>();
+        for (int i = 0; i < ttsAssets.size(); i++) {
+            Asset ttsAsset = ttsAssets.get(i);
+            byte[] clipBytes = storageService.load(ttsAsset.getStorageKey());
+            Path clipPath = workDir.resolve(String.format("tts_clip_%02d.mp3", i));
+            Files.write(clipPath, clipBytes);
+            clipPaths.add(clipPath);
+            log.info("[VoiceStep] TTS clip {} — {} bytes → {}", i, clipBytes.length, clipPath);
+        }
+
+        // Build FFmpeg concat list file
+        Path concatList = workDir.resolve("tts_concat_list.txt");
+        StringBuilder listContent = new StringBuilder();
+        for (Path clipPath : clipPaths) {
+            listContent.append("file '").append(clipPath.toAbsolutePath()).append("'\n");
+        }
+        Files.writeString(concatList, listContent.toString());
+
+        String outputFilename = "voice_" + context.getGenerationId() + ".mp3";
+        Path outputPath = workDir.resolve(outputFilename);
+
+        // FFmpeg concat demuxer: lossless concatenation of MP3 files
+        ProcessBuilder pb = new ProcessBuilder(
+                ffmpegBinaryPath,
+                "-f", "concat",
+                "-safe", "0",
+                "-i", concatList.toAbsolutePath().toString(),
+                "-c", "copy",
+                "-y",
+                outputPath.toAbsolutePath().toString()
+        );
+        pb.redirectErrorStream(true);
+        Process process = pb.start();
+        String ffmpegOutput = new String(process.getInputStream().readAllBytes());
+        int exitCode = process.waitFor();
+
+        if (exitCode != 0) {
+            log.error("[VoiceStep] FFmpeg TTS concat failed (exit {}): {}", exitCode, ffmpegOutput);
+            throw new RuntimeException("FFmpeg TTS concatenation failed with exit code " + exitCode);
+        }
+
+        long outputSize = Files.size(outputPath);
+        log.info("[VoiceStep] Custom TTS concatenated — {} clips → {} ({} bytes)",
+                ttsAssets.size(), outputPath, outputSize);
+
         return outputPath.toString();
     }
 

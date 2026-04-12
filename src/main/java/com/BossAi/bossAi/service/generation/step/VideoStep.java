@@ -69,9 +69,13 @@ public class VideoStep implements GenerationStep {
         List<SceneAsset> scenes = context.getScenes();
         String modelId          = modelSelector.videoModel(context.getPlanType());
         boolean forceReuse      = context.isForceReuseForTesting();
+        List<Asset> customMedia = context.getCustomMediaAssets();
+        boolean hasCustomMedia  = context.hasCustomMedia();
 
-        log.info("[VideoStep] START — {} scen, model: {}, forceReuse: {}, generationId: {}",
-                scenes.size(), modelId, forceReuse, context.getGenerationId());
+        log.info("[VideoStep] START — {} scen, model: {}, forceReuse: {}, customMedia: {}, generationId: {}",
+                scenes.size(), modelId, forceReuse,
+                hasCustomMedia ? customMedia.size() : 0,
+                context.getGenerationId());
 
         // Walidacja — każda scena musi mieć imageUrl z ImageStep
         for (SceneAsset scene : scenes) {
@@ -167,19 +171,25 @@ public class VideoStep implements GenerationStep {
             Path workDir,
             GenerationContext context
     ) throws Exception {
+        // Custom media assets (user-provided, ordered)
+        List<Asset> customMedia = context.getCustomMediaAssets();
+        boolean hasCustomMedia = context.hasCustomMedia();
+
         // Ustal które sceny są VIDEO (animowane) a które IMAGE (statyczne)
         Set<Integer> videoSceneIndices = resolveVideoSceneIndices(context);
 
-        log.info("[VideoStep] Mixed media plan: VIDEO sceny={}, IMAGE sceny={}",
+        log.info("[VideoStep] Mixed media plan: VIDEO sceny={}, IMAGE sceny={}, customMedia={}",
                 videoSceneIndices,
                 scenes.stream()
                         .map(SceneAsset::getIndex)
                         .filter(i -> !videoSceneIndices.contains(i))
-                        .collect(Collectors.toList()));
+                        .collect(Collectors.toList()),
+                hasCustomMedia ? customMedia.size() : 0);
 
         // Przetwarzaj każdą scenę
         int videoCount = 0;
         int reusedCount = 0;
+        int customCount = 0;
         for (int i = 0; i < scenes.size(); i++) {
             SceneAsset scene = scenes.get(i);
             boolean isVideo  = videoSceneIndices.contains(scene.getIndex());
@@ -190,6 +200,34 @@ public class VideoStep implements GenerationStep {
                     String.format("%s scenę %d/%d...",
                             isVideo ? "Animuję" : "Konwertuję", i + 1, scenes.size())
             );
+
+            // Check for custom VIDEO asset at this scene index
+            if (hasCustomMedia && i < customMedia.size()) {
+                Asset customAsset = customMedia.get(i);
+                if (customAsset.getType() == AssetType.VIDEO) {
+                    try {
+                        byte[] customBytes = storageService.load(customAsset.getStorageKey());
+                        String filename = String.format("scene_%02d_%s.mp4", scene.getIndex(), context.getGenerationId());
+                        Path videoPath = workDir.resolve(filename);
+                        Files.write(videoPath, customBytes);
+                        scene.setVideoLocalPath(videoPath.toString());
+                        customCount++;
+                        log.info("[VideoStep] Scena {} CUSTOM VIDEO — asset: {}, {} bytes",
+                                scene.getIndex(), customAsset.getId(), customBytes.length);
+                        continue;
+                    } catch (Exception e) {
+                        log.warn("[VideoStep] Scena {} — custom video load failed ({}), falling back to pipeline",
+                                scene.getIndex(), e.getMessage());
+                    }
+                }
+                // Custom IMAGE asset → process as image scene (Ken Burns)
+                if (customAsset.getType() == AssetType.IMAGE) {
+                    log.info("[VideoStep] Scena {} CUSTOM IMAGE → FFmpeg Ken Burns", scene.getIndex());
+                    processImageScene(scene, workDir);
+                    customCount++;
+                    continue;
+                }
+            }
 
             if (isVideo) {
                 // Sprawdź czy mamy reusable VIDEO asset
@@ -223,8 +261,9 @@ public class VideoStep implements GenerationStep {
             }
         }
 
-        log.info("[VideoStep] DONE — {} scen VIDEO (API), {} scen IMAGE (FFmpeg), {} reused",
-                videoCount - reusedCount, scenes.size() - videoCount, reusedCount);
+        log.info("[VideoStep] DONE — {} API video, {} IMAGE (FFmpeg), {} reused, {} custom user assets",
+                videoCount - reusedCount, scenes.size() - videoCount - customCount,
+                reusedCount, customCount);
     }
 
     // =========================================================================

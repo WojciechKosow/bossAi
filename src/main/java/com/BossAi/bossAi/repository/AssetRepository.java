@@ -1,6 +1,7 @@
 package com.BossAi.bossAi.repository;
 
 import com.BossAi.bossAi.entity.Asset;
+import com.BossAi.bossAi.entity.AssetSource;
 import com.BossAi.bossAi.entity.AssetType;
 import com.BossAi.bossAi.entity.User;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -28,4 +29,8 @@ public interface AssetRepository extends JpaRepository<Asset, UUID> {
      * to bypass the reusable=true filter.
      */
     List<Asset> findByUserAndTypeAndPromptIsNotNull(User user, AssetType type);
+
+    List<Asset> findByUserAndTypeAndSourceOrderByOrderIndexAsc(User user, AssetType type, AssetSource source);
+
+    List<Asset> findByUserAndTypeInAndSourceOrderByOrderIndexAsc(User user, List<AssetType> types, AssetSource source);
 }

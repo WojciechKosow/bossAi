@@ -46,10 +46,15 @@ public class ImageStep implements GenerationStep {
         Map<String, Asset> reusedImages = context.getReusedImageAssets();
         boolean forceReuse = context.isForceReuseForTesting();
 
-        log.info("[ImageStep] START — {} scen, model: {}, reuse: {} dopasowań, forceReuse: {}, generationId: {}",
+        // Custom media assets (user-uploaded images/videos) mapped by scene index
+        List<Asset> customMedia = context.getCustomMediaAssets();
+        boolean hasCustomMedia = context.hasCustomMedia();
+
+        log.info("[ImageStep] START — {} scen, model: {}, reuse: {} dopasowań, forceReuse: {}, customMedia: {}, generationId: {}",
                 scenes.size(), modelId,
                 reusedImages != null ? reusedImages.size() : 0,
                 forceReuse,
+                hasCustomMedia ? customMedia.size() : 0,
                 context.getGenerationId());
 
         if (forceReuse) {
@@ -57,6 +62,7 @@ public class ImageStep implements GenerationStep {
         }
 
         int reusedCount = 0;
+        int customCount = 0;
 
         for (int i = 0; i < scenes.size(); i++) {
             SceneAsset scene = scenes.get(i);
@@ -68,6 +74,21 @@ public class ImageStep implements GenerationStep {
                     progressBase + (i * progressPerScene),
                     String.format("Generuję obraz sceny %d/%d...", i + 1, scenes.size())
             );
+
+            // Check for custom media asset at this scene index
+            if (hasCustomMedia && i < customMedia.size()) {
+                Asset customAsset = customMedia.get(i);
+                String customUrl = resolveAssetUrl(customAsset);
+                if (customUrl != null) {
+                    scene.setImageUrl(customUrl);
+                    customCount++;
+                    log.info("[ImageStep] Scena {}/{} CUSTOM ASSET — type: {}, asset: {}, url: {}",
+                            i + 1, scenes.size(), customAsset.getType(), customAsset.getId(), customUrl);
+                    continue;
+                }
+                log.warn("[ImageStep] Scena {}/{} — custom asset URL resolution failed, asset: {}",
+                        i + 1, scenes.size(), customAsset.getId());
+            }
 
             // Sprawdź czy istnieje reusable asset dla tej sceny
             Asset reusedAsset = reusedImages != null
@@ -146,8 +167,8 @@ public class ImageStep implements GenerationStep {
             log.info("[ImageStep] Scena {}/{} DONE — imageUrl: {}", i + 1, scenes.size(), imageUrl);
         }
 
-        log.info("[ImageStep] DONE — {} obrazów wygenerowanych, {} reused (zaoszczędzone)",
-                scenes.size() - reusedCount, reusedCount);
+        log.info("[ImageStep] DONE — {} AI generated, {} reused, {} custom user assets",
+                scenes.size() - reusedCount - customCount, reusedCount, customCount);
     }
 
     /**

@@ -44,4 +44,24 @@ public class TikTokAdRequest {
      * DO NOT use in production.
      */
     private boolean forceReuseForTesting = false;
+
+    /**
+     * Custom visual assets (images + videos) uploaded by user, ordered by user.
+     * Mapped to scenes by orderIndex. Requires PRO+ plan.
+     */
+    private List<UUID> customMediaAssetIds;
+
+    /**
+     * Custom TTS voice-over assets uploaded by user, ordered by user.
+     * When provided, pipeline skips AI TTS generation entirely.
+     * Audio clips are concatenated in orderIndex order and sent to WhisperX.
+     * Requires PRO+ plan.
+     */
+    private List<UUID> customTtsAssetIds;
+
+    /**
+     * If true, GPT decides the optimal order for user-provided custom media assets.
+     * If false (default), assets are used in the order defined by their orderIndex.
+     */
+    private boolean useGptOrdering = false;
 }

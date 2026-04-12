@@ -1,5 +1,7 @@
 package com.BossAi.bossAi.service.generation.step;
 
+import com.BossAi.bossAi.entity.Asset;
+import com.BossAi.bossAi.entity.AssetType;
 import com.BossAi.bossAi.service.OpenAiService;
 import com.BossAi.bossAi.service.generation.GenerationContext;
 import com.BossAi.bossAi.service.generation.GenerationStepName;
@@ -123,15 +125,57 @@ public class ScriptStep implements GenerationStep {
             sb.append(context.getStyleConfig().getPromptInstructions());
         }
 
-        // Assety usera
-        if (!context.getUserImageAssets().isEmpty()) {
+        // Custom media assets — user provided their own images/videos
+        if (context.hasCustomMedia()) {
+            List<Asset> media = context.getCustomMediaAssets();
+            int imageCount = (int) media.stream().filter(a -> a.getType() == AssetType.IMAGE).count();
+            int videoCount = (int) media.stream().filter(a -> a.getType() == AssetType.VIDEO).count();
+
+            sb.append("\n\n--- CUSTOM MEDIA ASSETS ---");
+            sb.append("\nUser provided ").append(media.size()).append(" custom media asset(s):");
+            if (imageCount > 0) sb.append(" ").append(imageCount).append(" image(s)");
+            if (videoCount > 0) sb.append(" ").append(videoCount).append(" video(s)");
+            sb.append(".");
+
+            sb.append("\nYou MUST generate EXACTLY ").append(media.size()).append(" scenes to match the number of user assets.");
+
+            if (context.isUseGptOrdering()) {
+                sb.append("\nYou decide the OPTIMAL ORDER of scenes for maximum impact.");
+                sb.append("\nReturn a field 'assetOrder' in the JSON — an array of 0-based indices mapping each scene to its asset.");
+                sb.append("\nExample: if user has 3 assets and you decide scene 0 should use asset 2, scene 1 → asset 0, scene 2 → asset 1:");
+                sb.append("\n'assetOrder': [2, 0, 1]");
+            } else {
+                sb.append("\nAssets will be used in the order the user defined (scene 0 = asset 0, scene 1 = asset 1, etc.).");
+            }
+
+            // Describe each asset for GPT context
+            for (int i = 0; i < media.size(); i++) {
+                Asset a = media.get(i);
+                sb.append("\n  Asset ").append(i).append(": type=").append(a.getType());
+                if (a.getPrompt() != null) {
+                    sb.append(", description=\"").append(a.getPrompt()).append("\"");
+                }
+                if (a.getDurationSeconds() != null) {
+                    sb.append(", duration=").append(a.getDurationSeconds()).append("s");
+                }
+            }
+        }
+
+        // Custom TTS — user provided their own voice-over
+        if (context.hasCustomTts()) {
+            sb.append("\n\nUser provided ").append(context.getCustomTtsAssets().size())
+                    .append(" custom TTS voice-over clip(s) — do NOT generate narration text for TTS.");
+            sb.append("\nGenerate scene descriptions and visual prompts, but narration will come from the user's audio.");
+            sb.append("\nStill generate subtitleText for each scene as placeholder — WhisperX will provide actual word timings.");
+        } else if (context.hasUserVoice()) {
+            sb.append("\n\nUser recorded their own voiceover — keep narration under 40 words per scene.");
+        }
+
+        // Standard assets
+        if (!context.hasCustomMedia() && !context.getUserImageAssets().isEmpty()) {
             sb.append("\n\nUser provided ")
                     .append(context.getUserImageAssets().size())
                     .append(" product photo(s) — match their visual style.");
-        }
-
-        if (context.hasUserVoice()) {
-            sb.append("\n\nUser recorded their own voiceover — keep narration under 40 words per scene.");
         }
 
         if (context.hasUserMusic()) {
