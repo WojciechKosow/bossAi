@@ -416,6 +416,12 @@ public class GenerationServiceImpl implements GenerationService {
                 .filter(a -> a.getType() == AssetType.IMAGE)
                 .toList();
 
+        // Resolve custom media assets (images + videos with user ordering)
+        List<Asset> customMediaAssets = resolveCustomAssets(request.getCustomMediaAssetIds(), user);
+
+        // Resolve custom TTS assets (voice-over clips with user ordering)
+        List<Asset> customTtsAssets = resolveCustomAssets(request.getCustomTtsAssetIds(), user);
+
         PlanDefinition planDefinition = planDefinitionRepository.findById(userPlan.getPlanType())
                 .orElseThrow();
 
@@ -434,6 +440,14 @@ public class GenerationServiceImpl implements GenerationService {
                     "no new assets will be generated, using existing assets only");
         }
 
+        if (!customMediaAssets.isEmpty()) {
+            log.info("[GenerationService] User provided {} custom media assets", customMediaAssets.size());
+        }
+        if (!customTtsAssets.isEmpty()) {
+            log.info("[GenerationService] User provided {} custom TTS assets — AI TTS will be skipped",
+                    customTtsAssets.size());
+        }
+
         return GenerationContext.builder()
                 .generationId(generation.getId())
                 .userId(user.getId())
@@ -444,11 +458,42 @@ public class GenerationServiceImpl implements GenerationService {
                 .userMusicAsset(userMusicAsset)
                 .userVoiceAsset(userVoiceAsset)
                 .userImageAssets(userImageAssets)
+                .customMediaAssets(customMediaAssets)
+                .customTtsAssets(customTtsAssets)
+                .useGptOrdering(request.isUseGptOrdering())
                 .reuseAssets(reuseEnabled)
                 .forceReuseForTesting(forceReuse)
                 .styleConfig(styleConfig)
                 .style(request.getStyle())
                 .build();
+    }
+
+    /**
+     * Resolves and validates custom assets by IDs. Returns sorted by orderIndex.
+     * Validates ownership. Returns empty list if assetIds is null/empty.
+     */
+    private List<Asset> resolveCustomAssets(List<UUID> assetIds, User user) {
+        if (assetIds == null || assetIds.isEmpty()) {
+            return List.of();
+        }
+
+        List<Asset> assets = assetRepository.findAllById(assetIds);
+
+        assets.forEach(asset -> {
+            if (!asset.getUser().getId().equals(user.getId())) {
+                throw new AccessDeniedException(
+                        "Asset " + asset.getId() + " is not user's asset"
+                );
+            }
+        });
+
+        // Sort by orderIndex (null-safe, nulls last)
+        return assets.stream()
+                .sorted(java.util.Comparator.comparing(
+                        Asset::getOrderIndex,
+                        java.util.Comparator.nullsLast(java.util.Comparator.naturalOrder())
+                ))
+                .toList();
     }
 
 }

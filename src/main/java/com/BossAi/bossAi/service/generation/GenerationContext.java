@@ -111,11 +111,31 @@ public class GenerationContext {
     private Asset userVoiceAsset;
 
     /**
-     * Obrazy/wideo uploadowane przez usera jako materiał do generacji scen.
+     * Obrazy uploadowane przez usera jako materiał do generacji scen.
      * Używane przez ScriptStep jako kontekst przy budowaniu promptów.
      */
     @Builder.Default
     private List<Asset> userImageAssets = new ArrayList<>();
+
+    /**
+     * Custom media assets (images + videos) uploaded by user, sorted by orderIndex.
+     * Used by ImageStep/VideoStep to replace AI generation for specific scenes.
+     */
+    @Builder.Default
+    private List<Asset> customMediaAssets = new ArrayList<>();
+
+    /**
+     * Custom TTS voice-over assets uploaded by user, sorted by orderIndex.
+     * When non-empty, VoiceStep concatenates these instead of generating AI TTS.
+     */
+    @Builder.Default
+    private List<Asset> customTtsAssets = new ArrayList<>();
+
+    /**
+     * If true, GPT decides the optimal order for user-provided custom media assets.
+     * If false, assets are used in the order defined by their orderIndex.
+     */
+    private boolean useGptOrdering;
 
     /**
      * Czy pipeline próbuje ponownie wykorzystać wcześniejsze assety.
@@ -309,6 +329,21 @@ public class GenerationContext {
      */
     public boolean hasUserMusic() {
         return userMusicAsset != null;
+    }
+
+    /**
+     * Zwraca true jeśli user dostarczył własne media (images/videos) do scen.
+     */
+    public boolean hasCustomMedia() {
+        return customMediaAssets != null && !customMediaAssets.isEmpty();
+    }
+
+    /**
+     * Zwraca true jeśli user dostarczył własne TTS voice-over.
+     * VoiceStep używa tego do decyzji: user TTS vs AI TTS.
+     */
+    public boolean hasCustomTts() {
+        return customTtsAssets != null && !customTtsAssets.isEmpty();
     }
 
     /**

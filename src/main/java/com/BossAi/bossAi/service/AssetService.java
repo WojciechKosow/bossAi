@@ -47,6 +47,13 @@ public interface AssetService {
             MultipartFile file
     ) throws Exception;
 
+    AssetDTO createUserUpload(
+            String email,
+            AssetType type,
+            MultipartFile file,
+            Integer orderIndex
+    ) throws Exception;
+
     AssetDTO createAssetFromUrl(
             UUID userId,
             AssetType type,

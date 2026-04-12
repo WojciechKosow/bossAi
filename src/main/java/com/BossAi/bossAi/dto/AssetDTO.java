@@ -1,5 +1,6 @@
 package com.BossAi.bossAi.dto;
 
+import com.BossAi.bossAi.entity.AssetSource;
 import com.BossAi.bossAi.entity.AssetType;
 import lombok.AllArgsConstructor;
 import lombok.Data;
@@ -14,7 +15,9 @@ import java.util.UUID;
 public class AssetDTO {
     private UUID id;
     private AssetType type;
+    private AssetSource source;
     private String url;
+    private Integer orderIndex;
     private Integer durationSeconds;
     private Integer width;
     private Integer height;

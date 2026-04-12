@@ -39,9 +39,10 @@ public class AssetController {
     public AssetDTO uploadAsset(
             Authentication authentication,
             @RequestParam AssetType type,
-            @RequestParam MultipartFile file
+            @RequestParam MultipartFile file,
+            @RequestParam(required = false) Integer orderIndex
     ) throws Exception {
-        return assetService.createUserUpload(authentication.getName(), type, file);
+        return assetService.createUserUpload(authentication.getName(), type, file, orderIndex);
     }
 
     @DeleteMapping("/{id}")
