@@ -148,13 +148,30 @@ public class EdlGeneratorService {
                     projectAssets);
         } else {
             // === STARA ŚCIEŻKA: buduj segmenty ze scen (1 scena = 1 segment) ===
+            // Oblicz prawdziwy czas trwania z voice-over (master clock)
+            int voiceDurationMs = 0;
+            if (context.getWordTimings() != null && !context.getWordTimings().isEmpty()) {
+                voiceDurationMs = context.getWordTimings()
+                        .get(context.getWordTimings().size() - 1).endMs();
+            }
+
+            int sceneDurationMs = context.getScenes().stream()
+                    .mapToInt(SceneAsset::getDurationMs).sum();
+
+            // Jeśli voice jest dłuższy niż sceny, przeskaluj proportionally
+            double scale = (voiceDurationMs > sceneDurationMs && sceneDurationMs > 0)
+                    ? (double) voiceDurationMs / sceneDurationMs
+                    : 1.0;
+
             int timelineMs = 0;
+            String callbackBase = remotionProperties.getCallbackBaseUrl();
+
             for (int i = 0; i < context.getScenes().size(); i++) {
                 SceneAsset scene = context.getScenes().get(i);
                 ProjectAsset asset = assetBySceneIndex.get(i);
                 if (asset == null) continue;
 
-                int durationMs = scene.getDurationMs();
+                int durationMs = (int) (scene.getDurationMs() * scale);
 
                 // Music-aware effect z DirectorPlan (po EffectAssigner)
                 List<EdlEffect> effects = buildEffectsForScene(context, audioAnalysis, i);
@@ -173,7 +190,7 @@ public class EdlGeneratorService {
                 segments.add(EdlSegment.builder()
                         .id(UUID.randomUUID().toString())
                         .assetId(asset.getId().toString())
-                        .assetUrl(buildAssetUrl(remotionProperties.getCallbackBaseUrl(), asset.getId().toString(), asset.getStorageUrl()))
+                        .assetUrl(buildAssetUrl(callbackBase, asset.getId().toString(), asset.getStorageUrl()))
                         .assetType(asset.getType().name())
                         .startMs(timelineMs)
                         .endMs(timelineMs + durationMs)
@@ -182,6 +199,16 @@ public class EdlGeneratorService {
                         .build());
 
                 timelineMs += durationMs;
+            }
+
+            // Jeśli voice nadal dłuższy niż timeline (zaokrąglenia) — rozciągnij ostatni segment
+            if (voiceDurationMs > 0 && !segments.isEmpty()) {
+                EdlSegment lastSeg = segments.get(segments.size() - 1);
+                if (lastSeg.getEndMs() < voiceDurationMs) {
+                    lastSeg.setEndMs(voiceDurationMs);
+                    log.info("[EdlGenerator] Stretched last segment to cover voice duration: {}ms → {}ms",
+                            timelineMs, voiceDurationMs);
+                }
             }
         }
 
@@ -284,8 +311,8 @@ public class EdlGeneratorService {
     // JUSTIFIED CUTS → SEGMENTS — buduje segmenty z uzasadnionych cięć
     // =========================================================================
 
-    /** Max uses per single asset — more than this and repetition becomes obvious. */
-    private static final int MAX_ASSET_USES = 2;
+    /** Preferred max uses per asset — aim for this, but allow more if needed. */
+    private static final int PREFERRED_MAX_ASSET_USES = 2;
 
     /**
      * Buduje segmenty EDL na podstawie justified cuts z CutEngine.
@@ -377,12 +404,13 @@ public class EdlGeneratorService {
      * Rozprowadza assety po segmentach z zasadami:
      *   1. Round-robin spread — każdy asset użyty zanim zaczną się powtórzenia
      *   2. NIGDY ten sam asset pod rząd (po cut)
-     *   3. Max MAX_ASSET_USES użyć jednego assetu
+     *   3. Adaptacyjny max uses — ceil(segmentCount / assetCount), min 1, preferowany 2
+     *   4. GWARANCJA: ZAWSZE zwraca dokładnie segmentCount assetów (żadnych czarnych ekranów)
      *
      * Algorytm:
-     *   - Faza 1: przypisz każdy asset po kolei (round-robin)
-     *   - Faza 2: jeśli potrzeba więcej — druga runda z shuffle (unikaj consecutive)
-     *   - Faza 3: jeśli nadal za mało — użyj assetu z najniższym usage count (nie consecutive)
+     *   - Oblicz adaptacyjny maxUses na podstawie potrzeb
+     *   - Round-robin z shuffle w kolejnych rundach
+     *   - Emergency fill z least-used, non-consecutive assets
      */
     private List<ProjectAsset> distributeAssetsToSegments(List<ProjectAsset> assets, int segmentCount) {
         List<ProjectAsset> result = new ArrayList<>(segmentCount);
@@ -393,8 +421,17 @@ public class EdlGeneratorService {
             usageCount.put(a.getId().toString(), 0);
         }
 
-        // Faza 1+2: round-robin z shuffle w drugiej rundzie
-        List<ProjectAsset> pool = new ArrayList<>(assets); // pierwsza runda — oryginalna kolejność
+        // Adaptacyjny max uses — jeśli 4 assety i 12 segmentów → max 3 użycia per asset
+        // Preferujemy 2, ale idziemy wyżej jeśli trzeba
+        int maxUsesNeeded = (int) Math.ceil((double) segmentCount / assets.size());
+        int maxUses = Math.max(PREFERRED_MAX_ASSET_USES, maxUsesNeeded);
+
+        log.info("[EdlGenerator] Asset distribution — {} assets, {} segments, maxUses: {} (preferred: {})",
+                assets.size(), segmentCount, maxUses, PREFERRED_MAX_ASSET_USES);
+
+        // Round-robin z shuffle w kolejnych rundach
+        List<ProjectAsset> pool = new ArrayList<>(assets);
+        int round = 0;
 
         while (result.size() < segmentCount) {
             boolean addedAny = false;
@@ -406,7 +443,7 @@ public class EdlGeneratorService {
                 int uses = usageCount.getOrDefault(candidateId, 0);
 
                 // Max uses check
-                if (uses >= MAX_ASSET_USES) continue;
+                if (uses >= maxUses) continue;
 
                 // Consecutive check — nie ten sam co poprzedni
                 if (!result.isEmpty()) {
@@ -419,48 +456,43 @@ public class EdlGeneratorService {
                 addedAny = true;
             }
 
-            if (!addedAny) {
-                // Wszystkie assety na max uses — wymusz z najniższym usage (ignore max)
-                break;
-            }
+            if (!addedAny) break;
 
             // Następna runda — shuffle dla wizualnej różnorodności
+            round++;
             pool = new ArrayList<>(assets);
-            Collections.shuffle(pool);
+            if (round > 0) Collections.shuffle(pool);
         }
 
-        // Faza 3: emergency fill — jeśli nadal brakuje segmentów
-        if (result.size() < segmentCount) {
-            log.warn("[EdlGenerator] Asset pool exhausted at {} — need {}, force-filling remaining",
-                    result.size(), segmentCount);
+        // Emergency fill — GWARANCJA pełnego pokrycia (żadnych czarnych ekranów)
+        // Pozwala przekroczyć maxUses — lepiej powtórzony asset niż czarny ekran
+        while (result.size() < segmentCount) {
+            ProjectAsset best = null;
+            int bestUses = Integer.MAX_VALUE;
+            String lastId = result.isEmpty() ? "" : result.get(result.size() - 1).getId().toString();
 
-            while (result.size() < segmentCount) {
-                // Znajdź asset z najniższym usage, nie-consecutive
-                ProjectAsset best = null;
-                int bestUses = Integer.MAX_VALUE;
-                String lastId = result.isEmpty() ? "" : result.get(result.size() - 1).getId().toString();
-
-                for (ProjectAsset a : assets) {
-                    String aId = a.getId().toString();
-                    if (aId.equals(lastId)) continue; // NIGDY consecutive
-                    int uses = usageCount.getOrDefault(aId, 0);
-                    if (uses < bestUses) {
-                        bestUses = uses;
-                        best = a;
-                    }
+            for (ProjectAsset a : assets) {
+                String aId = a.getId().toString();
+                if (aId.equals(lastId) && assets.size() > 1) continue; // nie consecutive (chyba że 1 asset)
+                int uses = usageCount.getOrDefault(aId, 0);
+                if (uses < bestUses) {
+                    bestUses = uses;
+                    best = a;
                 }
-
-                if (best == null) {
-                    // Ekstremalny edge case — tylko 1 asset, musi być consecutive
-                    best = assets.get(result.size() % assets.size());
-                }
-
-                result.add(best);
-                usageCount.put(best.getId().toString(),
-                        usageCount.getOrDefault(best.getId().toString(), 0) + 1);
             }
+
+            if (best == null) {
+                // Jedyny asset — musi być consecutive
+                best = assets.get(0);
+            }
+
+            result.add(best);
+            usageCount.put(best.getId().toString(),
+                    usageCount.getOrDefault(best.getId().toString(), 0) + 1);
         }
 
+        // Log finalną dystrybucję
+        log.info("[EdlGenerator] Asset usage: {}", usageCount);
         return result;
     }
 
@@ -1114,6 +1146,24 @@ public class EdlGeneratorService {
         }
         sb.append("\n");
 
+        // Voice-over duration — this is the MASTER CLOCK for the timeline
+        int voiceDurationMs = 0;
+        if (context.getWordTimings() != null && !context.getWordTimings().isEmpty()) {
+            voiceDurationMs = context.getWordTimings()
+                    .get(context.getWordTimings().size() - 1).endMs();
+            sb.append("=== VOICE-OVER DURATION (MASTER CLOCK) ===\n");
+            sb.append("Voice duration: ").append(voiceDurationMs).append("ms (")
+                    .append(String.format("%.1f", voiceDurationMs / 1000.0)).append("s)\n");
+            sb.append("IMPORTANT: total_duration_ms MUST be ").append(voiceDurationMs)
+                    .append(". Segments must cover 0ms → ").append(voiceDurationMs).append("ms completely.\n");
+            int sceneTotalMs = context.getScenes().stream().mapToInt(SceneAsset::getDurationMs).sum();
+            if (voiceDurationMs > sceneTotalMs) {
+                sb.append("NOTE: Voice is LONGER than scenes total (").append(sceneTotalMs)
+                        .append("ms). You MUST reuse assets to cover the full voice duration.\n");
+            }
+            sb.append("Available visual assets: ").append(saIdx).append(". Distribute them evenly.\n\n");
+        }
+
         // Audio analysis — richer context
         if (audioAnalysis != null) {
             sb.append("=== MUSIC ANALYSIS ===\n");
@@ -1124,8 +1174,9 @@ public class EdlGeneratorService {
             sb.append("Danceability: ").append(String.format("%.2f", audioAnalysis.danceability())).append(" (0=low, 1=high)\n");
 
             if (audioAnalysis.beats() != null && !audioAnalysis.beats().isEmpty()) {
-                // Calculate total video duration to filter relevant beats
-                int totalMs = context.getScenes().stream().mapToInt(SceneAsset::getDurationMs).sum();
+                // Calculate total video duration to filter relevant beats (use voice duration as master)
+                int totalMs = voiceDurationMs > 0 ? voiceDurationMs
+                        : context.getScenes().stream().mapToInt(SceneAsset::getDurationMs).sum();
                 double totalSec = totalMs / 1000.0;
                 List<Double> relevantBeats = audioAnalysis.beats().stream()
                         .filter(b -> b <= totalSec + 1.0)
@@ -1242,11 +1293,18 @@ public class EdlGeneratorService {
                 === EDITING RULES (MANDATORY) ===
 
                 TIMELINE:
-                - Segments must cover the full timeline continuously (NO gaps, NO overlaps)
+                - Segments must cover the full timeline continuously (NO gaps, NO overlaps, NO black screens)
                 - Each segment MUST use an asset_id from the SCENES list above
-                - total_duration_ms MUST equal the sum of all scene durations
+                - total_duration_ms MUST match the voice-over duration (if provided below), NOT scene durations
+                - If voice-over is longer than scenes: REUSE assets — spread them evenly, NEVER same asset consecutively
                 - If a JUSTIFIED CUT PLAN is provided above: ALIGN segments to those cut points
                 - If no cut plan: ALIGN segment cut points to beat positions from music analysis
+
+                ASSET REUSE:
+                - Every asset should be used at least once before any asset is repeated
+                - Max 2-3 uses of one asset — prefer visual variety
+                - NEVER put the same asset_id in two consecutive segments
+                - If few assets: plan fewer cuts with longer segments rather than repeating excessively
 
                 FILM GRAMMAR (CRITICAL):
                 - NEVER cut in the middle of a word
