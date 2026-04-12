@@ -46,10 +46,11 @@ public class CutEngine {
      */
     private static final int MIN_WORDS_PER_SEGMENT = 3;
 
-    /**
-     * Maksymalna liczba użyć jednego assetu. Więcej = powtórzenia widoczne.
-     */
-    private static final int MAX_ASSET_USES = 2;
+    /** Preferowana max liczba użyć jednego assetu. Soft limit — przekraczany gdy trzeba. */
+    private static final int PREFERRED_MAX_ASSET_USES = 2;
+
+    /** Absolutny max użyć jednego assetu — powyżej wygląda jak zapętlone. */
+    private static final int ABSOLUTE_MAX_ASSET_USES = 4;
 
     /**
      * Generuje listę uzasadnionych cięć.
@@ -79,14 +80,24 @@ public class CutEngine {
         if (maxCutMs <= 0) maxCutMs = DEFAULT_MAX_CUT_MS;
         if (maxCutMs < minCutMs * 2) maxCutMs = minCutMs * 3;
 
-        // Ile segmentów możemy mieć przy max 2 użyciach per asset?
-        int maxSegments = availableAssetCount > 0
-                ? availableAssetCount * MAX_ASSET_USES
-                : Integer.MAX_VALUE;
+        // Ile segmentów możemy mieć?
+        // Adaptacyjny limit — preferujemy 2 użycia per asset, ale pozwalamy więcej
+        // gdy jest mało assetów, żeby uniknąć czarnych ekranów.
+        // Też ograniczamy przez faktyczny czas trwania — max segments = totalDuration / minCut
+        int maxByDuration = totalDurationMs / minCutMs;
+        int maxSegments;
+        if (availableAssetCount > 0) {
+            // Ile rund potrzebujemy? ceil(maxByDuration / assetCount)
+            int roundsNeeded = (int) Math.ceil((double) maxByDuration / availableAssetCount);
+            int effectiveMaxUses = Math.max(PREFERRED_MAX_ASSET_USES, Math.min(roundsNeeded, ABSOLUTE_MAX_ASSET_USES));
+            maxSegments = availableAssetCount * effectiveMaxUses;
+        } else {
+            maxSegments = maxByDuration;
+        }
 
         log.info("[CutEngine] Generating justified cuts — duration: {}ms, minCut: {}ms, maxCut: {}ms, " +
-                        "assets: {}, maxSegments: {}",
-                totalDurationMs, minCutMs, maxCutMs, availableAssetCount, maxSegments);
+                        "assets: {}, maxSegments: {}, maxByDuration: {}",
+                totalDurationMs, minCutMs, maxCutMs, availableAssetCount, maxSegments, maxByDuration);
 
         NarrationAnalysis.EditingIntent intent = narrationAnalysis.getEditingIntent();
 
@@ -624,8 +635,7 @@ public class CutEngine {
             // Sprawdź limit segmentów (selectedTimes.size() cut points = size() segments)
             // +1 bo jeszcze dodamy totalDurationMs na końcu
             if (selectedTimes.size() >= maxSegments) {
-                log.info("[CutEngine] Asset limit reached — {} segments max (from {} assets)",
-                        maxSegments, maxSegments / MAX_ASSET_USES);
+                log.info("[CutEngine] Segment limit reached — {} segments max", maxSegments);
                 break;
             }
 

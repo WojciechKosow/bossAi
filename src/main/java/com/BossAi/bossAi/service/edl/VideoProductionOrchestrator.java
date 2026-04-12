@@ -229,9 +229,31 @@ public class VideoProductionOrchestrator {
         }
 
         try {
-            int totalDurationMs = context.getScenes().stream()
+            // totalDurationMs = VOICE-OVER duration (master clock)
+            // Jeśli voice ma word timings, użyj ich jako prawdziwego czasu trwania.
+            // Scene durations (z GPT) to SZACUNEK — voice-over to PRAWDA.
+            int sceneDurationMs = context.getScenes().stream()
                     .mapToInt(SceneAsset::getDurationMs)
                     .sum();
+
+            int voiceDurationMs = 0;
+            if (context.getWordTimings() != null && !context.getWordTimings().isEmpty()) {
+                voiceDurationMs = context.getWordTimings()
+                        .get(context.getWordTimings().size() - 1).endMs();
+            }
+
+            // Voice-over jest master clockiem — nigdy nie może być czarnego ekranu
+            int totalDurationMs;
+            if (voiceDurationMs > 0) {
+                totalDurationMs = voiceDurationMs;
+                if (Math.abs(voiceDurationMs - sceneDurationMs) > 2000) {
+                    log.warn("[Orchestrator] Duration mismatch — voice: {}ms, scenes: {}ms. Using voice as master.",
+                            voiceDurationMs, sceneDurationMs);
+                }
+            } else {
+                totalDurationMs = sceneDurationMs;
+                log.info("[Orchestrator] No word timings — using scene duration: {}ms", sceneDurationMs);
+            }
 
             int minCutMs = editDna != null && editDna.getCutRhythm() != null
                     ? editDna.getCutRhythm().getMinCutMs() : 400;
