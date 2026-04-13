@@ -327,13 +327,21 @@ public class OpenAiService {
 
     @Retry(name = "openAi")
     public ScriptResult generateScript(String userPrompt) {
+        return generateScript(userPrompt, false);
+    }
+
+    public ScriptResult generateScript(String userPrompt, boolean hasCustomTts) {
         String contentType = detectContentType(userPrompt);
-        return generateScriptForContentType(userPrompt, contentType);
+        return generateScriptForContentType(userPrompt, contentType, hasCustomTts);
     }
 
     public ScriptResult generateScriptForContentType(String userPrompt, String contentType) {
-        log.info("[OpenAiService] generateScript \u2014 model: {}, contentType: {}",
-                properties.getModel().getChat(), contentType);
+        return generateScriptForContentType(userPrompt, contentType, false);
+    }
+
+    public ScriptResult generateScriptForContentType(String userPrompt, String contentType, boolean hasCustomTts) {
+        log.info("[OpenAiService] generateScript \u2014 model: {}, contentType: {}, hasCustomTts: {}",
+                properties.getModel().getChat(), contentType, hasCustomTts);
 
         String systemPrompt = buildSystemPrompt(contentType);
 
@@ -354,7 +362,7 @@ public class OpenAiService {
                 .bodyToMono(String.class)
                 .block();
 
-        return parseScriptResult(rawJson);
+        return parseScriptResult(rawJson, hasCustomTts);
     }
 
     private String buildSystemPrompt(String contentType) {
@@ -509,7 +517,7 @@ public class OpenAiService {
     // PARSOWANIE
     // =========================================================================
 
-    private ScriptResult parseScriptResult(String rawResponse) {
+    private ScriptResult parseScriptResult(String rawResponse, boolean hasCustomTts) {
         try {
             JsonNode root = objectMapper.readTree(rawResponse);
 
@@ -523,7 +531,7 @@ public class OpenAiService {
 
             ScriptResult result = objectMapper.readValue(jsonContent, ScriptResult.class);
 
-            validateScriptResult(result);
+            validateScriptResult(result, hasCustomTts);
 
             // Normalize: auto-correct VIDEO scene durations to match Kling API minimum
             result = normalizeScriptResult(result);
@@ -541,8 +549,8 @@ public class OpenAiService {
         }
     }
 
-    private void validateScriptResult(ScriptResult result) {
-        if (result.narration() == null || result.narration().isBlank()) {
+    private void validateScriptResult(ScriptResult result, boolean hasCustomTts) {
+        if (!hasCustomTts && (result.narration() == null || result.narration().isBlank())) {
             throw new RuntimeException("ScriptResult: brak narracji");
         }
         if (result.scenes() == null || result.scenes().isEmpty()) {
