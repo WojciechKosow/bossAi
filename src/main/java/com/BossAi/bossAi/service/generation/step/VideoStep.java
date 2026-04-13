@@ -1,5 +1,6 @@
 package com.BossAi.bossAi.service.generation.step;
 
+import com.BossAi.bossAi.config.properties.FfmpegProperties;
 import com.BossAi.bossAi.entity.Asset;
 import com.BossAi.bossAi.entity.AssetSource;
 import com.BossAi.bossAi.entity.AssetType;
@@ -16,10 +17,14 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -57,6 +62,7 @@ public class VideoStep implements GenerationStep {
     private final AssetService assetService;
     private final ModelSelector modelSelector;
     private final ImageToClipStep imageToClipStep;
+    private final FfmpegProperties ffmpegProperties;
 
     /** Maksymalna liczba scen VIDEO — safety cap niezależnie od GPT output */
     private static final int MAX_VIDEO_SCENES = 2;
@@ -135,12 +141,17 @@ public class VideoStep implements GenerationStep {
             if (reusedAsset != null && reusedAsset.getStorageKey() != null) {
                 try {
                     byte[] existingBytes = storageService.load(reusedAsset.getStorageKey());
-                    String filename = String.format("scene_%02d_%s.mp4", scene.getIndex(), context.getGenerationId());
-                    Path videoPath = workDir.resolve(filename);
-                    Files.write(videoPath, existingBytes);
-                    scene.setVideoLocalPath(videoPath.toString());
+                    String rawFilename = String.format("scene_%02d_%s_raw.mp4", scene.getIndex(), context.getGenerationId());
+                    Path rawPath = workDir.resolve(rawFilename);
+                    Files.write(rawPath, existingBytes);
+
+                    String normalizedFilename = String.format("scene_%02d_%s.mp4", scene.getIndex(), context.getGenerationId());
+                    Path normalizedPath = workDir.resolve(normalizedFilename);
+                    normalizeCustomVideo(rawPath, normalizedPath, scene.getDurationMs());
+
+                    scene.setVideoLocalPath(normalizedPath.toString());
                     reusedCount++;
-                    log.warn("[VideoStep] TEST MODE — scene {} REUSED VIDEO asset {} ({} bytes)",
+                    log.warn("[VideoStep] TEST MODE — scene {} REUSED VIDEO asset {} (normalized to 1080x1920, {} bytes)",
                             scene.getIndex(), reusedAsset.getId(), existingBytes.length);
                     continue;
                 } catch (Exception e) {
@@ -207,12 +218,17 @@ public class VideoStep implements GenerationStep {
                 if (customAsset.getType() == AssetType.VIDEO) {
                     try {
                         byte[] customBytes = storageService.load(customAsset.getStorageKey());
-                        String filename = String.format("scene_%02d_%s.mp4", scene.getIndex(), context.getGenerationId());
-                        Path videoPath = workDir.resolve(filename);
-                        Files.write(videoPath, customBytes);
-                        scene.setVideoLocalPath(videoPath.toString());
+                        String rawFilename = String.format("scene_%02d_%s_raw.mp4", scene.getIndex(), context.getGenerationId());
+                        Path rawPath = workDir.resolve(rawFilename);
+                        Files.write(rawPath, customBytes);
+
+                        String normalizedFilename = String.format("scene_%02d_%s.mp4", scene.getIndex(), context.getGenerationId());
+                        Path normalizedPath = workDir.resolve(normalizedFilename);
+                        normalizeCustomVideo(rawPath, normalizedPath, scene.getDurationMs());
+
+                        scene.setVideoLocalPath(normalizedPath.toString());
                         customCount++;
-                        log.info("[VideoStep] Scena {} CUSTOM VIDEO — asset: {}, {} bytes",
+                        log.info("[VideoStep] Scena {} CUSTOM VIDEO (normalized to 1080x1920) — asset: {}, {} bytes",
                                 scene.getIndex(), customAsset.getId(), customBytes.length);
                         continue;
                     } catch (Exception e) {
@@ -237,15 +253,20 @@ public class VideoStep implements GenerationStep {
 
                 if (reusedAsset != null && reusedAsset.getStorageKey() != null) {
                     try {
-                        // REUSE — pobierz istniejące wideo z storage
+                        // REUSE — pobierz istniejące wideo z storage i normalizuj do 1080x1920
                         byte[] existingBytes = storageService.load(reusedAsset.getStorageKey());
-                        String filename = String.format("scene_%02d_%s.mp4", scene.getIndex(), context.getGenerationId());
-                        Path videoPath = workDir.resolve(filename);
-                        Files.write(videoPath, existingBytes);
-                        scene.setVideoLocalPath(videoPath.toString());
+                        String rawFilename = String.format("scene_%02d_%s_raw.mp4", scene.getIndex(), context.getGenerationId());
+                        Path rawPath = workDir.resolve(rawFilename);
+                        Files.write(rawPath, existingBytes);
+
+                        String normalizedFilename = String.format("scene_%02d_%s.mp4", scene.getIndex(), context.getGenerationId());
+                        Path normalizedPath = workDir.resolve(normalizedFilename);
+                        normalizeCustomVideo(rawPath, normalizedPath, scene.getDurationMs());
+
+                        scene.setVideoLocalPath(normalizedPath.toString());
                         reusedCount++;
                         videoCount++;
-                        log.info("[VideoStep] VIDEO scena {} REUSED — asset: {}, {} bytes",
+                        log.info("[VideoStep] VIDEO scena {} REUSED (normalized to 1080x1920) — asset: {}, {} bytes",
                                 scene.getIndex(), reusedAsset.getId(), existingBytes.length);
                         continue;
                     } catch (Exception e) {
@@ -356,6 +377,76 @@ public class VideoStep implements GenerationStep {
         Set<Integer> fallback = lastIndex == 0 ? Set.of(0) : Set.of(0, lastIndex);
         log.info("[VideoStep] Brak mediaAssignments — fallback VIDEO sceny = {}", fallback);
         return fallback;
+    }
+
+    // =========================================================================
+    // VIDEO NORMALIZATION (custom + reused videos → 1080x1920)
+    // =========================================================================
+
+    /**
+     * Normalizes a user-uploaded or reused video to 1080x1920 (TikTok portrait).
+     *
+     * - scale to cover 1080x1920 (force_original_aspect_ratio=increase)
+     * - crop center to exactly 1080x1920
+     * - force 30fps, yuv420p, libx264 for xfade compatibility
+     * - strip audio (added later in RenderStep)
+     * - trim to scene duration if provided
+     */
+    private void normalizeCustomVideo(Path input, Path output, int durationMs) throws Exception {
+        String vf = "scale=1080:1920:force_original_aspect_ratio=increase," +
+                "crop=1080:1920," +
+                "setsar=1";
+
+        List<String> cmd = new ArrayList<>();
+        cmd.add(ffmpegProperties.getBinary().getPath());
+        cmd.add("-y");
+        cmd.addAll(List.of("-i", input.toString()));
+        cmd.addAll(List.of("-vf", vf));
+        if (durationMs > 0) {
+            cmd.addAll(List.of("-t", String.format(Locale.US, "%.3f", durationMs / 1000.0)));
+        }
+        cmd.addAll(List.of("-c:v", "libx264"));
+        cmd.addAll(List.of("-preset", "fast"));
+        cmd.addAll(List.of("-crf", "23"));
+        cmd.addAll(List.of("-pix_fmt", "yuv420p"));
+        cmd.addAll(List.of("-r", "30"));
+        cmd.addAll(List.of("-an"));
+        cmd.addAll(List.of("-movflags", "+faststart"));
+        cmd.add(output.toString());
+
+        runCommand(cmd, "normalize-video-" + input.getFileName());
+
+        // Clean up raw file
+        try { Files.deleteIfExists(input); } catch (Exception ignored) {}
+    }
+
+    private void runCommand(List<String> cmd, String phase) throws Exception {
+        log.info("[VideoStep][{}] Komenda: {}", phase, String.join(" ", cmd));
+
+        ProcessBuilder pb = new ProcessBuilder(cmd);
+        pb.redirectErrorStream(true);
+        Process process = pb.start();
+
+        StringBuilder ffmpegLog = new StringBuilder();
+        try (BufferedReader reader =
+                     new BufferedReader(new InputStreamReader(process.getInputStream()))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                ffmpegLog.append(line).append("\n");
+            }
+        }
+
+        int exitCode = process.waitFor();
+
+        if (exitCode != 0) {
+            String logTail = ffmpegLog.length() > 1500
+                    ? ffmpegLog.substring(ffmpegLog.length() - 1500)
+                    : ffmpegLog.toString();
+            throw new RuntimeException("[VideoStep][" + phase + "] FFmpeg kod " + exitCode
+                    + "\n" + logTail);
+        }
+
+        log.debug("[VideoStep][{}] OK", phase);
     }
 
     private Path getWorkingDir(GenerationContext context) {
