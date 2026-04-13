@@ -102,9 +102,13 @@ public class DirectorAiServiceImpl implements DirectorAiService {
                     """);
         }
 
-        sb.append("NARRATION:\n")
-                .append(context.getScript().narration())
-                .append("\n\n");
+        if (context.getScript().narration() != null) {
+            sb.append("NARRATION:\n")
+                    .append(context.getScript().narration())
+                    .append("\n\n");
+        } else {
+            sb.append("NARRATION: (custom TTS provided by user — narration not available)\n\n");
+        }
 
         sb.append("SCENES:\n");
         context.getScenes().forEach(scene -> {

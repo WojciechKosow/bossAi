@@ -81,14 +81,16 @@ public class ScriptStep implements GenerationStep {
 
         ScriptResult script;
 
+        boolean hasCustomTts = context.hasCustomTts();
+
         if (contentType != null) {
             // Wiemy jaki typ — bezpośrednio generuj z odpowiednim promptem
-            log.info("[ScriptStep] Generuję dla contentType: {}", contentType);
-            script = openAiService.generateScriptForContentType(enrichedPrompt, contentType);
+            log.info("[ScriptStep] Generuję dla contentType: {}, hasCustomTts: {}", contentType, hasCustomTts);
+            script = openAiService.generateScriptForContentType(enrichedPrompt, contentType, hasCustomTts);
         } else {
             // Auto-detect content type przez OpenAiService (dodatkowy GPT call)
-            log.info("[ScriptStep] Auto-detect content type");
-            script = openAiService.generateScript(enrichedPrompt);
+            log.info("[ScriptStep] Auto-detect content type, hasCustomTts: {}", hasCustomTts);
+            script = openAiService.generateScript(enrichedPrompt, hasCustomTts);
         }
 
         context.setScript(script);
