@@ -1,6 +1,7 @@
 package com.BossAi.bossAi.request;
 
 import com.BossAi.bossAi.entity.VideoStyle;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import jakarta.validation.constraints.NotBlank;
@@ -24,6 +25,7 @@ public class TikTokAdRequest {
 
     private List<UUID> assetIds;
 
+    @JsonIgnore
     private MultipartFile musicFile;
 
     @Enumerated(EnumType.STRING)
