@@ -22,9 +22,19 @@ public class GenerationController {
 
     private final GenerationService generationService;
 
-    @PostMapping(value = "/tiktok-ad", consumes = {MediaType.MULTIPART_FORM_DATA_VALUE, MediaType.APPLICATION_JSON_VALUE})
+    @PostMapping(value = "/tiktok-ad", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<GenerationResponse> generateTikTokAd(
             @Valid @ModelAttribute TikTokAdRequest request,
+            Authentication authentication
+    ) throws Exception {
+        return ResponseEntity.accepted().body(
+                generationService.generateTikTokAd(request, authentication.getName())
+        );
+    }
+
+    @PostMapping(value = "/tiktok-ad", consumes = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<GenerationResponse> generateTikTokAdJson(
+            @Valid @RequestBody TikTokAdRequest request,
             Authentication authentication
     ) throws Exception {
         return ResponseEntity.accepted().body(
