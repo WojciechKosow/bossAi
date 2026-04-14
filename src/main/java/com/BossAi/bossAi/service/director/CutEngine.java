@@ -63,6 +63,7 @@ public class CutEngine {
      * @param minCutMs          minimalny czas ujęcia (z EditDna)
      * @param maxCutMs          maksymalny czas ujęcia (z EditDna)
      * @param availableAssetCount  ile unikalnych assetów jest dostępnych
+     * @param sceneCount        ile scen (tematycznych segmentów) ma film
      */
     public List<JustifiedCut> generateCuts(
             NarrationAnalysis narrationAnalysis,
@@ -72,7 +73,8 @@ public class CutEngine {
             int totalDurationMs,
             int minCutMs,
             int maxCutMs,
-            int availableAssetCount) {
+            int availableAssetCount,
+            int sceneCount) {
 
         // Enforce sane minimums — nigdy poniżej 1500ms
         if (minCutMs < ABSOLUTE_MIN_CUT_MS) minCutMs = ABSOLUTE_MIN_CUT_MS;
@@ -80,24 +82,37 @@ public class CutEngine {
         if (maxCutMs <= 0) maxCutMs = DEFAULT_MAX_CUT_MS;
         if (maxCutMs < minCutMs * 2) maxCutMs = minCutMs * 3;
 
-        // Ile segmentów możemy mieć?
-        // Adaptacyjny limit — preferujemy 2 użycia per asset, ale pozwalamy więcej
-        // gdy jest mało assetów, żeby uniknąć czarnych ekranów.
-        // Też ograniczamy przez faktyczny czas trwania — max segments = totalDuration / minCut
-        int maxByDuration = totalDurationMs / minCutMs;
-        int maxSegments;
+        // === INTELIGENTNY LIMIT SEGMENTÓW ===
+        // Filozofia: sceneCount definiuje ILE TEMATÓW jest w filmie.
+        // Każdy temat = 1 główny segment. Dodatkowe cuty wewnątrz tematu
+        // są dozwolone TYLKO jeśli segment jest wystarczająco długi.
+        //
+        // Przykład "Top 3 places" (3 sceny, 30s):
+        //   - Minimalne cuty: 3 (po jednym per temat)
+        //   - Sensowne cuty: 5-6 (3 tematy + parę cutów wewnątrz dłuższych scen)
+        //   - NIE: 15+ cutów które mieszają assety
+
+        int effectiveSceneCount = sceneCount > 0 ? sceneCount : availableAssetCount;
+        int avgSceneDuration = effectiveSceneCount > 0 ? totalDurationMs / effectiveSceneCount : totalDurationMs;
+
+        // Ile dodatkowych cutów wewnątrz scen? Zależy od długości sceny
+        // Scena 3s → 0 dodatkowych, scena 6s → 1 dodatkowy, scena 10s → 2 dodatkowe
+        int intraCutsPerScene = Math.max(0, (avgSceneDuration - 4000) / 4000);
+        int maxSegments = effectiveSceneCount + (effectiveSceneCount * intraCutsPerScene);
+
+        // Dodatkowy limit od assetów (jeśli mniej assetów niż scen)
         if (availableAssetCount > 0) {
-            // Ile rund potrzebujemy? ceil(maxByDuration / assetCount)
-            int roundsNeeded = (int) Math.ceil((double) maxByDuration / availableAssetCount);
-            int effectiveMaxUses = Math.max(PREFERRED_MAX_ASSET_USES, Math.min(roundsNeeded, ABSOLUTE_MAX_ASSET_USES));
-            maxSegments = availableAssetCount * effectiveMaxUses;
-        } else {
-            maxSegments = maxByDuration;
+            int maxByAssets = availableAssetCount * ABSOLUTE_MAX_ASSET_USES;
+            maxSegments = Math.min(maxSegments, maxByAssets);
         }
 
-        log.info("[CutEngine] Generating justified cuts — duration: {}ms, minCut: {}ms, maxCut: {}ms, " +
-                        "assets: {}, maxSegments: {}, maxByDuration: {}",
-                totalDurationMs, minCutMs, maxCutMs, availableAssetCount, maxSegments, maxByDuration);
+        // Minimum: tyle segmentów ile scen (każdy temat musi mieć co najmniej 1)
+        maxSegments = Math.max(maxSegments, effectiveSceneCount);
+
+        log.info("[CutEngine] Generating cuts — duration: {}ms, scenes: {}, assets: {}, " +
+                        "avgSceneDur: {}ms, intraCuts/scene: {}, maxSegments: {}",
+                totalDurationMs, sceneCount, availableAssetCount,
+                avgSceneDuration, intraCutsPerScene, maxSegments);
 
         NarrationAnalysis.EditingIntent intent = narrationAnalysis.getEditingIntent();
 
@@ -128,7 +143,7 @@ public class CutEngine {
     }
 
     /**
-     * Backwards compat — bez availableAssetCount.
+     * Backwards compat — bez availableAssetCount i sceneCount.
      */
     public List<JustifiedCut> generateCuts(
             NarrationAnalysis narrationAnalysis,
@@ -139,7 +154,23 @@ public class CutEngine {
             int minCutMs,
             int maxCutMs) {
         return generateCuts(narrationAnalysis, speechAnalysis, audioAnalysis,
-                wordTimings, totalDurationMs, minCutMs, maxCutMs, 0);
+                wordTimings, totalDurationMs, minCutMs, maxCutMs, 0, 0);
+    }
+
+    /**
+     * Backwards compat — bez sceneCount.
+     */
+    public List<JustifiedCut> generateCuts(
+            NarrationAnalysis narrationAnalysis,
+            SpeechTimingAnalysis speechAnalysis,
+            AudioAnalysisResponse audioAnalysis,
+            List<SubtitleService.WordTiming> wordTimings,
+            int totalDurationMs,
+            int minCutMs,
+            int maxCutMs,
+            int availableAssetCount) {
+        return generateCuts(narrationAnalysis, speechAnalysis, audioAnalysis,
+                wordTimings, totalDurationMs, minCutMs, maxCutMs, availableAssetCount, 0);
     }
 
     // =========================================================================
