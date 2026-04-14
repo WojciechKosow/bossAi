@@ -270,13 +270,15 @@ public class VideoProductionOrchestrator {
                 }
             }
 
-            log.info("[Orchestrator] Available visual assets: {} — max segments: {}",
-                    availableAssetCount, availableAssetCount * 2);
+            int sceneCount = context.getScenes().size();
+
+            log.info("[Orchestrator] Available visual assets: {}, scenes: {}",
+                    availableAssetCount, sceneCount);
 
             List<JustifiedCut> cuts = cutEngine.generateCuts(
                     narrationAnalysis, speechAnalysis, audioAnalysis,
                     context.getWordTimings(), totalDurationMs, minCutMs, maxCutMs,
-                    availableAssetCount);
+                    availableAssetCount, sceneCount);
 
             log.info("[Orchestrator] CutEngine complete — {} justified cuts for {}ms video",
                     cuts.size(), totalDurationMs);
