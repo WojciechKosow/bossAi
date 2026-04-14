@@ -56,6 +56,8 @@ public class VideoProductionOrchestrator {
     private final NarrationAnalyzer narrationAnalyzer;
     private final SpeechAnalyzer speechAnalyzer;
     private final CutEngine cutEngine;
+    private final AssetAnalyzer assetAnalyzer;
+    private final UserIntentParser userIntentParser;
     private final ObjectMapper objectMapper;
 
     /**
@@ -78,7 +80,13 @@ public class VideoProductionOrchestrator {
             // 2. Pobierz assety projektu z bazy
             List<ProjectAsset> projectAssets = projectAssetService.getProjectAssetEntities(projectId);
 
+            // 2.5 NOWE: Analiza assetów + parsowanie intencji usera
+            //   Te dwa kroki dają GPT "oczy" i "uszy" — zamiast ślepego montażu,
+            //   system wie CO jest na assetach i CZEGO chce user.
+            analyzeAssetsAndIntent(context);
+
             // 3. WARSTWA A: Analiza narracji (GPT — semantyczne segmenty + editing intent)
+            //    TERAZ z kontekstem: UserEditIntent + AssetProfiles
             NarrationAnalysis narrationAnalysis = analyzeNarration(context, audioAnalysis);
             context.setNarrationAnalysis(narrationAnalysis);
 
@@ -87,9 +95,11 @@ public class VideoProductionOrchestrator {
             context.setSpeechTimingAnalysis(speechAnalysis);
 
             // 5. Generuj EditDna z narration analysis (LLM Director — osobowość montażu)
+            //    TERAZ z kontekstem: UserEditIntent + AssetProfiles (via context)
             EditDna editDna = editDnaGenerator.generate(context, audioAnalysis, narrationAnalysis);
 
-            // 6. WARSTWA C: CutEngine — "mózg montażysty" (uzasadnione cięcia)
+            // 6. WARSTWA C+D: CutEngine — "mózg montażysty" (uzasadnione cięcia)
+            //    TERAZ z UserEditIntent jako źródło kandydatów na cięcia
             List<JustifiedCut> justifiedCuts = generateJustifiedCuts(
                     context, narrationAnalysis, speechAnalysis, audioAnalysis, editDna, projectAssets);
             context.setJustifiedCuts(justifiedCuts);
@@ -137,6 +147,47 @@ public class VideoProductionOrchestrator {
     }
 
     // ─── Private ──────────────────────────────────────────────────────
+
+    /**
+     * NOWE: Analiza assetów + parsowanie intencji usera.
+     *
+     * Krok 1: AssetAnalyzer analizuje custom media → AssetProfile[]
+     * Krok 2: UserIntentParser parsuje prompt → UserEditIntent
+     *
+     * Oba wyniki zapisywane na GenerationContext i używane przez:
+     *   - ScriptStep (już wykonany — assety i intent są wstrzykiwane przez
+     *     orchestrator PRZED production, ale ScriptStep czyta z context)
+     *   - NarrationAnalyzer, EditDnaGenerator, CutEngine, EdlGenerator
+     */
+    private void analyzeAssetsAndIntent(GenerationContext context) {
+        // Krok 1: Analiza assetów (tylko jeśli user dostarczył custom media)
+        List<AssetProfile> profiles = List.of();
+        if (context.hasCustomMedia()) {
+            try {
+                profiles = assetAnalyzer.analyzeAssets(
+                        context.getCustomMediaAssets(), context.getPrompt());
+                context.setAssetProfiles(profiles);
+                log.info("[Orchestrator] Asset analysis complete — {} profiles", profiles.size());
+            } catch (Exception e) {
+                log.warn("[Orchestrator] Asset analysis failed — continuing without profiles: {}", e.getMessage());
+            }
+        }
+
+        // Krok 2: Parsowanie intencji usera
+        try {
+            UserEditIntent editIntent = userIntentParser.parseIntent(
+                    context.getPrompt(),
+                    context.hasCustomMedia() ? context.getCustomMediaAssets() : null,
+                    profiles);
+            context.setUserEditIntent(editIntent);
+            log.info("[Orchestrator] User intent parsed — explicit: {}, placements: {}, pacing: {}",
+                    editIntent.hasExplicitInstructions(),
+                    editIntent.getPlacements() != null ? editIntent.getPlacements().size() : 0,
+                    editIntent.getPacingPreference());
+        } catch (Exception e) {
+            log.warn("[Orchestrator] User intent parsing failed — continuing without intent: {}", e.getMessage());
+        }
+    }
 
     private AudioAnalysisResponse analyzeMusic(GenerationContext context) {
         if (context.getMusicLocalPath() == null) {
@@ -275,10 +326,12 @@ public class VideoProductionOrchestrator {
             log.info("[Orchestrator] Available visual assets: {}, scenes: {}",
                     availableAssetCount, sceneCount);
 
+            // Pass UserEditIntent to CutEngine (warstwa D)
+            UserEditIntent editIntent = context.getUserEditIntent();
             List<JustifiedCut> cuts = cutEngine.generateCuts(
                     narrationAnalysis, speechAnalysis, audioAnalysis,
                     context.getWordTimings(), totalDurationMs, minCutMs, maxCutMs,
-                    availableAssetCount, sceneCount);
+                    availableAssetCount, sceneCount, editIntent);
 
             log.info("[Orchestrator] CutEngine complete — {} justified cuts for {}ms video",
                     cuts.size(), totalDurationMs);

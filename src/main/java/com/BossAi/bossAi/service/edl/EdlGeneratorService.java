@@ -5,9 +5,11 @@ import com.BossAi.bossAi.dto.edl.*;
 import com.BossAi.bossAi.entity.ProjectAsset;
 import com.BossAi.bossAi.service.OpenAiService;
 import com.BossAi.bossAi.service.audio.AudioAnalysisResponse;
+import com.BossAi.bossAi.service.director.AssetProfile;
 import com.BossAi.bossAi.service.director.EffectType;
 import com.BossAi.bossAi.service.director.JustifiedCut;
 import com.BossAi.bossAi.service.director.NarrationAnalysis;
+import com.BossAi.bossAi.service.director.UserEditIntent;
 import com.BossAi.bossAi.service.generation.GenerationContext;
 import com.BossAi.bossAi.service.generation.context.SceneAsset;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -1125,6 +1127,65 @@ public class EdlGeneratorService {
             sb.append("\n");
         }
 
+        // === USER EDIT INTENT — parsed structural instructions ===
+        UserEditIntent editIntent = context.getUserEditIntent();
+        if (editIntent != null && editIntent.hasExplicitInstructions()) {
+            sb.append("=== USER'S EDITING INSTRUCTIONS (MANDATORY — override defaults) ===\n");
+            sb.append("Goal: ").append(editIntent.getOverallGoal()).append("\n");
+
+            if (editIntent.getPlacements() != null && !editIntent.getPlacements().isEmpty()) {
+                sb.append("Asset role assignments:\n");
+                for (var p : editIntent.getPlacements()) {
+                    if (!"auto".equals(p.getRole())) {
+                        sb.append("  Asset ").append(p.getAssetIndex())
+                                .append(" → ROLE=").append(p.getRole())
+                                .append(", TIMING=").append(p.getTiming());
+                        if (p.getDurationHintMs() > 0) {
+                            sb.append(", duration_hint=").append(p.getDurationHintMs()).append("ms");
+                        }
+                        if (p.getUserInstruction() != null) {
+                            sb.append(" (user said: \"").append(p.getUserInstruction()).append("\")");
+                        }
+                        sb.append("\n");
+                    }
+                }
+                sb.append("""
+                        CRITICAL RULES FOR USER ROLE ASSIGNMENTS:
+                        - role=intro → This asset's segment MUST be FIRST in timeline (start_ms=0)
+                        - role=outro → This asset's segment MUST be LAST in timeline
+                        - role=hook → This asset must appear within first 3 seconds
+                        - HARD CUT between assets with DIFFERENT roles (intro→content, content→outro)
+                        - The user's role assignments OVERRIDE all other heuristics
+                        """);
+            }
+
+            if (editIntent.getStructureHints() != null && !editIntent.getStructureHints().isEmpty()) {
+                sb.append("Structure: ").append(String.join(", ", editIntent.getStructureHints())).append("\n");
+            }
+            if (!"auto".equals(editIntent.getPacingPreference())) {
+                sb.append("Pacing: ").append(editIntent.getPacingPreference()).append("\n");
+            }
+            sb.append("\n");
+        }
+
+        // === ASSET VISUAL PROFILES — what's actually in each asset ===
+        List<AssetProfile> profiles = context.getAssetProfiles();
+        if (profiles != null && !profiles.isEmpty()) {
+            sb.append("=== ASSET VISUAL PROFILES (from analysis) ===\n");
+            for (AssetProfile profile : profiles) {
+                sb.append("  Asset ").append(profile.getIndex())
+                        .append(": role=").append(profile.getSuggestedRole())
+                        .append(", mood=").append(profile.getMood())
+                        .append(", complexity=").append(String.format("%.1f", profile.getVisualComplexity()))
+                        .append(", visual=\"").append(profile.getVisualDescription()).append("\"");
+                if (profile.getTags() != null && !profile.getTags().isEmpty()) {
+                    sb.append(", tags=").append(profile.getTags());
+                }
+                sb.append("\n");
+            }
+            sb.append("Use these profiles to match effects to content (simple→ken_burns, complex→minimal).\n\n");
+        }
+
         // Narration
         if (context.getScript() != null) {
             sb.append("NARRATION:\n").append(context.getScript().narration()).append("\n\n");
@@ -1144,10 +1205,29 @@ public class EdlGeneratorService {
         for (int i = 0; i < context.getScenes().size(); i++) {
             SceneAsset scene = context.getScenes().get(i);
             ProjectAsset asset = sceneAssetMap.get(i);
+
+            // Enrich with profile and placement info
+            AssetProfile profile = (profiles != null && i < profiles.size()) ? profiles.get(i) : null;
+            UserEditIntent.AssetPlacement placement = (editIntent != null)
+                    ? editIntent.getPlacementForAsset(i) : null;
+
             sb.append("  Scene ").append(i).append(":\n");
             sb.append("    asset_id: ").append(asset != null ? asset.getId() : "MISSING").append("\n");
             sb.append("    asset_type: ").append(asset != null ? asset.getType() : "UNKNOWN").append("\n");
             sb.append("    duration: ").append(scene.getDurationMs()).append("ms\n");
+
+            // Role from user intent or asset profile
+            if (placement != null && !"auto".equals(placement.getRole())) {
+                sb.append("    ROLE (user-assigned): ").append(placement.getRole()).append("\n");
+            } else if (profile != null) {
+                sb.append("    role (suggested): ").append(profile.getSuggestedRole()).append("\n");
+            }
+
+            if (profile != null) {
+                sb.append("    visual_profile: \"").append(profile.getVisualDescription()).append("\"\n");
+                sb.append("    mood: ").append(profile.getMood()).append("\n");
+            }
+
             if (scene.getImagePrompt() != null) {
                 sb.append("    visual_content: \"").append(scene.getImagePrompt()).append("\"\n");
             }

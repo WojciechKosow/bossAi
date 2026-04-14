@@ -5,6 +5,8 @@ import com.BossAi.bossAi.service.audio.AudioAnalysisResponse;
 import com.BossAi.bossAi.service.generation.GenerationContext;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+
+import java.util.List;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -193,6 +195,57 @@ public class NarrationAnalyzer {
                 }
             }
             sb.append("\n");
+        }
+
+        // User editing intent — drives segment structure
+        UserEditIntent editIntent = context.getUserEditIntent();
+        if (editIntent != null && editIntent.hasExplicitInstructions()) {
+            sb.append("=== USER'S EDITING INTENT (RESPECT THIS) ===\n");
+            sb.append("Goal: ").append(editIntent.getOverallGoal()).append("\n");
+
+            if (editIntent.getStructureHints() != null && !editIntent.getStructureHints().isEmpty()) {
+                sb.append("Structure hints: ").append(String.join(", ", editIntent.getStructureHints())).append("\n");
+            }
+
+            if (editIntent.getPlacements() != null && !editIntent.getPlacements().isEmpty()) {
+                sb.append("Asset roles assigned by user:\n");
+                for (var p : editIntent.getPlacements()) {
+                    if (!"auto".equals(p.getRole())) {
+                        sb.append("  Asset ").append(p.getAssetIndex())
+                                .append(" → role=").append(p.getRole())
+                                .append(", timing=").append(p.getTiming());
+                        if (p.getUserInstruction() != null) {
+                            sb.append(" (\"").append(p.getUserInstruction()).append("\")");
+                        }
+                        sb.append("\n");
+                    }
+                }
+                sb.append("IMPORTANT: Your narration segments MUST align with these roles.\n");
+                sb.append("If user assigned asset as 'intro' → first segment should be type=hook.\n");
+                sb.append("If user assigned asset as 'outro' → last segment should be type=cta.\n");
+            }
+
+            if (!"auto".equals(editIntent.getPacingPreference())) {
+                sb.append("User wants pacing: ").append(editIntent.getPacingPreference()).append("\n");
+            }
+            sb.append("\n");
+        }
+
+        // Asset profiles — visual context
+        List<AssetProfile> profiles = context.getAssetProfiles();
+        if (profiles != null && !profiles.isEmpty()) {
+            sb.append("=== ASSET VISUAL PROFILES ===\n");
+            for (AssetProfile profile : profiles) {
+                sb.append("  Asset ").append(profile.getIndex())
+                        .append(": role=").append(profile.getSuggestedRole())
+                        .append(", mood=").append(profile.getMood())
+                        .append(", visual=\"").append(profile.getVisualDescription()).append("\"");
+                if (profile.getTags() != null && !profile.getTags().isEmpty()) {
+                    sb.append(", tags=").append(profile.getTags());
+                }
+                sb.append("\n");
+            }
+            sb.append("Match narration segments to these visuals — each segment should align with its asset's content.\n\n");
         }
 
         sb.append("""
