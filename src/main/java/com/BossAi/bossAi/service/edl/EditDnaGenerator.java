@@ -3,6 +3,7 @@ package com.BossAi.bossAi.service.edl;
 import com.BossAi.bossAi.service.OpenAiService;
 import com.BossAi.bossAi.service.audio.AudioAnalysisResponse;
 import com.BossAi.bossAi.service.director.NarrationAnalysis;
+import com.BossAi.bossAi.service.director.UserEditIntent;
 import com.BossAi.bossAi.service.generation.GenerationContext;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -233,6 +234,49 @@ public class EditDnaGenerator {
                 sb.append("  (You may follow or DELIBERATELY CONTRAST this suggestion — surprise is key)\n");
             }
             sb.append("\n");
+        }
+
+        // User editing intent — influences creative direction
+        UserEditIntent editIntent = context.getUserEditIntent();
+        if (editIntent != null && editIntent.hasExplicitInstructions()) {
+            sb.append("=== USER'S EDITING INTENT ===\n");
+            sb.append("Goal: ").append(editIntent.getOverallGoal()).append("\n");
+            if (!"auto".equals(editIntent.getPacingPreference())) {
+                sb.append("Pacing: ").append(editIntent.getPacingPreference())
+                        .append(" — cut_rhythm.mode MUST respect this.\n");
+            }
+            if (editIntent.getEditingStyle() != null) {
+                sb.append("Style requested: ").append(editIntent.getEditingStyle()).append("\n");
+            }
+            if (editIntent.getStructureHints() != null && !editIntent.getStructureHints().isEmpty()) {
+                sb.append("Structure: ").append(String.join(", ", editIntent.getStructureHints())).append("\n");
+            }
+            if (editIntent.getPlacements() != null) {
+                boolean hasIntro = editIntent.getPlacements().stream()
+                        .anyMatch(p -> "intro".equals(p.getRole()));
+                boolean hasOutro = editIntent.getPlacements().stream()
+                        .anyMatch(p -> "outro".equals(p.getRole()));
+                if (hasIntro) {
+                    sb.append("User assigned an INTRO asset — hook_strategy must incorporate this intro clip.\n");
+                }
+                if (hasOutro) {
+                    sb.append("User assigned an OUTRO asset — ensure editing arc includes a clear resolution phase.\n");
+                }
+            }
+            sb.append("\n");
+        }
+
+        // Asset profiles — visual context for creative decisions
+        java.util.List<com.BossAi.bossAi.service.director.AssetProfile> profiles = context.getAssetProfiles();
+        if (profiles != null && !profiles.isEmpty()) {
+            sb.append("=== ASSET VISUAL PROFILES ===\n");
+            for (var profile : profiles) {
+                sb.append("  Asset ").append(profile.getIndex())
+                        .append(": ").append(profile.getSuggestedRole())
+                        .append(" — ").append(profile.getVisualDescription())
+                        .append(" (mood: ").append(profile.getMood()).append(")\n");
+            }
+            sb.append("Use these asset moods to inform color_grade and effect_palette choices.\n\n");
         }
 
         sb.append("""

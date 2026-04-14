@@ -4,10 +4,12 @@ import com.BossAi.bossAi.entity.Asset;
 import com.BossAi.bossAi.entity.PlanType;
 import com.BossAi.bossAi.entity.VideoStyle;
 import com.BossAi.bossAi.service.SubtitleService;
+import com.BossAi.bossAi.service.director.AssetProfile;
 import com.BossAi.bossAi.service.director.DirectorPlan;
 import com.BossAi.bossAi.service.director.JustifiedCut;
 import com.BossAi.bossAi.service.director.NarrationAnalysis;
 import com.BossAi.bossAi.service.director.SpeechTimingAnalysis;
+import com.BossAi.bossAi.service.director.UserEditIntent;
 import com.BossAi.bossAi.service.generation.context.SceneAsset;
 import com.BossAi.bossAi.service.generation.context.ScriptResult;
 import com.BossAi.bossAi.service.music.MusicAnalysisResult;
@@ -300,6 +302,27 @@ public class GenerationContext {
      */
     @Builder.Default
     private List<JustifiedCut> justifiedCuts = new ArrayList<>();
+
+    // -------------------------------------------------------------------------
+    // WYNIKI ASSET ANALYSIS + USER INTENT (nowe warstwy)
+    // -------------------------------------------------------------------------
+
+    /**
+     * Profile wizualne custom media assetów usera.
+     * Każdy profil opisuje CO jest na assecie, jaką ma ROLĘ i NASTRÓJ.
+     * Generowane przez AssetAnalyzer PRZED ScriptStep.
+     * Puste jeśli user nie dostarczył custom media.
+     */
+    @Builder.Default
+    private List<AssetProfile> assetProfiles = new ArrayList<>();
+
+    /**
+     * Sparsowana intencja montażowa usera.
+     * Wyciągnięta z prompta przez UserIntentParser.
+     * Definiuje: role assetów, kolejność, pacing, styl.
+     * Null jeśli UserIntentParser nie został uruchomiony.
+     */
+    private UserEditIntent userEditIntent;
 
     // -------------------------------------------------------------------------
     // METODY POMOCNICZE

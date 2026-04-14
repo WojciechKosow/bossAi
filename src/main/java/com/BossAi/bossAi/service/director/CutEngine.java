@@ -53,6 +53,30 @@ public class CutEngine {
     private static final int ABSOLUTE_MAX_ASSET_USES = 4;
 
     /**
+     * Generuje listę uzasadnionych cięć z uwzględnieniem intencji usera.
+     *
+     * Nowa sygnatura z UserEditIntent — warstwa D.
+     * Jeśli user podał wskazówki montażowe (np. "asset 0 = intro"),
+     * CutEngine generuje HARD CUT-y wymuszające te role.
+     */
+    public List<JustifiedCut> generateCuts(
+            NarrationAnalysis narrationAnalysis,
+            SpeechTimingAnalysis speechAnalysis,
+            AudioAnalysisResponse audioAnalysis,
+            List<SubtitleService.WordTiming> wordTimings,
+            int totalDurationMs,
+            int minCutMs,
+            int maxCutMs,
+            int availableAssetCount,
+            int sceneCount,
+            UserEditIntent userEditIntent) {
+
+        return doGenerateCuts(narrationAnalysis, speechAnalysis, audioAnalysis,
+                wordTimings, totalDurationMs, minCutMs, maxCutMs,
+                availableAssetCount, sceneCount, userEditIntent);
+    }
+
+    /**
      * Generuje listę uzasadnionych cięć.
      *
      * @param narrationAnalysis analiza semantyczna narracji (warstwa A)
@@ -75,6 +99,23 @@ public class CutEngine {
             int maxCutMs,
             int availableAssetCount,
             int sceneCount) {
+
+        return doGenerateCuts(narrationAnalysis, speechAnalysis, audioAnalysis,
+                wordTimings, totalDurationMs, minCutMs, maxCutMs,
+                availableAssetCount, sceneCount, null);
+    }
+
+    private List<JustifiedCut> doGenerateCuts(
+            NarrationAnalysis narrationAnalysis,
+            SpeechTimingAnalysis speechAnalysis,
+            AudioAnalysisResponse audioAnalysis,
+            List<SubtitleService.WordTiming> wordTimings,
+            int totalDurationMs,
+            int minCutMs,
+            int maxCutMs,
+            int availableAssetCount,
+            int sceneCount,
+            UserEditIntent userEditIntent) {
 
         // Enforce sane minimums — nigdy poniżej 1500ms
         if (minCutMs < ABSOLUTE_MIN_CUT_MS) minCutMs = ABSOLUTE_MIN_CUT_MS;
@@ -121,6 +162,16 @@ public class CutEngine {
                 narrationAnalysis, speechAnalysis, audioAnalysis, wordTimings, totalDurationMs);
 
         log.info("[CutEngine] Collected {} raw cut candidates", candidates.size());
+
+        // === KROK 1.5: Dodaj kandydatów z intencji usera (warstwa D) ===
+        if (userEditIntent != null && userEditIntent.hasExplicitInstructions()) {
+            addUserIntentCandidates(candidates, userEditIntent, narrationAnalysis,
+                    wordTimings, totalDurationMs, sceneCount);
+            // Re-sort after adding new candidates
+            candidates.sort(Comparator.comparingInt(c -> c.timeMs));
+            candidates = deduplicateCandidates(candidates);
+            log.info("[CutEngine] After user intent injection: {} candidates", candidates.size());
+        }
 
         // === KROK 2: Odsiej kandydatów łamiących film grammar ===
         candidates = applyFilmGrammar(candidates, wordTimings);
@@ -362,6 +413,130 @@ public class CutEngine {
         // Beaty mogą wzmocnić istniejących kandydatów (nie dodajemy beata jako samodzielnego cuta,
         // chyba że jest w sekcji high-energy)
         // Beat scoring jest w scoreCandidates()
+    }
+
+    // =========================================================================
+    // WARSTWA D — USER INTENT CANDIDATES
+    // =========================================================================
+
+    /**
+     * Kandydaci z intencji usera — cięcia wymuszane przez role assetów.
+     *
+     * Jeśli user powiedział "asset 0 = intro, asset 1 = content, asset 2 = outro",
+     * to CutEngine MUSI wygenerować HARD CUT-y na granicach tych ról.
+     *
+     * Scoring: user-intent cuty mają NAJWYŻSZY score (1.0) bo to jawna intencja.
+     * Nie mogą być odrzucone przez film grammar (chyba że wypadają w środku słowa —
+     * wtedy snap do najbliższego word boundary).
+     *
+     * Logika:
+     *   - Dzielimy timeline na segmenty proporcjonalnie do scen
+     *   - Dla każdego placement z inną rolą niż "auto" → HARD CUT na granicy
+     *   - intro → HARD CUT po jego zakończeniu
+     *   - outro → HARD CUT przed jego rozpoczęciem
+     *   - content → SOFT CUT na przejściu do następnego content
+     */
+    private void addUserIntentCandidates(
+            List<CutCandidate> candidates,
+            UserEditIntent userEditIntent,
+            NarrationAnalysis narrationAnalysis,
+            List<SubtitleService.WordTiming> wordTimings,
+            int totalDurationMs,
+            int sceneCount) {
+
+        List<UserEditIntent.AssetPlacement> placements = userEditIntent.getPlacements();
+        if (placements == null || placements.isEmpty()) return;
+
+        int assetCount = placements.size();
+        if (assetCount <= 1) return; // Single asset = no cuts needed from intent
+
+        log.info("[CutEngine] Adding user intent candidates — {} placements", assetCount);
+
+        // Calculate proportional boundaries based on scene count or equal division
+        int effectiveSegments = sceneCount > 0 ? sceneCount : assetCount;
+        int segmentDuration = totalDurationMs / effectiveSegments;
+
+        for (int i = 0; i < placements.size() - 1; i++) {
+            UserEditIntent.AssetPlacement current = placements.get(i);
+            UserEditIntent.AssetPlacement next = placements.get(i + 1);
+
+            // Skip if both are "auto"
+            if ("auto".equals(current.getRole()) && "auto".equals(next.getRole())) continue;
+
+            // Cut point = boundary between this placement and the next
+            int cutMs;
+
+            // If current has a duration hint, use it
+            if (current.getDurationHintMs() > 0) {
+                cutMs = calculatePlacementStartMs(placements, i) + current.getDurationHintMs();
+            } else {
+                // Use proportional boundary
+                cutMs = (i + 1) * segmentDuration;
+            }
+
+            // Snap to word boundary if we have word timings
+            if (wordTimings != null && !wordTimings.isEmpty()) {
+                int snappedSentence = snapToSentenceEnd(cutMs, wordTimings);
+                if (snappedSentence > 0 && Math.abs(snappedSentence - cutMs) < 3000) {
+                    cutMs = snappedSentence;
+                } else {
+                    int snappedWord = snapToWordBoundary(cutMs, wordTimings);
+                    if (snappedWord > 0) cutMs = snappedWord;
+                }
+            }
+
+            // Clamp to valid range
+            cutMs = Math.max(ABSOLUTE_MIN_CUT_MS, Math.min(cutMs, totalDurationMs - ABSOLUTE_MIN_CUT_MS));
+
+            // Determine classification based on role transition
+            JustifiedCut.CutClassification classification;
+            JustifiedCut.CutReason reason;
+            double score;
+
+            boolean isRoleTransition = !sameRole(current.getRole(), next.getRole());
+            boolean involvesIntroOutro = "intro".equals(current.getRole()) || "outro".equals(next.getRole());
+
+            if (involvesIntroOutro || isRoleTransition) {
+                classification = JustifiedCut.CutClassification.HARD;
+                reason = involvesIntroOutro
+                        ? JustifiedCut.CutReason.TOPIC_CHANGE
+                        : JustifiedCut.CutReason.TOPIC_CHANGE;
+                score = 1.0; // Highest — user explicitly requested this
+            } else {
+                classification = JustifiedCut.CutClassification.SOFT;
+                reason = JustifiedCut.CutReason.TOPIC_CHANGE;
+                score = 0.85;
+            }
+
+            List<JustifiedCut.CutReason> secondary = new ArrayList<>();
+            secondary.add(JustifiedCut.CutReason.ATTENTION_RESET);
+
+            candidates.add(new CutCandidate(
+                    cutMs, classification, reason, secondary,
+                    score, i, "user_intent"));
+
+            log.debug("[CutEngine] User intent cut at {}ms — {} → {} ({})",
+                    cutMs, current.getRole(), next.getRole(), classification);
+        }
+    }
+
+    /**
+     * Oblicza start ms dla danego placement na podstawie duration_hint_ms poprzedników.
+     */
+    private int calculatePlacementStartMs(List<UserEditIntent.AssetPlacement> placements, int index) {
+        int startMs = 0;
+        for (int i = 0; i < index; i++) {
+            if (placements.get(i).getDurationHintMs() > 0) {
+                startMs += placements.get(i).getDurationHintMs();
+            }
+        }
+        return startMs;
+    }
+
+    private boolean sameRole(String a, String b) {
+        if (a == null || b == null) return false;
+        if ("auto".equals(a) || "auto".equals(b)) return true; // auto = don't care
+        return a.equals(b);
     }
 
     /**

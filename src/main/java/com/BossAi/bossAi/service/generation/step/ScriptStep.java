@@ -3,6 +3,8 @@ package com.BossAi.bossAi.service.generation.step;
 import com.BossAi.bossAi.entity.Asset;
 import com.BossAi.bossAi.entity.AssetType;
 import com.BossAi.bossAi.service.OpenAiService;
+import com.BossAi.bossAi.service.director.AssetProfile;
+import com.BossAi.bossAi.service.director.UserEditIntent;
 import com.BossAi.bossAi.service.generation.GenerationContext;
 import com.BossAi.bossAi.service.generation.GenerationStepName;
 import com.BossAi.bossAi.service.generation.context.SceneAsset;
@@ -130,10 +132,12 @@ public class ScriptStep implements GenerationStep {
         // Custom media assets — user provided their own images/videos
         if (context.hasCustomMedia()) {
             List<Asset> media = context.getCustomMediaAssets();
+            List<AssetProfile> profiles = context.getAssetProfiles();
+            UserEditIntent editIntent = context.getUserEditIntent();
             int imageCount = (int) media.stream().filter(a -> a.getType() == AssetType.IMAGE).count();
             int videoCount = (int) media.stream().filter(a -> a.getType() == AssetType.VIDEO).count();
 
-            sb.append("\n\n--- CUSTOM MEDIA ASSETS ---");
+            sb.append("\n\n--- CUSTOM MEDIA ASSETS (with visual analysis) ---");
             sb.append("\nUser provided ").append(media.size()).append(" custom media asset(s):");
             if (imageCount > 0) sb.append(" ").append(imageCount).append(" image(s)");
             if (videoCount > 0) sb.append(" ").append(videoCount).append(" video(s)");
@@ -150,16 +154,58 @@ public class ScriptStep implements GenerationStep {
                 sb.append("\nAssets will be used in the order the user defined (scene 0 = asset 0, scene 1 = asset 1, etc.).");
             }
 
-            // Describe each asset for GPT context
+            // Describe each asset with RICH context (AssetProfile + UserEditIntent)
             for (int i = 0; i < media.size(); i++) {
                 Asset a = media.get(i);
-                sb.append("\n  Asset ").append(i).append(": type=").append(a.getType());
-                if (a.getPrompt() != null) {
+                AssetProfile profile = (profiles != null && i < profiles.size()) ? profiles.get(i) : null;
+                UserEditIntent.AssetPlacement placement = (editIntent != null)
+                        ? editIntent.getPlacementForAsset(i) : null;
+
+                sb.append("\n  Asset ").append(i).append(":");
+                sb.append(" type=").append(a.getType());
+
+                // Visual profile (from AssetAnalyzer)
+                if (profile != null) {
+                    sb.append(", visual=\"").append(profile.getVisualDescription()).append("\"");
+                    sb.append(", role=").append(profile.getSuggestedRole());
+                    sb.append(", mood=").append(profile.getMood());
+                    if (profile.getTags() != null && !profile.getTags().isEmpty()) {
+                        sb.append(", tags=").append(profile.getTags());
+                    }
+                } else if (a.getPrompt() != null) {
                     sb.append(", description=\"").append(a.getPrompt()).append("\"");
                 }
+
+                // User intent placement (from UserIntentParser)
+                if (placement != null && !"auto".equals(placement.getRole())) {
+                    sb.append(", USER_ASSIGNED_ROLE=").append(placement.getRole());
+                    sb.append(", USER_ASSIGNED_TIMING=").append(placement.getTiming());
+                    if (placement.getUserInstruction() != null) {
+                        sb.append(", user_says=\"").append(placement.getUserInstruction()).append("\"");
+                    }
+                }
+
                 if (a.getDurationSeconds() != null) {
                     sb.append(", duration=").append(a.getDurationSeconds()).append("s");
                 }
+            }
+
+            // User editing intent summary
+            if (editIntent != null && editIntent.hasExplicitInstructions()) {
+                sb.append("\n\n--- USER'S EDITING INSTRUCTIONS (MUST FOLLOW) ---");
+                if (editIntent.getStructureHints() != null && !editIntent.getStructureHints().isEmpty()) {
+                    sb.append("\nStructure: ").append(String.join(", ", editIntent.getStructureHints()));
+                }
+                if (!"auto".equals(editIntent.getPacingPreference())) {
+                    sb.append("\nPacing: ").append(editIntent.getPacingPreference());
+                }
+                if (editIntent.getEditingStyle() != null) {
+                    sb.append("\nStyle: ").append(editIntent.getEditingStyle());
+                }
+                sb.append("\nIMPORTANT: The USER_ASSIGNED_ROLE values above are EXPLICIT user instructions.");
+                sb.append("\nIf an asset has role=intro → it MUST be the FIRST scene.");
+                sb.append("\nIf an asset has role=outro → it MUST be the LAST scene.");
+                sb.append("\nGenerate narration that MATCHES these role assignments.");
             }
         }
 
