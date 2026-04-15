@@ -80,6 +80,14 @@ public class JustifiedCut {
      */
     private String suggestedTransition;
 
+    /**
+     * Jawnie przypisany indeks assetu (z UserEditIntent / warstwy D).
+     * -1 = brak przypisania, użyj scene-based fallback.
+     * >= 0 = MUST use this asset (user explicitly requested it).
+     */
+    @Builder.Default
+    private int assignedAssetIndex = -1;
+
     // ─── Enums ──────────────────────────────────────────────────────
 
     public enum CutClassification {
