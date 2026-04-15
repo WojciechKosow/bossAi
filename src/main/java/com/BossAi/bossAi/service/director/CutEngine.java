@@ -188,6 +188,11 @@ public class CutEngine {
         // === KROK 5: Waliduj minimalne pokrycie słów per segment ===
         cuts = enforceMinWordsPerSegment(cuts, wordTimings, minCutMs);
 
+        // === KROK 6: Propaguj assignedAssetIndex na segmenty między user-intent cuts ===
+        if (userEditIntent != null && userEditIntent.hasExplicitInstructions()) {
+            propagateAssetAssignments(cuts, userEditIntent);
+        }
+
         log.info("[CutEngine] Final result: {} justified cuts (asset limit: {})", cuts.size(), maxSegments);
 
         return cuts;
@@ -511,13 +516,93 @@ public class CutEngine {
             List<JustifiedCut.CutReason> secondary = new ArrayList<>();
             secondary.add(JustifiedCut.CutReason.ATTENTION_RESET);
 
-            candidates.add(new CutCandidate(
+            CutCandidate candidate = new CutCandidate(
                     cutMs, classification, reason, secondary,
-                    score, i, "user_intent"));
+                    score, i, "user_intent");
+            // Tag: the segment AFTER this cut should use the next placement's asset
+            candidate.assignedAssetIndex = next.getAssetIndex();
+            candidates.add(candidate);
 
-            log.debug("[CutEngine] User intent cut at {}ms — {} → {} ({})",
-                    cutMs, current.getRole(), next.getRole(), classification);
+            log.debug("[CutEngine] User intent cut at {}ms — {} → {} ({}) → next asset: {}",
+                    cutMs, current.getRole(), next.getRole(), classification, next.getAssetIndex());
         }
+
+        // Tag the FIRST segment (before any cut) with the first placement's asset
+        if (!placements.isEmpty()) {
+            // Find or create a candidate at time 0 to tag the first asset
+            CutCandidate firstCandidate = null;
+            for (CutCandidate c : candidates) {
+                if (c.timeMs == 0 || (c.timeMs < ABSOLUTE_MIN_CUT_MS && "user_intent".equals(c.source))) {
+                    firstCandidate = c;
+                    break;
+                }
+            }
+            if (firstCandidate == null) {
+                // Create a virtual candidate at time 0 to carry the first asset assignment
+                firstCandidate = new CutCandidate(0,
+                        JustifiedCut.CutClassification.HARD,
+                        JustifiedCut.CutReason.HOOK_START,
+                        List.of(), 1.0, 0, "user_intent");
+                candidates.add(firstCandidate);
+            }
+            firstCandidate.assignedAssetIndex = placements.get(0).getAssetIndex();
+        }
+    }
+
+    /**
+     * Propaguje assignedAssetIndex z user-intent cuts na sąsiednie segmenty.
+     *
+     * Logika: segmenty między dwoma user-intent punktami cięcia powinny używać
+     * tego samego assetu. Np. jeśli user chce "asset 0 jako intro, asset 1-3 jako content":
+     *   - Segment 0 (start) → asset 0 (z user_intent)
+     *   - Segment 1 (po user_intent cut) → asset 1 (z user_intent)
+     *   - Segment 2 (pomiędzy, bez tagu) → dziedziczy asset 1
+     *   - Segment 3 (po user_intent cut) → asset 2 (z user_intent)
+     *   - itd.
+     */
+    private void propagateAssetAssignments(List<JustifiedCut> cuts, UserEditIntent userEditIntent) {
+        if (cuts.isEmpty()) return;
+
+        List<UserEditIntent.AssetPlacement> placements = userEditIntent.getPlacements();
+        if (placements == null || placements.isEmpty()) return;
+
+        // Build a map of time ranges to asset indices from placements
+        int totalAssets = placements.size();
+
+        // Forward propagation: fill gaps between tagged cuts
+        int lastKnownAsset = -1;
+        for (JustifiedCut cut : cuts) {
+            if (cut.getAssignedAssetIndex() >= 0) {
+                lastKnownAsset = cut.getAssignedAssetIndex();
+            } else if (lastKnownAsset >= 0) {
+                // This segment has no explicit assignment — inherit from last known
+                cut.setAssignedAssetIndex(lastKnownAsset);
+            }
+        }
+
+        // If the first segment wasn't tagged (unlikely but possible), back-propagate from first tagged
+        if (cuts.get(0).getAssignedAssetIndex() < 0) {
+            int firstTagged = -1;
+            for (JustifiedCut cut : cuts) {
+                if (cut.getAssignedAssetIndex() >= 0) {
+                    firstTagged = cut.getAssignedAssetIndex();
+                    break;
+                }
+            }
+            if (firstTagged >= 0) {
+                for (JustifiedCut cut : cuts) {
+                    if (cut.getAssignedAssetIndex() < 0) {
+                        cut.setAssignedAssetIndex(firstTagged);
+                    } else {
+                        break;
+                    }
+                }
+            }
+        }
+
+        long tagged = cuts.stream().filter(c -> c.getAssignedAssetIndex() >= 0).count();
+        log.info("[CutEngine] Asset assignment propagation: {}/{} cuts have assigned assets",
+                tagged, cuts.size());
     }
 
     /**
@@ -896,7 +981,8 @@ public class CutEngine {
                         .narrationSegmentIndex(source.narrationSegmentIndex)
                         .editingPhase(source.editingPhase)
                         .suggestedEffect(suggestEffect(source))
-                        .suggestedTransition(suggestTransition(source));
+                        .suggestedTransition(suggestTransition(source))
+                        .assignedAssetIndex(source.assignedAssetIndex);
             } else {
                 // Wymuszony cut (max duration) lub pierwszy segment
                 builder.classification(i == 0 ? JustifiedCut.CutClassification.HARD
@@ -1135,8 +1221,9 @@ public class CutEngine {
         List<JustifiedCut.CutReason> secondaryReasons;
         double score;
         int narrationSegmentIndex;
-        String source; // "narration", "speech", "music_section", "tempo"
+        String source; // "narration", "speech", "music_section", "tempo", "user_intent"
         String editingPhase;
+        int assignedAssetIndex = -1; // -1 = auto, >= 0 = explicit user assignment
 
         CutCandidate(int timeMs, JustifiedCut.CutClassification classification,
                      JustifiedCut.CutReason primaryReason,

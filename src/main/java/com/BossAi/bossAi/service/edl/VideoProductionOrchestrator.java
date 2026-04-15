@@ -342,6 +342,19 @@ public class VideoProductionOrchestrator {
             long microCuts = cuts.stream().filter(c -> c.getClassification() == JustifiedCut.CutClassification.MICRO).count();
             log.info("[Orchestrator] Cut distribution — HARD: {}, SOFT: {}, MICRO: {}", hardCuts, softCuts, microCuts);
 
+            // Log asset assignments for debugging
+            long assigned = cuts.stream().filter(c -> c.getAssignedAssetIndex() >= 0).count();
+            if (assigned > 0) {
+                log.info("[Orchestrator] Asset assignments: {}/{} cuts have explicit asset indices", assigned, cuts.size());
+                for (int ci = 0; ci < cuts.size(); ci++) {
+                    JustifiedCut c = cuts.get(ci);
+                    if (c.getAssignedAssetIndex() >= 0) {
+                        log.debug("[Orchestrator]   Cut {} ({}ms-{}ms) → asset index {}",
+                                ci, c.getStartMs(), c.getEndMs(), c.getAssignedAssetIndex());
+                    }
+                }
+            }
+
             return cuts;
 
         } catch (Exception e) {

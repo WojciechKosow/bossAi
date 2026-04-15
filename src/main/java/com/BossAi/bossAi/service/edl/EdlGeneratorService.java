@@ -316,17 +316,15 @@ public class EdlGeneratorService {
     /**
      * Buduje segmenty EDL na podstawie justified cuts z CutEngine.
      *
-     * SCENE-AWARE ASSET ASSIGNMENT:
-     *   Każdy cut mapowany jest na scenę (SceneAsset), w której wypada jego środek.
-     *   Scena definiuje TEMAT wizualny (imagePrompt) — jeśli narracja mówi o "lesie",
-     *   to wszystkie cuty w tym fragmencie używają assetu "las".
+     * ASSET ASSIGNMENT PRIORITY (od najwyższego do najniższego):
+     *   1. EXPLICIT — JustifiedCut.assignedAssetIndex >= 0 (z UserEditIntent / Layer D)
+     *      User powiedział "ten klip jako intro" → CutEngine oznaczył segment → MUST use
+     *   2. SCENE-AWARE — pozycja cuta w timeline mapowana na scenę → asset sceny
+     *      Scena definiuje temat wizualny, cut w obrębie sceny dostaje jej asset
+     *   3. INTENT-AWARE FALLBACK — szuka assetu respektując role (nie daj intro w środku,
+     *      nie daj outro na początku), preferencja dla assetu z najbliższej sceny
      *
-     *   Kolejność assetów = kolejność scen = intencja usera / GPT.
-     *   Jeśli user dodał 3 klipy (las, pustynia, plaża) w tej kolejności,
-     *   to scena 0→las, scena 1→pustynia, scena 2→plaża.
-     *
-     *   Jeśli scen jest więcej niż assetów, nadmiarowe sceny dostają assety
-     *   z round-robin fallback (nigdy consecutive).
+     * Cel: user mówi "las jako intro, pustynia 2-4" → dokładnie tak wyjdzie, od początku do końca.
      */
     private List<EdlSegment> buildSegmentsFromJustifiedCuts(
             List<JustifiedCut> cuts,
@@ -351,8 +349,7 @@ public class EdlGeneratorService {
             return segments;
         }
 
-        // === SCENE-AWARE ASSIGNMENT ===
-        // Oblicz kumulatywne granice czasowe scen
+        // === SCENE-AWARE SETUP ===
         List<SceneAsset> scenes = context.getScenes();
         List<int[]> sceneBounds = buildSceneBounds(scenes);
 
@@ -369,7 +366,6 @@ public class EdlGeneratorService {
                     .get(context.getWordTimings().size() - 1).endMs();
         }
         int sceneDurationMs = scenes.stream().mapToInt(SceneAsset::getDurationMs).sum();
-        int totalDurationMs = voiceDurationMs > 0 ? voiceDurationMs : sceneDurationMs;
 
         // Przeskaluj granice scen jeśli voice jest dłuższy
         if (voiceDurationMs > sceneDurationMs && sceneDurationMs > 0) {
@@ -377,19 +373,45 @@ public class EdlGeneratorService {
             sceneBounds = scaleSceneBounds(sceneBounds, scale, voiceDurationMs);
         }
 
-        // Dla każdego cuta → znajdź scenę na podstawie pozycji w timeline
+        // === BUILD USER INTENT ROLE MAP (for intent-aware fallback) ===
+        UserEditIntent editIntent = context.getUserEditIntent();
+        Map<Integer, String> assetRoles = buildAssetRoleMap(editIntent, visualAssets.size());
+
+        // Dla każdego cuta → przypisz asset w kolejności priorytetów
         for (int i = 0; i < cuts.size(); i++) {
             JustifiedCut cut = cuts.get(i);
+            ProjectAsset asset = null;
+            String assignmentSource = "unknown";
 
-            // Środek cuta = w której scenie jesteśmy?
-            int midpoint = (cut.getStartMs() + cut.getEndMs()) / 2;
-            int sceneIndex = findSceneAtMs(midpoint, sceneBounds);
-            ProjectAsset asset = assetBySceneIndex.get(sceneIndex);
-
-            // Fallback jeśli scena nie ma assetu (więcej scen niż assetów)
-            if (asset == null) {
-                asset = findFallbackAsset(sceneIndex, assetBySceneIndex, visualAssets, segments);
+            // === PRIORYTET 1: Explicit assignment z CutEngine (user intent) ===
+            if (cut.getAssignedAssetIndex() >= 0 && cut.getAssignedAssetIndex() < visualAssets.size()) {
+                asset = visualAssets.get(cut.getAssignedAssetIndex());
+                assignmentSource = "explicit_intent";
             }
+
+            // === PRIORYTET 2: Scene-aware mapping ===
+            if (asset == null) {
+                int midpoint = (cut.getStartMs() + cut.getEndMs()) / 2;
+                int sceneIndex = findSceneAtMs(midpoint, sceneBounds);
+                asset = assetBySceneIndex.get(sceneIndex);
+                if (asset != null) {
+                    assignmentSource = "scene_" + sceneIndex;
+                }
+            }
+
+            // === PRIORYTET 3: Intent-aware fallback ===
+            if (asset == null) {
+                double positionPct = cuts.size() > 1
+                        ? (double) i / (cuts.size() - 1) : 0.5;
+                asset = findIntentAwareFallbackAsset(
+                        positionPct, assetRoles, visualAssets, segments);
+                assignmentSource = "intent_fallback";
+            }
+
+            log.debug("[EdlGenerator] Segment {} ({}ms-{}ms) → asset {} ({})",
+                    i, cut.getStartMs(), cut.getEndMs(),
+                    asset != null ? asset.getId().toString().substring(0, 8) : "NULL",
+                    assignmentSource);
 
             // Efekt z sugestii CutEngine lub z DirectorPlan
             List<EdlEffect> effects = new ArrayList<>();
@@ -398,7 +420,8 @@ public class EdlGeneratorService {
                 double intensity = resolveIntensityFromCut(cut);
                 effects.add(effectRegistry.createEffect(effectType, intensity, null));
             } else {
-                int effectSceneIdx = Math.min(sceneIndex, scenes.size() - 1);
+                int midpoint = (cut.getStartMs() + cut.getEndMs()) / 2;
+                int effectSceneIdx = Math.min(findSceneAtMs(midpoint, sceneBounds), scenes.size() - 1);
                 effects = buildEffectsForScene(context, audioAnalysis, effectSceneIdx);
             }
 
@@ -426,13 +449,103 @@ public class EdlGeneratorService {
                     .build());
         }
 
-        // Loguj dystrybucję assetów per scena
+        // Loguj dystrybucję assetów — per asset z assignment source
         Map<String, Long> usageCounts = segments.stream()
                 .collect(Collectors.groupingBy(EdlSegment::getAssetId, Collectors.counting()));
-        log.info("[EdlGenerator] Built {} segments from {} justified cuts — scene-aware distribution: {}",
+        log.info("[EdlGenerator] Built {} segments from {} justified cuts — asset distribution: {}",
                 segments.size(), cuts.size(), usageCounts);
 
         return segments;
+    }
+
+    /**
+     * Buduje mapę asset index → role z UserEditIntent.
+     * Np. {0: "intro", 1: "content", 2: "content", 3: "outro"}
+     */
+    private Map<Integer, String> buildAssetRoleMap(UserEditIntent editIntent, int assetCount) {
+        Map<Integer, String> roles = new HashMap<>();
+        if (editIntent != null && editIntent.getPlacements() != null) {
+            for (var p : editIntent.getPlacements()) {
+                if (p.getAssetIndex() >= 0 && p.getAssetIndex() < assetCount) {
+                    roles.put(p.getAssetIndex(), p.getRole() != null ? p.getRole() : "auto");
+                }
+            }
+        }
+        return roles;
+    }
+
+    /**
+     * Intent-aware fallback — zamiast round-robin, szuka assetu respektując role.
+     *
+     * Zasady:
+     *   - Segment na początku (positionPct < 0.15) → preferuj intro/hook assets
+     *   - Segment na końcu (positionPct > 0.85) → preferuj outro/cta assets
+     *   - Segment w środku → preferuj content assets, unikaj intro/outro
+     *   - Nigdy ten sam asset co w poprzednim segmencie (no-consecutive)
+     *   - Preferuj assety użyte NAJMNIEJ razy (equal distribution)
+     */
+    private ProjectAsset findIntentAwareFallbackAsset(
+            double positionPct,
+            Map<Integer, String> assetRoles,
+            List<ProjectAsset> visualAssets,
+            List<EdlSegment> existingSegments) {
+
+        String lastAssetId = !existingSegments.isEmpty()
+                ? existingSegments.get(existingSegments.size() - 1).getAssetId() : null;
+
+        // Count current usage of each asset
+        Map<String, Long> usageCounts = existingSegments.stream()
+                .collect(Collectors.groupingBy(EdlSegment::getAssetId, Collectors.counting()));
+
+        // Score each candidate asset
+        int bestIdx = 0;
+        double bestScore = -999;
+
+        for (int idx = 0; idx < visualAssets.size(); idx++) {
+            ProjectAsset candidate = visualAssets.get(idx);
+            String candidateId = candidate.getId().toString();
+            String role = assetRoles.getOrDefault(idx, "auto");
+
+            // No-consecutive: skip if same as last
+            if (candidateId.equals(lastAssetId)) continue;
+
+            double score = 0;
+
+            // Role alignment — match position to role
+            if (positionPct < 0.15) {
+                // Beginning of video → prefer intro/hook
+                if ("intro".equals(role) || "hook".equals(role)) score += 3.0;
+                else if ("outro".equals(role) || "cta".equals(role)) score -= 5.0;
+                else score += 1.0;
+            } else if (positionPct > 0.85) {
+                // End of video → prefer outro/cta
+                if ("outro".equals(role) || "cta".equals(role)) score += 3.0;
+                else if ("intro".equals(role) || "hook".equals(role)) score -= 5.0;
+                else score += 1.0;
+            } else {
+                // Middle → prefer content, avoid intro/outro
+                if ("content".equals(role) || "auto".equals(role)) score += 2.0;
+                else if ("intro".equals(role)) score -= 3.0;
+                else if ("outro".equals(role)) score -= 3.0;
+                else score += 1.0;
+            }
+
+            // Prefer less-used assets (equal distribution)
+            long uses = usageCounts.getOrDefault(candidateId, 0L);
+            score -= uses * 1.5;
+
+            // Slight preference for assets near this position in the original order
+            double assetPositionPct = (double) idx / Math.max(1, visualAssets.size() - 1);
+            double proximity = 1.0 - Math.abs(positionPct - assetPositionPct);
+            score += proximity * 0.5;
+
+            if (score > bestScore) {
+                bestScore = score;
+                bestIdx = idx;
+            }
+        }
+
+        return visualAssets.get(bestIdx);
     }
 
     /**
@@ -480,32 +593,7 @@ public class EdlGeneratorService {
         return sceneBounds.isEmpty() ? 0 : sceneBounds.get(sceneBounds.size() - 1)[2];
     }
 
-    /**
-     * Fallback: gdy scena nie ma assetu (więcej scen niż assetów).
-     * Szuka najbliższego assetu, nie-consecutive z ostatnim segmentem.
-     */
-    private ProjectAsset findFallbackAsset(int sceneIndex,
-                                           Map<Integer, ProjectAsset> assetBySceneIndex,
-                                           List<ProjectAsset> visualAssets,
-                                           List<EdlSegment> existingSegments) {
-        // Spróbuj najbliższy scene index
-        for (int offset = 1; offset < assetBySceneIndex.size() + 1; offset++) {
-            ProjectAsset lower = assetBySceneIndex.get(sceneIndex - offset);
-            ProjectAsset upper = assetBySceneIndex.get(sceneIndex + offset);
-            ProjectAsset candidate = upper != null ? upper : lower;
-            if (candidate != null) {
-                // Sprawdź no-consecutive
-                if (!existingSegments.isEmpty()) {
-                    String lastId = existingSegments.get(existingSegments.size() - 1).getAssetId();
-                    if (!lastId.equals(candidate.getId().toString())) return candidate;
-                } else {
-                    return candidate;
-                }
-            }
-        }
-        // Absolutny fallback
-        return visualAssets.get(sceneIndex % visualAssets.size());
-    }
+    // findFallbackAsset removed — replaced by findIntentAwareFallbackAsset
 
     private double resolveIntensityFromCut(JustifiedCut cut) {
         return switch (cut.getClassification()) {
@@ -1349,6 +1437,16 @@ public class EdlGeneratorService {
             sb.append("Each cut has a REASON. Your segments MUST align with these cut points.\n");
             sb.append("This is not a suggestion — this is the edited timeline from the cut engine.\n\n");
 
+            // Build visual assets list for asset table
+            List<ProjectAsset> cutVisualAssets = new ArrayList<>();
+            for (ProjectAsset pa : projectAssets) {
+                String tn = pa.getType().name();
+                if ("VIDEO".equals(tn) || "IMAGE".equals(tn)) cutVisualAssets.add(pa);
+            }
+
+            boolean hasExplicitAssignments = justifiedCuts.stream()
+                    .anyMatch(c -> c.getAssignedAssetIndex() >= 0);
+
             for (int i = 0; i < justifiedCuts.size(); i++) {
                 JustifiedCut cut = justifiedCuts.get(i);
                 sb.append(String.format("  Segment %d: %dms–%dms (%dms) | %s | reason: %s | confidence: %.2f",
@@ -1363,17 +1461,48 @@ public class EdlGeneratorService {
                 if (cut.getEditingPhase() != null) {
                     sb.append(" | phase: ").append(cut.getEditingPhase());
                 }
+                // Explicit asset assignment — tell GPT exactly which asset to use
+                if (cut.getAssignedAssetIndex() >= 0 && cut.getAssignedAssetIndex() < cutVisualAssets.size()) {
+                    ProjectAsset assigned = cutVisualAssets.get(cut.getAssignedAssetIndex());
+                    sb.append(" | MUST_USE_ASSET: ").append(assigned.getId());
+                }
                 sb.append("\n");
             }
             sb.append("\n");
+
+            // === EXPLICIT ASSET ASSIGNMENT TABLE ===
+            if (hasExplicitAssignments) {
+                sb.append("=== ASSET ASSIGNMENT TABLE (MANDATORY — DO NOT OVERRIDE) ===\n");
+                sb.append("The following segments have EXPLICIT asset assignments from the user.\n");
+                sb.append("You MUST use the exact asset_id specified. This is NOT a suggestion.\n\n");
+
+                for (int i = 0; i < justifiedCuts.size(); i++) {
+                    JustifiedCut cut = justifiedCuts.get(i);
+                    if (cut.getAssignedAssetIndex() >= 0 && cut.getAssignedAssetIndex() < cutVisualAssets.size()) {
+                        ProjectAsset assigned = cutVisualAssets.get(cut.getAssignedAssetIndex());
+                        String role = "content";
+                        if (editIntent != null) {
+                            var placement = editIntent.getPlacementForAsset(cut.getAssignedAssetIndex());
+                            if (placement != null && !"auto".equals(placement.getRole())) {
+                                role = placement.getRole();
+                            }
+                        }
+                        sb.append(String.format("  Segment %d (%dms–%dms) → asset_id=%s (role=%s)\n",
+                                i, cut.getStartMs(), cut.getEndMs(), assigned.getId(), role));
+                    }
+                }
+                sb.append("\n");
+            }
+
             sb.append("""
                     IMPORTANT — CUT PLAN RULES:
                     - Your EDL segments MUST start/end at the cut points above (±50ms tolerance)
+                    - If a segment has MUST_USE_ASSET → use EXACTLY that asset_id, no exceptions
                     - Use the suggested effects unless you have a strong creative reason to override
                     - HARD cuts → use "cut" transition, strong effects (fast_zoom, shake)
                     - SOFT cuts → use "fade" or "dissolve" transition, gentle effects (drift, pan_*)
                     - MICRO cuts → use "cut" transition, rapid effects (fast_zoom, bounce)
-                    - Match each segment to the appropriate asset based on scene/narration alignment
+                    - For segments WITHOUT explicit asset assignment → match to scene/narration alignment
 
                     """);
         }
@@ -1405,12 +1534,15 @@ public class EdlGeneratorService {
                 - If no cut plan: ALIGN segment cut points to beat positions from music analysis
 
                 SCENE-ASSET ALIGNMENT (CRITICAL):
+                - If ASSET ASSIGNMENT TABLE is provided above → follow it EXACTLY, no exceptions
                 - Each scene represents a VISUAL THEME (e.g., forest, desert, beach)
                 - The asset for a scene MUST show during the narration about that theme
                 - Do NOT show a forest clip while narrating about desert — match visuals to content
                 - The SCENES list order IS the intended visual sequence — respect it
                 - Cuts within the same scene's narration should keep showing that scene's asset
                 - Only change asset when the narration TOPIC changes
+                - NEVER place an intro-role asset in the middle or end of the video
+                - NEVER place an outro-role asset at the beginning or middle of the video
 
                 CUT ECONOMY:
                 - Fewer, purposeful cuts are BETTER than many cuts with asset repetition
