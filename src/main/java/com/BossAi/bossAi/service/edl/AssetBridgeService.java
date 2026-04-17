@@ -56,9 +56,10 @@ public class AssetBridgeService {
         // 3. Rejestruj assety scen (IMAGE / VIDEO)
         for (SceneAsset scene : context.getScenes()) {
             if (scene.getVideoLocalPath() != null) {
+                AssetType sceneType = resolveSceneAssetType(scene);
                 ProjectAsset asset = projectAssetService.createAsset(
                         projectId,
-                        scene.getVideoUrl() != null && isVideoScene(scene) ? AssetType.VIDEO : AssetType.IMAGE,
+                        sceneType,
                         AssetSource.AI_GENERATED,
                         "scene_" + String.format("%02d", scene.getIndex()) + ".mp4",
                         "video/mp4"
@@ -114,8 +115,17 @@ public class AssetBridgeService {
         return projectId;
     }
 
-    private boolean isVideoScene(SceneAsset scene) {
-        // Scena VIDEO (fal.ai animation) vs IMAGE (Ken Burns FFmpeg)
-        return scene.getVideoUrl() != null && !scene.getVideoLocalPath().contains("_image_clip");
+    private AssetType resolveSceneAssetType(SceneAsset scene) {
+        String path = scene.getVideoLocalPath();
+        if (path != null && path.contains("_image_clip")) {
+            return AssetType.IMAGE;
+        }
+        if (scene.getVideoUrl() != null) {
+            return AssetType.VIDEO;
+        }
+        if (path != null && (path.endsWith(".mp4") || path.endsWith(".mov") || path.endsWith(".webm"))) {
+            return AssetType.VIDEO;
+        }
+        return AssetType.VIDEO;
     }
 }
