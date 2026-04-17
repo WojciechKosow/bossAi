@@ -93,26 +93,39 @@ public class AssetAnalyzer {
      * Dla VIDEO: wyciąga keyframe'y FFmpegiem (1-3 klatki) i wysyła jako obrazy.
      * Dla IMAGE: wysyła obraz bezpośrednio.
      *
-     * Jeden call per asset (Vision wymaga osobnych analiz per asset
-     * bo każdy ma inny content i kontekst).
+     * Fast-fail: jeśli pierwszy asset nie ma extractable frames,
+     * prawdopodobnie żaden nie będzie — skip cały vision pipeline.
      */
     private List<AssetProfile> analyzeViaVision(List<Asset> assets, String userPrompt) {
         List<AssetProfile> profiles = new ArrayList<>();
+        int visionSuccessCount = 0;
+        boolean firstVideoAttempted = false;
 
         for (int i = 0; i < assets.size(); i++) {
             Asset asset = assets.get(i);
             try {
                 List<byte[]> frames = extractFrames(asset);
                 if (frames.isEmpty()) {
+                    // Fast-fail: if first VIDEO asset can't extract frames,
+                    // files are probably not accessible — skip entire vision pipeline
+                    if (!firstVideoAttempted && asset.getType() == AssetType.VIDEO) {
+                        firstVideoAttempted = true;
+                        log.info("[AssetAnalyzer] First video asset yielded 0 frames — fast-failing vision pipeline");
+                        return null;
+                    }
                     log.debug("[AssetAnalyzer] No frames extracted for asset {} — skipping vision", i);
                     profiles.add(buildSingleMetadataProfile(asset, i));
                     continue;
+                }
+                if (asset.getType() == AssetType.VIDEO) {
+                    firstVideoAttempted = true;
                 }
 
                 String prompt = buildVisionPrompt(asset, i, assets.size(), userPrompt);
                 String rawJson = openAiService.analyzeWithVision(frames, prompt);
                 AssetProfile profile = parseVisionResponse(rawJson, asset, i);
                 profiles.add(profile);
+                visionSuccessCount++;
 
                 log.debug("[AssetAnalyzer] Vision profile for asset {}: role={}, mood={}, desc={}",
                         i, profile.getSuggestedRole(), profile.getMood(),
@@ -124,6 +137,14 @@ public class AssetAnalyzer {
             }
         }
 
+        // If vision didn't succeed for ANY asset, fall through to GPT text-only
+        if (visionSuccessCount == 0) {
+            log.info("[AssetAnalyzer] Vision extracted 0 frames for all {} assets — falling back to GPT text",
+                    assets.size());
+            return null;
+        }
+
+        log.info("[AssetAnalyzer] Vision analysis: {}/{} assets analyzed visually", visionSuccessCount, assets.size());
         return profiles;
     }
 
@@ -165,11 +186,20 @@ public class AssetAnalyzer {
     private List<byte[]> extractVideoKeyframes(Asset asset) throws IOException, InterruptedException {
         Path videoPath = storageService.resolvePath(asset.getStorageKey());
         if (!Files.exists(videoPath)) {
-            log.warn("[AssetAnalyzer] Video file not found: {}", videoPath);
+            log.warn("[AssetAnalyzer] Video file not found at resolved path: {} (storageKey: {})",
+                    videoPath, asset.getStorageKey());
+            return List.of();
+        }
+
+        if (Files.size(videoPath) == 0) {
+            log.warn("[AssetAnalyzer] Video file is empty: {}", videoPath);
             return List.of();
         }
 
         int durationSec = asset.getDurationSeconds() != null ? asset.getDurationSeconds() : 5;
+        // Clamp to at least 1s to avoid division issues
+        durationSec = Math.max(1, durationSec);
+
         int frameCount;
         double[] timestamps;
 
@@ -202,19 +232,38 @@ public class AssetAnalyzer {
                         framePath.toString()
                 );
 
+                log.debug("[AssetAnalyzer] FFmpeg cmd: {}", String.join(" ", cmd));
+
                 Process process = new ProcessBuilder(cmd)
                         .redirectErrorStream(true)
                         .start();
+
+                // Read process output to prevent buffer blocking
+                byte[] processOutput = process.getInputStream().readAllBytes();
                 boolean finished = process.waitFor(15, java.util.concurrent.TimeUnit.SECONDS);
 
-                if (finished && process.exitValue() == 0 && Files.exists(framePath)) {
+                if (!finished) {
+                    process.destroyForcibly();
+                    log.warn("[AssetAnalyzer] FFmpeg timed out for asset {}", asset.getId());
+                    continue;
+                }
+
+                if (process.exitValue() != 0) {
+                    String output = new String(processOutput).trim();
+                    log.warn("[AssetAnalyzer] FFmpeg exit code {} for asset {} — output: {}",
+                            process.exitValue(), asset.getId(),
+                            output.length() > 300 ? output.substring(0, 300) : output);
+                    continue;
+                }
+
+                if (Files.exists(framePath) && Files.size(framePath) > 0) {
                     byte[] frameBytes = Files.readAllBytes(framePath);
-                    if (frameBytes.length > 0) {
-                        frames.add(frameBytes);
-                    }
+                    frames.add(frameBytes);
+                } else {
+                    log.warn("[AssetAnalyzer] FFmpeg produced no output file for asset {} at {}s",
+                            asset.getId(), timestamps[i]);
                 }
             } finally {
-                // Cleanup temp frame
                 Files.deleteIfExists(framePath);
             }
         }
