@@ -514,6 +514,54 @@ public class OpenAiService {
     }
 
     // =========================================================================
+    // VISION — GPT-4o with image analysis
+    // =========================================================================
+
+    /**
+     * Analizuje obrazy/klatki video przez GPT-4o Vision.
+     *
+     * @param frames   lista klatek jako byte[] (JPEG)
+     * @param prompt   instrukcja analizy
+     * @return surowa odpowiedź JSON z GPT
+     */
+    public String analyzeWithVision(List<byte[]> frames, String prompt) {
+        log.info("[OpenAiService] Vision analysis — {} frames", frames.size());
+
+        List<Map<String, Object>> contentParts = new ArrayList<>();
+        contentParts.add(Map.of("type", "text", "text", prompt));
+
+        for (byte[] frame : frames) {
+            String base64 = java.util.Base64.getEncoder().encodeToString(frame);
+            contentParts.add(Map.of(
+                    "type", "image_url",
+                    "image_url", Map.of(
+                            "url", "data:image/jpeg;base64," + base64,
+                            "detail", "low"
+                    )
+            ));
+        }
+
+        Map<String, Object> requestBody = Map.of(
+                "model", properties.getModel().getChat(),
+                "response_format", Map.of("type", "json_object"),
+                "temperature", 0.4,
+                "max_tokens", 2000,
+                "messages", List.of(
+                        Map.of("role", "system",
+                                "content", "You are a professional video editor analyzing visual content. Return ONLY JSON."),
+                        Map.of("role", "user", "content", contentParts)
+                )
+        );
+
+        return webClient.post()
+                .uri("/chat/completions")
+                .bodyValue(requestBody)
+                .retrieve()
+                .bodyToMono(String.class)
+                .block();
+    }
+
+    // =========================================================================
     // PARSOWANIE
     // =========================================================================
 

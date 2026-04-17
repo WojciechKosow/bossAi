@@ -193,9 +193,82 @@ public class CutEngine {
             propagateAssetAssignments(cuts, userEditIntent);
         }
 
+        // === KROK 7: Sanity check — napraw oczywiste błędy bez GPT ===
+        cuts = sanitizeCuts(cuts, totalDurationMs, minCutMs);
+
         log.info("[CutEngine] Final result: {} justified cuts (asset limit: {})", cuts.size(), maxSegments);
 
         return cuts;
+    }
+
+    // =========================================================================
+    // KROK 7 — SANITY CHECK
+    // =========================================================================
+
+    /**
+     * Naprawia oczywiste błędy w wygenerowanych cięciach bez dodatkowych GPT calls.
+     *
+     * Sprawdza:
+     *   1. Ciągłość timeline (endMs[i] == startMs[i+1]) — naprawia luki i nakładki
+     *   2. Poprawność zakresu (start >= 0, end <= totalDurationMs, start < end)
+     *   3. Pokrycie całego timeline (od 0 do totalDurationMs)
+     *   4. Minimalny czas trwania segmentu (>= ABSOLUTE_MIN_CUT_MS)
+     */
+    private List<JustifiedCut> sanitizeCuts(List<JustifiedCut> cuts, int totalDurationMs, int minCutMs) {
+        if (cuts == null || cuts.isEmpty()) return cuts;
+
+        List<JustifiedCut> fixed = new ArrayList<>(cuts);
+        int issues = 0;
+
+        // 1. Popraw zakresy (clamp do [0, totalDurationMs])
+        for (JustifiedCut cut : fixed) {
+            int originalStart = cut.getStartMs();
+            int originalEnd = cut.getEndMs();
+            cut.setStartMs(Math.max(0, Math.min(cut.getStartMs(), totalDurationMs)));
+            cut.setEndMs(Math.max(0, Math.min(cut.getEndMs(), totalDurationMs)));
+            if (cut.getStartMs() != originalStart || cut.getEndMs() != originalEnd) issues++;
+        }
+
+        // 2. Usuń segmenty gdzie start >= end lub za krótkie
+        int effectiveMin = Math.max(ABSOLUTE_MIN_CUT_MS / 2, minCutMs / 2);
+        fixed.removeIf(cut -> {
+            int dur = cut.getEndMs() - cut.getStartMs();
+            return dur <= 0 || dur < effectiveMin;
+        });
+
+        // 3. Sortuj po startMs
+        fixed.sort(Comparator.comparingInt(JustifiedCut::getStartMs));
+
+        // 4. Napraw ciągłość — eliminuj luki i nakładki
+        for (int i = 1; i < fixed.size(); i++) {
+            JustifiedCut prev = fixed.get(i - 1);
+            JustifiedCut curr = fixed.get(i);
+            if (curr.getStartMs() != prev.getEndMs()) {
+                curr.setStartMs(prev.getEndMs());
+                issues++;
+            }
+        }
+
+        // 5. Upewnij się że pierwszy zaczyna od 0
+        if (!fixed.isEmpty() && fixed.get(0).getStartMs() != 0) {
+            fixed.get(0).setStartMs(0);
+            issues++;
+        }
+
+        // 6. Upewnij się że ostatni kończy na totalDurationMs
+        if (!fixed.isEmpty()) {
+            JustifiedCut last = fixed.get(fixed.size() - 1);
+            if (last.getEndMs() != totalDurationMs) {
+                last.setEndMs(totalDurationMs);
+                issues++;
+            }
+        }
+
+        if (issues > 0) {
+            log.warn("[CutEngine] Sanity check fixed {} issues in {} cuts", issues, fixed.size());
+        }
+
+        return fixed;
     }
 
     /**
@@ -626,7 +699,14 @@ public class CutEngine {
 
     /**
      * Szuka timestampa granicy między dwoma segmentami narracji.
-     * Szuka w word timings słowa kończącego prevSeg.text.
+     *
+     * Strategia wielopoziomowa:
+     *   1. Szukaj pełnej sekwencji 3 ostatnich słów prevSeg + 2 pierwszych currSeg (5-gram)
+     *   2. Szukaj sekwencji 2 ostatnich prevSeg + 1 pierwszego currSeg (3-gram)
+     *   3. Szukaj pary: ostatnie słowo prevSeg + pierwsze currSeg (2-gram)
+     *   4. Fallback: samo ostatnie słowo prevSeg (szukaj OD POCZĄTKU, nie od tyłu)
+     *
+     * To eliminuje false matches na częstych słowach ("to", "jest", "i").
      */
     private int findSegmentBoundaryMs(
             NarrationAnalysis.NarrationSegment prevSeg,
@@ -636,41 +716,119 @@ public class CutEngine {
         if (wordTimings == null || wordTimings.isEmpty()) return -1;
         if (prevSeg.getText() == null || prevSeg.getText().isBlank()) return -1;
 
-        // Wyciągnij ostatnie słowo z prevSeg
         String[] prevWords = prevSeg.getText().trim().split("\\s+");
-        String lastWord = prevWords[prevWords.length - 1]
-                .replaceAll("[^\\p{L}\\p{N}]", "")
-                .toLowerCase();
+        String[] currWords = (currSeg.getText() != null && !currSeg.getText().isBlank())
+                ? currSeg.getText().trim().split("\\s+")
+                : new String[0];
 
-        // Wyciągnij pierwsze słowo z currSeg
-        String firstWord = "";
-        if (currSeg.getText() != null && !currSeg.getText().isBlank()) {
-            String[] currWords = currSeg.getText().trim().split("\\s+");
-            firstWord = currWords[0].replaceAll("[^\\p{L}\\p{N}]", "").toLowerCase();
+        // Znormalizowane słowa do porównań
+        List<String> prevNorm = new ArrayList<>();
+        for (String w : prevWords) {
+            prevNorm.add(normalizeWord(w));
+        }
+        List<String> currNorm = new ArrayList<>();
+        for (String w : currWords) {
+            currNorm.add(normalizeWord(w));
         }
 
-        // Szukaj w word timings — od tyłu, żeby złapać poprawne wystąpienie
-        for (int i = wordTimings.size() - 1; i >= 0; i--) {
-            String wtWord = wordTimings.get(i).word()
-                    .replaceAll("[^\\p{L}\\p{N}]", "")
-                    .toLowerCase();
+        // Pre-normalizuj word timings (raz, nie w każdej iteracji)
+        List<String> wtNorm = new ArrayList<>(wordTimings.size());
+        for (SubtitleService.WordTiming wt : wordTimings) {
+            wtNorm.add(normalizeWord(wt.word()));
+        }
 
-            if (wtWord.equals(lastWord)) {
-                // Sprawdź czy następne słowo to firstWord (potwierdzenie granicy)
-                if (!firstWord.isEmpty() && i + 1 < wordTimings.size()) {
-                    String nextWtWord = wordTimings.get(i + 1).word()
-                            .replaceAll("[^\\p{L}\\p{N}]", "")
-                            .toLowerCase();
-                    if (nextWtWord.equals(firstWord)) {
+        // === LEVEL 1: Szukaj sekwencji 3 ostatnich prevSeg + 2 pierwszych currSeg ===
+        if (prevNorm.size() >= 3 && currNorm.size() >= 2) {
+            List<String> seq = List.of(
+                    prevNorm.get(prevNorm.size() - 3),
+                    prevNorm.get(prevNorm.size() - 2),
+                    prevNorm.get(prevNorm.size() - 1),
+                    currNorm.get(0),
+                    currNorm.get(1));
+            int idx = findSequenceInTimings(wtNorm, seq, 0);
+            if (idx >= 0) {
+                // Granica = po 3. elemencie sekwencji (ostatnie słowo prevSeg)
+                int boundaryIdx = idx + 2;
+                return wordTimings.get(boundaryIdx).endMs();
+            }
+        }
+
+        // === LEVEL 2: Szukaj sekwencji 2 ostatnich prevSeg + 1 pierwszego currSeg ===
+        if (prevNorm.size() >= 2 && currNorm.size() >= 1) {
+            List<String> seq = List.of(
+                    prevNorm.get(prevNorm.size() - 2),
+                    prevNorm.get(prevNorm.size() - 1),
+                    currNorm.get(0));
+            int idx = findSequenceInTimings(wtNorm, seq, 0);
+            if (idx >= 0) {
+                int boundaryIdx = idx + 1;
+                return wordTimings.get(boundaryIdx).endMs();
+            }
+        }
+
+        // === LEVEL 3: Szukaj pary: ostatnie prevSeg + pierwsze currSeg ===
+        if (prevNorm.size() >= 1 && currNorm.size() >= 1) {
+            String lastPrev = prevNorm.get(prevNorm.size() - 1);
+            String firstCurr = currNorm.get(0);
+            for (int i = 0; i < wtNorm.size() - 1; i++) {
+                if (wtNorm.get(i).equals(lastPrev) && wtNorm.get(i + 1).equals(firstCurr)) {
+                    return wordTimings.get(i).endMs();
+                }
+            }
+        }
+
+        // === LEVEL 4: Fallback — samo ostatnie słowo prevSeg (szukaj OD POCZĄTKU) ===
+        String lastWord = prevNorm.get(prevNorm.size() - 1);
+        if (lastWord.length() >= 4) {
+            // Dla słów >= 4 znaków szukaj od początku (unikalne wystarczająco)
+            for (int i = 0; i < wtNorm.size(); i++) {
+                if (wtNorm.get(i).equals(lastWord)) {
+                    return wordTimings.get(i).endMs();
+                }
+            }
+        } else {
+            // Krótkie słowo — szukaj z kontekstem poprzedniego słowa
+            if (prevNorm.size() >= 2) {
+                String penultimate = prevNorm.get(prevNorm.size() - 2);
+                for (int i = 1; i < wtNorm.size(); i++) {
+                    if (wtNorm.get(i).equals(lastWord) && wtNorm.get(i - 1).equals(penultimate)) {
                         return wordTimings.get(i).endMs();
                     }
                 }
-                // Jeśli nie ma potwierdzenia, użyj tego słowa
-                return wordTimings.get(i).endMs();
+            }
+            // Absolutny fallback — pierwsze wystąpienie
+            for (int i = 0; i < wtNorm.size(); i++) {
+                if (wtNorm.get(i).equals(lastWord)) {
+                    return wordTimings.get(i).endMs();
+                }
             }
         }
 
         return -1;
+    }
+
+    /**
+     * Szuka sekwencji słów w znormalizowanej liście word timings.
+     * Zwraca indeks PIERWSZEGO słowa sekwencji, lub -1.
+     */
+    private int findSequenceInTimings(List<String> wtNorm, List<String> sequence, int startFrom) {
+        if (sequence.isEmpty()) return -1;
+        int searchLimit = wtNorm.size() - sequence.size();
+        for (int i = startFrom; i <= searchLimit; i++) {
+            boolean match = true;
+            for (int j = 0; j < sequence.size(); j++) {
+                if (!wtNorm.get(i + j).equals(sequence.get(j))) {
+                    match = false;
+                    break;
+                }
+            }
+            if (match) return i;
+        }
+        return -1;
+    }
+
+    private String normalizeWord(String word) {
+        return word.replaceAll("[^\\p{L}\\p{N}]", "").toLowerCase();
     }
 
     // =========================================================================
@@ -767,44 +925,88 @@ public class CutEngine {
 
     /**
      * Przesuwa timestamp na koniec najbliższego słowa kończącego zdanie (. ! ? ;).
-     * Jeśli nie ma takiego w zasięgu — zwraca -1.
+     *
+     * KIERUNKOWY snap: szukamy TYLKO do przodu lub z małym cofnięciem (max 200ms).
+     * Stary kod szukał globalnie, co mogło przesunąć cięcie wstecz o sekundy
+     * i zniszczyć timeline.
+     *
+     * Priorytet:
+     *   1. Najbliższy koniec zdania DO PRZODU (w limicie 2000ms)
+     *   2. Koniec zdania tuż ZA nami (max 200ms wstecz — "dopiero co było")
+     *   3. -1 jeśli brak w zasięgu
      */
     private int snapToSentenceEnd(int timeMs, List<SubtitleService.WordTiming> wordTimings) {
-        int closest = -1;
-        int minDist = Integer.MAX_VALUE;
+        int maxForwardMs = 2000;
+        int maxBackwardMs = 200;
+
+        int bestForward = -1;
+        int bestForwardDist = Integer.MAX_VALUE;
+        int bestBackward = -1;
+        int bestBackwardDist = Integer.MAX_VALUE;
 
         for (SubtitleService.WordTiming wt : wordTimings) {
             String word = wt.word();
             if (word.isEmpty()) continue;
             char last = word.charAt(word.length() - 1);
-            if (last == '.' || last == '!' || last == '?' || last == ';') {
-                int dist = Math.abs(wt.endMs() - timeMs);
-                if (dist < minDist) {
-                    minDist = dist;
-                    closest = wt.endMs();
+            if (last != '.' && last != '!' && last != '?' && last != ';') continue;
+
+            int endMs = wt.endMs();
+            int diff = endMs - timeMs; // positive = forward, negative = backward
+
+            if (diff >= 0 && diff <= maxForwardMs) {
+                if (diff < bestForwardDist) {
+                    bestForwardDist = diff;
+                    bestForward = endMs;
+                }
+            } else if (diff < 0 && (-diff) <= maxBackwardMs) {
+                if ((-diff) < bestBackwardDist) {
+                    bestBackwardDist = -diff;
+                    bestBackward = endMs;
                 }
             }
         }
 
-        return closest;
+        // Prefer forward snap, fall back to small backward
+        if (bestForward >= 0) return bestForward;
+        if (bestBackward >= 0) return bestBackward;
+        return -1;
     }
 
     /**
      * Przesuwa timestamp na najbliższy koniec słowa.
+     *
+     * KIERUNKOWY: preferuje do przodu (max 1000ms), fallback mały krok wstecz (max 300ms).
+     * Nigdy nie przesuwa daleko wstecz — to niszczyło timeline.
      */
     private int snapToWordBoundary(int timeMs, List<SubtitleService.WordTiming> wordTimings) {
-        int closest = -1;
-        int minDist = Integer.MAX_VALUE;
+        int maxForwardMs = 1000;
+        int maxBackwardMs = 300;
+
+        int bestForward = -1;
+        int bestForwardDist = Integer.MAX_VALUE;
+        int bestBackward = -1;
+        int bestBackwardDist = Integer.MAX_VALUE;
 
         for (SubtitleService.WordTiming wt : wordTimings) {
-            int dist = Math.abs(wt.endMs() - timeMs);
-            if (dist < minDist) {
-                minDist = dist;
-                closest = wt.endMs();
+            int endMs = wt.endMs();
+            int diff = endMs - timeMs;
+
+            if (diff >= 0 && diff <= maxForwardMs) {
+                if (diff < bestForwardDist) {
+                    bestForwardDist = diff;
+                    bestForward = endMs;
+                }
+            } else if (diff < 0 && (-diff) <= maxBackwardMs) {
+                if ((-diff) < bestBackwardDist) {
+                    bestBackwardDist = -diff;
+                    bestBackward = endMs;
+                }
             }
         }
 
-        return closest;
+        if (bestForward >= 0) return bestForward;
+        if (bestBackward >= 0) return bestBackward;
+        return -1;
     }
 
     // =========================================================================
