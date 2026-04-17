@@ -67,20 +67,52 @@ public class EdlGeneratorService {
     }
 
     /**
-     * Generuje EDL przez GPT-4o z pelnym kontekstem audio + wideo + EditDna (osobowość montażu).
+     * Generuje EDL z pelnym kontekstem audio + wideo + EditDna (osobowość montażu).
+     *
+     * STRATEGIA (v3):
+     *   Jeśli CutEngine wygenerował JustifiedCuts → DETERMINISTIC PATH (spójne cięcia)
+     *   Jeśli brak JustifiedCuts → GPT EDL (fallback na pełną generację)
+     *
+     * Dlaczego: CutEngine łączy 4 warstwy analizy (narracja + mowa + muzyka + user intent)
+     * i podejmuje uzasadnione decyzje o cięciach. Dodatkowy GPT call w EdlGenerator
+     * mógł się rozmijać z tymi decyzjami, generując niespójny timeline.
+     * Teraz deterministic path jest domyślny — GPT jest fallbackiem.
      */
     public EdlDto generateEdl(GenerationContext context,
                               AudioAnalysisResponse audioAnalysis,
                               List<ProjectAsset> projectAssets,
                               EditDna editDna) {
 
-        log.info("[EdlGenerator] Generating EDL via GPT — scenes: {}, hasAudio: {}, hasEditDna: {}",
-                context.sceneCount(), audioAnalysis != null, editDna != null);
+        boolean hasJustifiedCuts = context.getJustifiedCuts() != null
+                && !context.getJustifiedCuts().isEmpty();
 
+        log.info("[EdlGenerator] Generating EDL — scenes: {}, hasAudio: {}, hasEditDna: {}, hasJustifiedCuts: {}",
+                context.sceneCount(), audioAnalysis != null, editDna != null, hasJustifiedCuts);
+
+        // PRIMARY PATH: deterministic EDL from CutEngine's justified cuts
+        if (hasJustifiedCuts) {
+            log.info("[EdlGenerator] Using CutEngine path — {} justified cuts drive the timeline",
+                    context.getJustifiedCuts().size());
+            EdlDto edl = buildDeterministicEdl(context, audioAnalysis, projectAssets);
+
+            // Enrich with EditDna (color grade, effect palette)
+            injectColorGrade(edl, editDna);
+            enrichEffectsFromEditDna(edl, editDna);
+
+            EdlValidator.ValidationResult result = edlValidator.validate(edl);
+            if (result.valid()) {
+                log.info("[EdlGenerator] CutEngine EDL valid — {} segments, {} audio tracks, {} whisper words",
+                        edl.getSegments().size(),
+                        edl.getAudioTracks() != null ? edl.getAudioTracks().size() : 0,
+                        edl.getWhisperWords() != null ? edl.getWhisperWords().size() : 0);
+                return edl;
+            }
+            log.warn("[EdlGenerator] CutEngine EDL invalid — falling back to GPT: {}", result.errors());
+        }
+
+        // FALLBACK PATH: GPT generates full EDL
         String prompt = buildGptPrompt(context, audioAnalysis, projectAssets, editDna);
-
         String rawJson = openAiService.generateDirectorPlan(prompt);
-
         EdlDto edl = parseGptResponse(rawJson);
 
         // Inject asset URLs — GPT nie zna URLi, tylko asset_id
@@ -100,7 +132,7 @@ public class EdlGeneratorService {
 
         EdlValidator.ValidationResult result = edlValidator.validate(edl);
         if (!result.valid()) {
-            log.warn("[EdlGenerator] GPT EDL invalid, falling back to deterministic — errors: {}", result.errors());
+            log.warn("[EdlGenerator] GPT EDL also invalid — last resort deterministic: {}", result.errors());
             return buildDeterministicEdl(context, audioAnalysis, projectAssets);
         }
 
@@ -110,9 +142,47 @@ public class EdlGeneratorService {
                 edl.getTextOverlays() != null ? edl.getTextOverlays().size() : 0,
                 edl.getWhisperWords() != null ? edl.getWhisperWords().size() : 0);
 
-
-
         return edl;
+    }
+
+    /**
+     * Wzbogaca efekty w segmentach EDL danymi z EditDna.
+     * Dotyczy effect_palette (primary, secondary, drop_signature)
+     * i cut_rhythm (humanize_ms).
+     */
+    private void enrichEffectsFromEditDna(EdlDto edl, EditDna editDna) {
+        if (editDna == null || edl.getSegments() == null) return;
+
+        var palette = editDna.getEffectPalette();
+        var rhythm = editDna.getCutRhythm();
+        if (palette == null) return;
+
+        for (int i = 0; i < edl.getSegments().size(); i++) {
+            EdlSegment seg = edl.getSegments().get(i);
+            if (seg.getEffects() == null || seg.getEffects().isEmpty()) continue;
+
+            for (EdlEffect effect : seg.getEffects()) {
+                // Apply base intensity from EditDna if segment doesn't have explicit intensity
+                if (effect.getIntensity() <= 0 && palette.getBaseIntensity() > 0) {
+                    effect.setIntensity(palette.getBaseIntensity());
+                }
+            }
+
+            // Apply humanize offset to segment timing (subtle randomness)
+            if (rhythm != null && rhythm.getHumanizeMs() > 0 && i > 0) {
+                int humanize = rhythm.getHumanizeMs();
+                // Small random offset to avoid robotic precision
+                int offset = (int) ((Math.random() - 0.5) * 2 * humanize);
+                seg.setStartMs(seg.getStartMs() + offset);
+                // Ensure no overlap with previous segment
+                if (i > 0) {
+                    EdlSegment prev = edl.getSegments().get(i - 1);
+                    if (seg.getStartMs() < prev.getEndMs()) {
+                        seg.setStartMs(prev.getEndMs());
+                    }
+                }
+            }
+        }
     }
 
     /**
