@@ -4,6 +4,7 @@ import com.BossAi.bossAi.entity.Asset;
 import com.BossAi.bossAi.entity.AssetType;
 import com.BossAi.bossAi.service.OpenAiService;
 import com.BossAi.bossAi.service.director.AssetProfile;
+import com.BossAi.bossAi.service.director.SceneDirective;
 import com.BossAi.bossAi.service.director.UserEditIntent;
 import com.BossAi.bossAi.service.generation.GenerationContext;
 import com.BossAi.bossAi.service.generation.GenerationStepName;
@@ -143,7 +144,13 @@ public class ScriptStep implements GenerationStep {
             if (videoCount > 0) sb.append(" ").append(videoCount).append(" video(s)");
             sb.append(".");
 
-            sb.append("\nYou MUST generate EXACTLY ").append(media.size()).append(" scenes to match the number of user assets.");
+            // Scene count: if directives exist, use directive count; otherwise match asset count
+            if (editIntent != null && editIntent.hasSceneDirectives()) {
+                sb.append("\nYou MUST generate EXACTLY ").append(editIntent.getSceneDirectives().size())
+                        .append(" scenes to match the user's scene directives.");
+            } else {
+                sb.append("\nYou MUST generate EXACTLY ").append(media.size()).append(" scenes to match the number of user assets.");
+            }
 
             if (context.isUseGptOrdering()) {
                 sb.append("\nYou decide the OPTIMAL ORDER of scenes for maximum impact.");
@@ -206,6 +213,59 @@ public class ScriptStep implements GenerationStep {
                 sb.append("\nIf an asset has role=intro → it MUST be the FIRST scene.");
                 sb.append("\nIf an asset has role=outro → it MUST be the LAST scene.");
                 sb.append("\nGenerate narration that MATCHES these role assignments.");
+            }
+
+            // Scene directives — rich per-scene instructions with layers
+            if (editIntent != null && editIntent.hasSceneDirectives()) {
+                sb.append("\n\n--- SCENE DIRECTIVES (DETAILED PER-SCENE COMPOSITION — MUST FOLLOW) ---");
+                sb.append("\nThe user described specific scenes with precise composition instructions.");
+                sb.append("\nYou MUST generate scenes that MATCH these directives exactly.\n");
+
+                for (SceneDirective directive : editIntent.getSceneDirectives()) {
+                    sb.append("\n  SCENE ").append(directive.getSceneIndex());
+                    if (directive.getSceneLabel() != null) {
+                        sb.append(" [").append(directive.getSceneLabel()).append("]");
+                    }
+                    sb.append(":");
+                    if (directive.getDescription() != null) {
+                        sb.append("\n    Description: ").append(directive.getDescription());
+                    }
+                    if (directive.getComposition() != null && !"fullscreen".equals(directive.getComposition())) {
+                        sb.append("\n    Composition: ").append(directive.getComposition());
+                    }
+                    if (directive.getDurationHintMs() > 0) {
+                        sb.append("\n    Duration: ~").append(directive.getDurationHintMs()).append("ms");
+                    }
+                    if (directive.getUserInstruction() != null) {
+                        sb.append("\n    User said: \"").append(directive.getUserInstruction()).append("\"");
+                    }
+
+                    if (directive.getLayers() != null) {
+                        for (SceneDirective.LayerDirective layer : directive.getLayers()) {
+                            sb.append("\n    Layer ").append(layer.getLayerIndex())
+                                    .append(" (").append(layer.getRole()).append("): ");
+                            if (layer.isProvided()) {
+                                sb.append("USE provided asset ").append(layer.getAssetIndex());
+                                if (layer.getAssetDescription() != null) {
+                                    sb.append(" (\"").append(layer.getAssetDescription()).append("\")");
+                                }
+                            } else if (layer.isGenerate()) {
+                                sb.append("GENERATE ").append(layer.getGenerationType() != null ? layer.getGenerationType() : "image");
+                                sb.append(": \"").append(layer.getGenerationPrompt()).append("\"");
+                            } else {
+                                sb.append("auto (system decides)");
+                            }
+                        }
+                    }
+                }
+
+                sb.append("\n\nIMPORTANT RULES FOR SCENE DIRECTIVES:");
+                sb.append("\n- Generate EXACTLY the number of scenes described above");
+                sb.append("\n- Each scene's imagePrompt MUST match the directive's description/layers");
+                sb.append("\n- If a layer has source=generate, use the generation_prompt as the imagePrompt");
+                sb.append("\n- If a scene has multiple layers, focus imagePrompt on the BACKGROUND layer");
+                sb.append("\n- Narration should describe what the viewer sees in each scene");
+                sb.append("\n- Scene order MUST match directive scene_index order");
             }
         }
 

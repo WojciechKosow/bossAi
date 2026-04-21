@@ -89,6 +89,19 @@ public class UserEditIntent {
     @JsonProperty("reasoning")
     private String reasoning;
 
+    /**
+     * Szczegółowe instrukcje per scena — co dokładnie ma się znaleźć w każdej scenie.
+     * Każda SceneDirective opisuje warstwy (background/primary/overlay),
+     * źródła assetów (provided/generate), kompozycję, timing.
+     *
+     * Jeśli user opisał sceny w prompcie (np. "pierwsza scena = intro z giełdą w tle"),
+     * to GPT parsuje to do SceneDirectives.
+     * Pusta lista = user nie opisał konkretnych scen → system decyduje.
+     */
+    @Builder.Default
+    @JsonProperty("scene_directives")
+    private List<SceneDirective> sceneDirectives = List.of();
+
     // ─── Placement per asset ───────────────────────────────────
 
     @Data
@@ -140,6 +153,9 @@ public class UserEditIntent {
      * Jeśli nie — system działa w trybie auto (jak dotychczas).
      */
     public boolean hasExplicitInstructions() {
+        if (sceneDirectives != null && !sceneDirectives.isEmpty()) {
+            return true;
+        }
         if (placements != null && !placements.isEmpty()) {
             return placements.stream().anyMatch(p ->
                     p.getRole() != null && !"auto".equals(p.getRole()));
@@ -166,5 +182,31 @@ public class UserEditIntent {
         return placements.stream()
                 .filter(p -> role.equals(p.getRole()))
                 .toList();
+    }
+
+    /**
+     * Czy user opisał konkretne sceny z warstwami?
+     */
+    public boolean hasSceneDirectives() {
+        return sceneDirectives != null && !sceneDirectives.isEmpty();
+    }
+
+    /**
+     * Znajdź SceneDirective dla danego indeksu sceny.
+     */
+    public SceneDirective getSceneDirective(int sceneIndex) {
+        if (sceneDirectives == null) return null;
+        return sceneDirectives.stream()
+                .filter(sd -> sd.getSceneIndex() == sceneIndex)
+                .findFirst()
+                .orElse(null);
+    }
+
+    /**
+     * Czy któraś scena wymaga generowania assetów?
+     */
+    public boolean needsAssetGeneration() {
+        return sceneDirectives != null && sceneDirectives.stream()
+                .anyMatch(SceneDirective::needsGeneration);
     }
 }
