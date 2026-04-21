@@ -93,52 +93,134 @@ public class UserIntentParser {
                 You are an expert at understanding video editing instructions from natural language.
 
                 The user is creating a short-form video (TikTok/Reels). They wrote a prompt
-                and optionally uploaded media assets. Your job: extract their EDITING INTENTIONS.
+                and optionally uploaded media assets. Your job: extract their EDITING INTENTIONS
+                at TWO levels:
 
-                WHAT TO EXTRACT:
-                1. overall_goal: What kind of video do they want? (1 sentence summary)
-                2. placements: For each asset, what ROLE and POSITION does the user want?
+                LEVEL 1 — GLOBAL INTENT (placements, pacing, structure)
+                LEVEL 2 — PER-SCENE DIRECTIVES (detailed per-scene composition with layers)
+
+                === LEVEL 1: GLOBAL INTENT ===
+                1. overall_goal: What kind of video do they want? (1 sentence)
+                2. placements: For each UPLOADED asset, what ROLE and POSITION?
                 3. pacing_preference: fast/moderate/slow/auto
-                4. structure_hints: Any structural requirements from the prompt
-                5. user_controls_order: Did the user explicitly order the assets?
-                6. editing_style: Any style preference mentioned (cinematic, fast-paced, etc.)
-                7. target_duration_ms: Preferred video length in ms (0 = auto)
+                4. structure_hints: Structural requirements from the prompt
+                5. user_controls_order: Did user explicitly order assets?
+                6. editing_style: Style preference (cinematic, fast-paced, etc.)
+                7. target_duration_ms: Preferred length in ms (0 = auto)
 
-                DETECTION RULES:
-                - "daj to na początku" / "put this first" / "start with this" → timing=beginning
+                === LEVEL 2: SCENE DIRECTIVES (the powerful part) ===
+                If the user describes SPECIFIC SCENES with details, extract scene_directives.
+                Each scene_directive describes what ONE scene should contain.
+
+                A scene can have MULTIPLE LAYERS:
+                  - layer 0 = BACKGROUND (e.g., "stock going down as background")
+                  - layer 1 = PRIMARY (main content, e.g., "that video with the blonde girl")
+                  - layer 2+ = OVERLAY (additional elements on top)
+
+                Each layer has a SOURCE:
+                  - "provided" = user uploaded this asset (reference by asset_index)
+                  - "generate" = user wants AI to CREATE this (image or video)
+                  - "auto" = system decides
+
+                DETECTION RULES FOR SCENE DIRECTIVES:
+                - "first scene should be..." / "pierwsza scena..." → scene_directive with scene_index=0
+                - "as a background" / "jako tło" / "in the background" → layer with role=background
+                - "in the middle" / "na środku" / "in front" → layer with role=primary or overlay
+                - "generate a video of..." / "wygeneriuj film z..." → layer with source=generate
+                - "use that video with..." / "weź ten film z..." → layer with source=provided
+                - "that blonde girl" / "ten film z giełdą" → match to uploaded asset by description
+                - "stock going down" / "matrix animation" → generation_prompt for source=generate
+
+                MATCHING UPLOADED ASSETS:
+                - When user says "that video with the girl" → find the uploaded asset whose
+                  visual description or filename best matches "girl"
+                - When user says "use asset 2" or "weź drugi film" → direct asset_index reference
+                - Be SMART about matching — look at descriptions, filenames, visual profiles
+
+                DETECTION RULES FOR PLACEMENTS (Level 1):
+                - "daj to na początku" / "put this first" → timing=beginning
                 - "jako intro" / "as an intro" → role=intro
-                - "na końcu" / "at the end" / "finish with" → timing=end, role=outro
-                - "szybki montaż" / "fast edit" / "dynamic" → pacing_preference=fast
-                - "spokojny" / "calm" / "slow" → pacing_preference=slow
-                - "ten filmik powinien być po..." → timing=after specific content
-                - If user lists assets in specific order with instructions → user_controls_order=true
-                - If user says "30 seconds" or "45s" → target_duration_ms = that value in ms
-                - If no editing instructions at all → all roles="auto", pacing="auto"
+                - "na końcu" / "at the end" → timing=end, role=outro
+                - "szybki montaż" / "fast edit" → pacing_preference=fast
+                - If no editing instructions → roles="auto", pacing="auto"
 
                 IMPORTANT:
-                - If the user doesn't mention editing/order at all, set all roles to "auto"
-                - Don't over-interpret — only extract what the user ACTUALLY said
-                - The user's language may be Polish, English, or mixed — understand all
+                - scene_directives should ONLY be generated when user describes specific scenes
+                - If user just says "put this as intro" without describing layers → use placements only
+                - If user describes complex scenes with backgrounds/overlays → use scene_directives
+                - Both can coexist — placements for simple role assignments, directives for complex scenes
+                - User language may be Polish, English, or mixed
+                - Don't over-interpret — only extract what user ACTUALLY said
 
                 Return ONLY valid JSON:
                 {
-                  "overall_goal": "educational video about AI tools",
+                  "overall_goal": "intro video with stock market background and girl overlay",
                   "placements": [
                     {
                       "asset_index": 0,
                       "role": "intro",
                       "timing": "beginning",
                       "duration_hint_ms": 0,
-                      "user_instruction": "user said: 'put this at the beginning as intro'"
+                      "user_instruction": "user said: 'first scene as intro'"
+                    }
+                  ],
+                  "scene_directives": [
+                    {
+                      "scene_index": 0,
+                      "scene_label": "intro",
+                      "description": "Intro scene with stock market dropping in background and blonde girl video in center",
+                      "layers": [
+                        {
+                          "layer_index": 0,
+                          "role": "background",
+                          "source": "generate",
+                          "asset_index": -1,
+                          "asset_description": null,
+                          "generation_prompt": "stock market chart going down, red numbers, dramatic, dark background",
+                          "generation_type": "video",
+                          "effect": null,
+                          "opacity": 1.0
+                        },
+                        {
+                          "layer_index": 1,
+                          "role": "primary",
+                          "source": "provided",
+                          "asset_index": 2,
+                          "asset_description": "video with blonde girl",
+                          "generation_prompt": null,
+                          "generation_type": null,
+                          "effect": null,
+                          "opacity": 1.0
+                        }
+                      ],
+                      "composition": "background_foreground",
+                      "timing": "beginning",
+                      "duration_hint_ms": 3000,
+                      "transition_in": null,
+                      "transition_out": "cut",
+                      "user_instruction": "first scene is intro with stock background and blonde girl"
                     }
                   ],
                   "pacing_preference": "auto",
-                  "structure_hints": ["intro first", "end with CTA"],
+                  "structure_hints": ["intro with layered composition"],
                   "user_controls_order": true,
                   "editing_style": null,
                   "target_duration_ms": 0,
-                  "reasoning": "User explicitly assigned asset 0 as intro and wants it first"
+                  "reasoning": "User wants scene 0 as intro with AI-generated stock bg + provided girl video"
                 }
+
+                COMPOSITION VALUES:
+                - "fullscreen" = single layer fills the screen (default)
+                - "background_foreground" = background layer + primary layer on top
+                - "overlay" = primary layer + overlay on top (semi-transparent)
+                - "split" = layers side by side
+
+                TIMING VALUES:
+                - "beginning", "middle", "end", "after_intro", "before_outro", "auto"
+
+                GENERATION_TYPE VALUES:
+                - "image" = generate a still image
+                - "video" = generate a video clip
 
                 """);
 
@@ -147,11 +229,12 @@ public class UserIntentParser {
 
         if (customAssets != null && !customAssets.isEmpty()) {
             sb.append("=== USER'S UPLOADED ASSETS ===\n");
+            sb.append("Match these when user references assets by description.\n\n");
             for (int i = 0; i < customAssets.size(); i++) {
                 Asset a = customAssets.get(i);
                 sb.append("Asset ").append(i).append(": type=").append(a.getType());
                 if (a.getOriginalFilename() != null) {
-                    sb.append(", filename=").append(a.getOriginalFilename());
+                    sb.append(", filename=\"").append(a.getOriginalFilename()).append("\"");
                 }
                 if (a.getPrompt() != null) {
                     sb.append(", description=\"").append(a.getPrompt()).append("\"");
@@ -160,11 +243,14 @@ public class UserIntentParser {
                     sb.append(", duration=").append(a.getDurationSeconds()).append("s");
                 }
 
-                // Add visual profile if available
                 if (assetProfiles != null && i < assetProfiles.size()) {
                     AssetProfile profile = assetProfiles.get(i);
                     sb.append(", visual=\"").append(profile.getVisualDescription()).append("\"");
+                    sb.append(", mood=").append(profile.getMood());
                     sb.append(", suggested_role=").append(profile.getSuggestedRole());
+                    if (profile.getTags() != null && !profile.getTags().isEmpty()) {
+                        sb.append(", tags=").append(profile.getTags());
+                    }
                 }
                 sb.append("\n");
             }

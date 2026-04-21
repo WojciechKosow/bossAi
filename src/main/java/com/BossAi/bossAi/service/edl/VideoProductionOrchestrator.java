@@ -180,10 +180,23 @@ public class VideoProductionOrchestrator {
                     context.hasCustomMedia() ? context.getCustomMediaAssets() : null,
                     profiles);
             context.setUserEditIntent(editIntent);
-            log.info("[Orchestrator] User intent parsed — explicit: {}, placements: {}, pacing: {}",
+            log.info("[Orchestrator] User intent parsed — explicit: {}, placements: {}, sceneDirectives: {}, pacing: {}",
                     editIntent.hasExplicitInstructions(),
                     editIntent.getPlacements() != null ? editIntent.getPlacements().size() : 0,
+                    editIntent.hasSceneDirectives() ? editIntent.getSceneDirectives().size() : 0,
                     editIntent.getPacingPreference());
+
+            // Log scene directives details
+            if (editIntent.hasSceneDirectives()) {
+                for (SceneDirective sd : editIntent.getSceneDirectives()) {
+                    log.info("[Orchestrator]   Scene {} [{}]: {} layers, composition={}, needsGeneration={}",
+                            sd.getSceneIndex(),
+                            sd.getSceneLabel() != null ? sd.getSceneLabel() : "unlabeled",
+                            sd.getLayers() != null ? sd.getLayers().size() : 0,
+                            sd.getComposition(),
+                            sd.needsGeneration());
+                }
+            }
         } catch (Exception e) {
             log.warn("[Orchestrator] User intent parsing failed — continuing without intent: {}", e.getMessage());
         }
