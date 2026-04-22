@@ -917,20 +917,38 @@ public class CutEngine {
         });
 
         // Greedy selection — wybieraj najlepszych kandydatów z zachowaniem min/max
+        // User-intent candidates (with assignedAssetIndex) are ALWAYS selected first
         List<Integer> selectedTimes = new ArrayList<>();
         selectedTimes.add(0); // zawsze zaczynaj od 0
 
+        // Phase 1: Select all user-intent candidates (have explicit asset assignments)
         for (CutCandidate c : candidates) {
             if (c.timeMs <= 0 || c.timeMs >= totalDurationMs) continue;
+            if (c.assignedAssetIndex < 0) continue;
+            if (selectedTimes.size() >= maxSegments) break;
 
-            // Sprawdź limit segmentów (selectedTimes.size() cut points = size() segments)
-            // +1 bo jeszcze dodamy totalDurationMs na końcu
+            boolean tooClose = false;
+            for (int existing : selectedTimes) {
+                if (Math.abs(c.timeMs - existing) < ABSOLUTE_MIN_CUT_MS) {
+                    tooClose = true;
+                    break;
+                }
+            }
+            if (!tooClose) {
+                selectedTimes.add(c.timeMs);
+            }
+        }
+
+        // Phase 2: Fill remaining slots with non-intent candidates
+        for (CutCandidate c : candidates) {
+            if (c.timeMs <= 0 || c.timeMs >= totalDurationMs) continue;
+            if (c.assignedAssetIndex >= 0) continue; // already handled
+
             if (selectedTimes.size() >= maxSegments) {
                 log.info("[CutEngine] Segment limit reached — {} segments max", maxSegments);
                 break;
             }
 
-            // Sprawdź czy nie jest za blisko istniejącego cuta
             boolean tooClose = false;
             for (int existing : selectedTimes) {
                 if (Math.abs(c.timeMs - existing) < minCutMs) {
@@ -954,10 +972,14 @@ public class CutEngine {
         List<JustifiedCut> result = new ArrayList<>();
         Map<Integer, CutCandidate> candidateMap = new HashMap<>();
         for (CutCandidate c : candidates) {
-            // Mapuj na najbliższy wybrany czas
             for (int time : selectedTimes) {
                 if (Math.abs(c.timeMs - time) < 100) {
-                    candidateMap.putIfAbsent(time, c);
+                    CutCandidate existing = candidateMap.get(time);
+                    // Prefer candidates with explicit asset assignments
+                    if (existing == null
+                            || (c.assignedAssetIndex >= 0 && existing.assignedAssetIndex < 0)) {
+                        candidateMap.put(time, c);
+                    }
                     break;
                 }
             }
@@ -1086,6 +1108,12 @@ public class CutEngine {
             if ((tooFewWords || tooShortDuration) && i + 1 < cuts.size()) {
                 // Merguj z następnym segmentem
                 JustifiedCut next = cuts.get(i + 1);
+
+                // Preserve assignedAssetIndex: prefer current's, fall back to next's
+                int mergedAssetIdx = current.getAssignedAssetIndex() >= 0
+                        ? current.getAssignedAssetIndex()
+                        : next.getAssignedAssetIndex();
+
                 JustifiedCut merged = JustifiedCut.builder()
                         .startMs(current.getStartMs())
                         .endMs(next.getEndMs())
@@ -1101,6 +1129,7 @@ public class CutEngine {
                         .editingPhase(current.getEditingPhase())
                         .suggestedEffect(current.getSuggestedEffect())
                         .suggestedTransition(next.getSuggestedTransition())
+                        .assignedAssetIndex(mergedAssetIdx)
                         .build();
 
                 // Zamień next w liście (aby kolejna iteracja mogła sprawdzić merged)
