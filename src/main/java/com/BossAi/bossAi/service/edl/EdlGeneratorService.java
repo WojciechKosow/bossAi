@@ -116,6 +116,11 @@ public class EdlGeneratorService {
         String rawJson = openAiService.generateDirectorPlan(prompt);
         EdlDto edl = parseGptResponse(rawJson);
 
+        // ENFORCE asset assignments from justified cuts — GPT can ignore MUST_USE_ASSET,
+        // so we deterministically override its choices for segments with explicit assignments.
+        // Must run BEFORE injectAssetUrls so URLs are resolved for corrected asset_ids.
+        enforceAssetAssignments(edl, context, projectAssets);
+
         // Inject asset URLs — GPT nie zna URLi, tylko asset_id
         injectAssetUrls(edl, projectAssets);
 
@@ -534,6 +539,81 @@ public class EdlGeneratorService {
                 segments.size(), cuts.size(), usageCounts);
 
         return segments;
+    }
+
+    /**
+     * Post-processes GPT-generated EDL to enforce asset assignments from justified cuts.
+     *
+     * GPT can and does ignore MUST_USE_ASSET tags. This method deterministically
+     * overrides GPT's asset choices for segments that overlap justified cuts with
+     * explicit assignedAssetIndex values. Effects and transitions from GPT are preserved.
+     */
+    private void enforceAssetAssignments(EdlDto edl, GenerationContext context,
+                                         List<ProjectAsset> projectAssets) {
+        List<JustifiedCut> justifiedCuts = context.getJustifiedCuts();
+        if (justifiedCuts == null || justifiedCuts.isEmpty()) return;
+
+        boolean hasExplicit = justifiedCuts.stream()
+                .anyMatch(c -> c.getAssignedAssetIndex() >= 0);
+        if (!hasExplicit) return;
+
+        List<ProjectAsset> visualAssets = new ArrayList<>();
+        for (ProjectAsset asset : projectAssets) {
+            String typeName = asset.getType().name();
+            if ("VIDEO".equals(typeName) || "IMAGE".equals(typeName)) {
+                visualAssets.add(asset);
+            }
+        }
+        if (visualAssets.isEmpty()) return;
+
+        List<EdlSegment> segments = edl.getSegments();
+        if (segments == null || segments.isEmpty()) return;
+
+        int overrideCount = 0;
+
+        for (EdlSegment segment : segments) {
+            if (segment.getLayer() > 0) continue;
+
+            JustifiedCut matchingCut = findMatchingCut(segment, justifiedCuts);
+            if (matchingCut == null) continue;
+
+            int assignedIdx = matchingCut.getAssignedAssetIndex();
+            if (assignedIdx < 0 || assignedIdx >= visualAssets.size()) continue;
+
+            ProjectAsset correctAsset = visualAssets.get(assignedIdx);
+            String correctId = correctAsset.getId().toString();
+
+            if (!correctId.equals(segment.getAssetId())) {
+                log.info("[EdlGenerator] ENFORCE: segment {}ms-{}ms — GPT used {}, overriding to {} (intent idx {})",
+                        segment.getStartMs(), segment.getEndMs(),
+                        segment.getAssetId() != null ? segment.getAssetId().substring(0, 8) : "null",
+                        correctId.substring(0, 8), assignedIdx);
+                segment.setAssetId(correctId);
+                overrideCount++;
+            }
+        }
+
+        if (overrideCount > 0) {
+            log.info("[EdlGenerator] Enforced {} asset assignment overrides on GPT EDL", overrideCount);
+        }
+    }
+
+    private JustifiedCut findMatchingCut(EdlSegment segment, List<JustifiedCut> cuts) {
+        JustifiedCut best = null;
+        int bestOverlap = 0;
+
+        for (JustifiedCut cut : cuts) {
+            int overlapStart = Math.max(segment.getStartMs(), cut.getStartMs());
+            int overlapEnd = Math.min(segment.getEndMs(), cut.getEndMs());
+            int overlap = Math.max(0, overlapEnd - overlapStart);
+
+            if (overlap > bestOverlap) {
+                bestOverlap = overlap;
+                best = cut;
+            }
+        }
+
+        return best;
     }
 
     /**
