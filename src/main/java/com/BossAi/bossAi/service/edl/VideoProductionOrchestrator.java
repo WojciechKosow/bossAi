@@ -58,6 +58,7 @@ public class VideoProductionOrchestrator {
     private final CutEngine cutEngine;
     private final AssetAnalyzer assetAnalyzer;
     private final UserIntentParser userIntentParser;
+    private final LayerAssetGenerator layerAssetGenerator;
     private final ObjectMapper objectMapper;
 
     /**
@@ -77,13 +78,23 @@ public class VideoProductionOrchestrator {
             // 1. Analiza muzyki (jesli dostepna)
             AudioAnalysisResponse audioAnalysis = analyzeMusic(context);
 
-            // 2. Pobierz assety projektu z bazy
-            List<ProjectAsset> projectAssets = projectAssetService.getProjectAssetEntities(projectId);
+            // 2. Pobierz assety projektu z bazy (mutable copy for addAll below)
+            List<ProjectAsset> projectAssets = new java.util.ArrayList<>(
+                    projectAssetService.getProjectAssetEntities(projectId));
 
             // 2.5 NOWE: Analiza assetów + parsowanie intencji usera
             //   Te dwa kroki dają GPT "oczy" i "uszy" — zamiast ślepego montażu,
             //   system wie CO jest na assetach i CZEGO chce user.
             analyzeAssetsAndIntent(context);
+
+            // 2.7 NOWE: Generuj assety dla warstw SceneDirective (source=generate)
+            //   Jeśli user chce "wygeneruj tło giełdy" — generujemy image przez FalAI
+            //   i dodajemy jako ProjectAsset. Musi być PRZED EDL generation.
+            List<ProjectAsset> layerAssets = generateLayerAssets(projectId, context);
+            if (!layerAssets.isEmpty()) {
+                projectAssets.addAll(layerAssets);
+                log.info("[Orchestrator] Added {} generated layer assets to project", layerAssets.size());
+            }
 
             // 3. WARSTWA A: Analiza narracji (GPT — semantyczne segmenty + editing intent)
             //    TERAZ z kontekstem: UserEditIntent + AssetProfiles
@@ -199,6 +210,55 @@ public class VideoProductionOrchestrator {
             }
         } catch (Exception e) {
             log.warn("[Orchestrator] User intent parsing failed — continuing without intent: {}", e.getMessage());
+        }
+    }
+
+    /**
+     * Generuje assety dla warstw SceneDirective z source=generate.
+     * Wywołuje LayerAssetGenerator i mapuje wyniki na SceneAsset.layerAssetIds.
+     */
+    private List<ProjectAsset> generateLayerAssets(UUID projectId, GenerationContext context) {
+        UserEditIntent editIntent = context.getUserEditIntent();
+        if (editIntent == null || !editIntent.needsAssetGeneration()) {
+            log.info("[Orchestrator] No layer assets to generate");
+            return List.of();
+        }
+
+        try {
+            List<ProjectAsset> generated = layerAssetGenerator.generateLayerAssets(projectId, editIntent);
+
+            for (ProjectAsset asset : generated) {
+                mapAssetToScene(asset, editIntent, context);
+            }
+
+            log.info("[Orchestrator] Generated {} layer assets, mapped to SceneAsset.layerAssetIds", generated.size());
+            return generated;
+        } catch (Exception e) {
+            log.warn("[Orchestrator] Layer asset generation failed — continuing without: {}", e.getMessage());
+            return List.of();
+        }
+    }
+
+    private void mapAssetToScene(ProjectAsset asset, UserEditIntent editIntent, GenerationContext context) {
+        if (asset.getPrompt() == null) return;
+
+        for (SceneDirective directive : editIntent.getSceneDirectives()) {
+            if (directive.getLayers() == null) continue;
+
+            for (SceneDirective.LayerDirective layer : directive.getLayers()) {
+                if (!layer.isGenerate()) continue;
+                if (!asset.getPrompt().equals(layer.getGenerationPrompt())) continue;
+
+                int sceneIdx = directive.getSceneIndex();
+                if (sceneIdx >= 0 && sceneIdx < context.getScenes().size()) {
+                    context.getScenes().get(sceneIdx)
+                            .getLayerAssetIds()
+                            .put(layer.getLayerIndex(), asset.getId());
+                    log.debug("[Orchestrator] Mapped asset {} to scene {} layer {}",
+                            asset.getId(), sceneIdx, layer.getLayerIndex());
+                }
+                return;
+            }
         }
     }
 

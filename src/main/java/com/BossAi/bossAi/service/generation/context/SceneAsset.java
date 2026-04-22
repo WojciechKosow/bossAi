@@ -3,12 +3,17 @@ package com.BossAi.bossAi.service.generation.context;
 import lombok.Builder;
 import lombok.Data;
 
+import java.util.HashMap;
+import java.util.Map;
+import java.util.UUID;
+
 /**
  * Assety wygenerowane dla jednej sceny TikTok Ad.
  *
  * Wypełniany kolejno przez:
  *   - ImageStep  → imageUrl
  *   - VideoStep  → videoUrl, videoLocalPath
+ *   - LayerAssetGenerator → layerAssetIds (dla multi-layer scen)
  *
  * Przechowywany w GenerationContext.scenes[].
  */
@@ -59,4 +64,14 @@ public class SceneAsset {
      * Fragment narracji dla tej sceny — trafi do SRT.
      */
     private String subtitleText;
+
+    /**
+     * Mapa layerIndex → ProjectAsset UUID dla dodatkowych warstw.
+     * Layer 0 = główny asset (imageUrl/videoUrl powyżej).
+     * Layer 1+ = wygenerowane przez LayerAssetGenerator.
+     *
+     * Używane przez EdlGeneratorService do emitowania multi-layer segmentów.
+     */
+    @Builder.Default
+    private Map<Integer, UUID> layerAssetIds = new HashMap<>();
 }

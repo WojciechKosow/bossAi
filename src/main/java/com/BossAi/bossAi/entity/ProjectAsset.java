@@ -61,6 +61,13 @@ public class ProjectAsset {
     private Long fileSizeBytes;
 
     /**
+     * Prompt użyty do wygenerowania assetu (FalAI image/video).
+     * Null dla assetów uploadowanych przez usera.
+     */
+    @Column(columnDefinition = "TEXT")
+    private String prompt;
+
+    /**
      * Dodatkowe metadane w formacie JSON.
      * Przykłady:
      * - Audio asset: audio analysis JSON (beats, energy, mood, sections)
