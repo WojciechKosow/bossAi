@@ -188,10 +188,10 @@ public class CutEngine {
         // === KROK 5: Waliduj minimalne pokrycie słów per segment ===
         cuts = enforceMinWordsPerSegment(cuts, wordTimings, minCutMs);
 
-        // === KROK 6: Propaguj assignedAssetIndex na segmenty między user-intent cuts ===
-        if (userEditIntent != null && userEditIntent.hasExplicitInstructions()) {
-            propagateAssetAssignments(cuts, userEditIntent);
-        }
+        // NOTE: propagateAssetAssignments() REMOVED — forward-fill caused wrong assets
+        // (all segments in a group got the group leader's asset instead of cycling).
+        // EdlGeneratorService's scene-aware mapping (Priority 2) handles non-boundary
+        // segments correctly by mapping timeline position → scene → asset.
 
         log.info("[CutEngine] Final result: {} justified cuts (asset limit: {})", cuts.size(), maxSegments);
 
