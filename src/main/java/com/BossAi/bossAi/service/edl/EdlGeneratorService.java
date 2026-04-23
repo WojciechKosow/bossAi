@@ -542,21 +542,19 @@ public class EdlGeneratorService {
     }
 
     /**
-     * Post-processes GPT-generated EDL to enforce asset assignments from justified cuts.
+     * Post-processes GPT-generated EDL to deterministically enforce asset assignments.
      *
-     * GPT can and does ignore MUST_USE_ASSET tags. This method deterministically
-     * overrides GPT's asset choices for segments that overlap justified cuts with
-     * explicit assignedAssetIndex values. Effects and transitions from GPT are preserved.
+     * Two-pass approach:
+     *   Pass 1: For segments matching justified cuts with explicit assignedAssetIndex,
+     *           use that asset (boundary transitions from user intent).
+     *   Pass 2: For ALL remaining segments, use scene-aware mapping — timeline position
+     *           → scene → asset. This ensures each segment shows the correct asset for
+     *           its position on the timeline, matching scene-to-asset 1:1 mapping.
+     *
+     * GPT's effects and transitions are preserved. Only asset_id is overridden.
      */
     private void enforceAssetAssignments(EdlDto edl, GenerationContext context,
                                          List<ProjectAsset> projectAssets) {
-        List<JustifiedCut> justifiedCuts = context.getJustifiedCuts();
-        if (justifiedCuts == null || justifiedCuts.isEmpty()) return;
-
-        boolean hasExplicit = justifiedCuts.stream()
-                .anyMatch(c -> c.getAssignedAssetIndex() >= 0);
-        if (!hasExplicit) return;
-
         List<ProjectAsset> visualAssets = new ArrayList<>();
         for (ProjectAsset asset : projectAssets) {
             String typeName = asset.getType().name();
@@ -569,32 +567,71 @@ public class EdlGeneratorService {
         List<EdlSegment> segments = edl.getSegments();
         if (segments == null || segments.isEmpty()) return;
 
-        int overrideCount = 0;
+        // Build scene bounds + asset-by-scene mapping
+        List<SceneAsset> scenes = context.getScenes();
+        List<int[]> sceneBounds = buildSceneBounds(scenes);
+
+        int voiceDurationMs = 0;
+        if (context.getWordTimings() != null && !context.getWordTimings().isEmpty()) {
+            voiceDurationMs = context.getWordTimings()
+                    .get(context.getWordTimings().size() - 1).endMs();
+        }
+        int sceneDurationMs = scenes.stream().mapToInt(SceneAsset::getDurationMs).sum();
+        if (voiceDurationMs > sceneDurationMs && sceneDurationMs > 0) {
+            double scale = (double) voiceDurationMs / sceneDurationMs;
+            sceneBounds = scaleSceneBounds(sceneBounds, scale, voiceDurationMs);
+        }
+
+        Map<Integer, ProjectAsset> assetBySceneIndex = new HashMap<>();
+        for (int i = 0; i < visualAssets.size(); i++) {
+            assetBySceneIndex.put(i, visualAssets.get(i));
+        }
+
+        List<JustifiedCut> justifiedCuts = context.getJustifiedCuts();
+        int explicitCount = 0;
+        int sceneAwareCount = 0;
 
         for (EdlSegment segment : segments) {
             if (segment.getLayer() > 0) continue;
 
-            JustifiedCut matchingCut = findMatchingCut(segment, justifiedCuts);
-            if (matchingCut == null) continue;
+            String correctId = null;
+            String source = null;
 
-            int assignedIdx = matchingCut.getAssignedAssetIndex();
-            if (assignedIdx < 0 || assignedIdx >= visualAssets.size()) continue;
+            // Pass 1: explicit assignment from justified cuts (boundary transitions)
+            if (justifiedCuts != null && !justifiedCuts.isEmpty()) {
+                JustifiedCut match = findMatchingCut(segment, justifiedCuts);
+                if (match != null && match.getAssignedAssetIndex() >= 0
+                        && match.getAssignedAssetIndex() < visualAssets.size()) {
+                    correctId = visualAssets.get(match.getAssignedAssetIndex()).getId().toString();
+                    source = "explicit_idx_" + match.getAssignedAssetIndex();
+                }
+            }
 
-            ProjectAsset correctAsset = visualAssets.get(assignedIdx);
-            String correctId = correctAsset.getId().toString();
+            // Pass 2: scene-aware mapping (timeline position → scene → asset)
+            if (correctId == null) {
+                int midpoint = (segment.getStartMs() + segment.getEndMs()) / 2;
+                int sceneIdx = findSceneAtMs(midpoint, sceneBounds);
+                ProjectAsset sceneAsset = assetBySceneIndex.get(sceneIdx);
+                if (sceneAsset != null) {
+                    correctId = sceneAsset.getId().toString();
+                    source = "scene_" + sceneIdx;
+                }
+            }
 
-            if (!correctId.equals(segment.getAssetId())) {
-                log.info("[EdlGenerator] ENFORCE: segment {}ms-{}ms — GPT used {}, overriding to {} (intent idx {})",
-                        segment.getStartMs(), segment.getEndMs(),
+            if (correctId != null && !correctId.equals(segment.getAssetId())) {
+                log.debug("[EdlGenerator] ENFORCE [{}]: segment {}ms-{}ms — {} → {}",
+                        source, segment.getStartMs(), segment.getEndMs(),
                         segment.getAssetId() != null ? segment.getAssetId().substring(0, 8) : "null",
-                        correctId.substring(0, 8), assignedIdx);
+                        correctId.substring(0, 8));
                 segment.setAssetId(correctId);
-                overrideCount++;
+                if (source != null && source.startsWith("explicit")) explicitCount++;
+                else sceneAwareCount++;
             }
         }
 
-        if (overrideCount > 0) {
-            log.info("[EdlGenerator] Enforced {} asset assignment overrides on GPT EDL", overrideCount);
+        if (explicitCount + sceneAwareCount > 0) {
+            log.info("[EdlGenerator] Enforced asset overrides: {} explicit, {} scene-aware",
+                    explicitCount, sceneAwareCount);
         }
     }
 
