@@ -177,11 +177,19 @@ public class ScriptStep implements GenerationStep {
                 }
 
                 // User intent placement (from UserIntentParser)
-                if (placement != null && !"auto".equals(placement.getRole())) {
-                    sb.append(", USER_ASSIGNED_ROLE=").append(placement.getRole());
-                    sb.append(", USER_ASSIGNED_TIMING=").append(placement.getTiming());
+                if (placement != null) {
+                    if (!"auto".equals(placement.getRole())) {
+                        sb.append(", USER_ASSIGNED_ROLE=").append(placement.getRole());
+                        sb.append(", USER_ASSIGNED_TIMING=").append(placement.getTiming());
+                    }
                     if (placement.getUserInstruction() != null) {
                         sb.append(", user_says=\"").append(placement.getUserInstruction()).append("\"");
+                    }
+                    if (placement.getSceneDescription() != null) {
+                        sb.append(", SCENE_DIRECTION=\"").append(placement.getSceneDescription()).append("\"");
+                    }
+                    if (placement.getMood() != null) {
+                        sb.append(", SCENE_MOOD=").append(placement.getMood());
                     }
                 }
 
@@ -206,6 +214,14 @@ public class ScriptStep implements GenerationStep {
                 sb.append("\nIf an asset has role=intro → it MUST be the FIRST scene.");
                 sb.append("\nIf an asset has role=outro → it MUST be the LAST scene.");
                 sb.append("\nGenerate narration that MATCHES these role assignments.");
+
+                boolean hasSceneDescriptions = editIntent.getPlacements().stream()
+                        .anyMatch(p -> p.getSceneDescription() != null);
+                if (hasSceneDescriptions) {
+                    sb.append("\n\nSCENE DESCRIPTIONS — user described what each scene should look/feel like.");
+                    sb.append("\nGenerate narration that MATCHES the SCENE_DIRECTION and SCENE_MOOD for each asset.");
+                    sb.append("\nThe imagePrompt for each scene should reflect the user's description.");
+                }
             }
         }
 

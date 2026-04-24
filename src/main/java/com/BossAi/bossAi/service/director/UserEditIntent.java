@@ -144,6 +144,19 @@ public class UserEditIntent {
          */
         @JsonProperty("user_instruction")
         private String userInstruction;
+
+        /**
+         * Opis sceny przypisanej do tego assetu — co user chce widzieć.
+         * Np. "Maroko o zachodzie słońca, wolny zoom, nastrojowo"
+         */
+        @JsonProperty("scene_description")
+        private String sceneDescription;
+
+        /**
+         * Nastrój sceny (calm, energetic, dramatic, mysterious, etc.)
+         */
+        @JsonProperty("mood")
+        private String mood;
     }
 
     // ─── Helper methods ────────────────────────────────────────

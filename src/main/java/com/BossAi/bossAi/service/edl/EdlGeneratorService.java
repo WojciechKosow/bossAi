@@ -1223,13 +1223,23 @@ public class EdlGeneratorService {
 
             if (editIntent.getPlacements() != null && !editIntent.getPlacements().isEmpty()) {
                 sb.append("Asset role assignments:\n");
+                boolean hasSceneDescriptions = false;
                 for (var p : editIntent.getPlacements()) {
-                    if (!"auto".equals(p.getRole())) {
-                        sb.append("  Asset ").append(p.getAssetIndex())
-                                .append(" → ROLE=").append(p.getRole())
-                                .append(", TIMING=").append(p.getTiming());
+                    if (!"auto".equals(p.getRole()) || p.getSceneDescription() != null) {
+                        sb.append("  Asset ").append(p.getAssetIndex());
+                        if (!"auto".equals(p.getRole())) {
+                            sb.append(" → ROLE=").append(p.getRole())
+                                    .append(", TIMING=").append(p.getTiming());
+                        }
                         if (p.getDurationHintMs() > 0) {
                             sb.append(", duration_hint=").append(p.getDurationHintMs()).append("ms");
+                        }
+                        if (p.getSceneDescription() != null) {
+                            sb.append(", SCENE_DIRECTION=\"").append(p.getSceneDescription()).append("\"");
+                            hasSceneDescriptions = true;
+                        }
+                        if (p.getMood() != null) {
+                            sb.append(", MOOD=").append(p.getMood());
                         }
                         if (p.getUserInstruction() != null) {
                             sb.append(" (user said: \"").append(p.getUserInstruction()).append("\")");
@@ -1245,6 +1255,17 @@ public class EdlGeneratorService {
                         - HARD CUT between assets with DIFFERENT roles (intro→content, content→outro)
                         - The user's role assignments OVERRIDE all other heuristics
                         """);
+                if (hasSceneDescriptions) {
+                    sb.append("""
+                            SCENE DIRECTION RULES:
+                            - SCENE_DIRECTION describes what the user wants to SEE in each scene
+                            - Match effects to the scene's MOOD (calm→ken_burns/drift, energetic→zoom/shake)
+                            - Scene transitions should reflect mood changes between scenes
+                            - If MOOD=calm → use soft transitions (fade, dissolve), slower effects
+                            - If MOOD=energetic → use hard cuts, dynamic effects (zoom, shake, glitch)
+                            - If MOOD=dramatic → use contrast effects, slow zoom, fade_black transitions
+                            """);
+                }
             }
 
             if (editIntent.getStructureHints() != null && !editIntent.getStructureHints().isEmpty()) {
@@ -1309,6 +1330,14 @@ public class EdlGeneratorService {
                 sb.append("    ROLE (user-assigned): ").append(placement.getRole()).append("\n");
             } else if (profile != null) {
                 sb.append("    role (suggested): ").append(profile.getSuggestedRole()).append("\n");
+            }
+
+            // User's scene description and mood (from prompt-driven editing)
+            if (placement != null && placement.getSceneDescription() != null) {
+                sb.append("    SCENE_DIRECTION: \"").append(placement.getSceneDescription()).append("\"\n");
+            }
+            if (placement != null && placement.getMood() != null) {
+                sb.append("    SCENE_MOOD: ").append(placement.getMood()).append("\n");
             }
 
             if (profile != null) {

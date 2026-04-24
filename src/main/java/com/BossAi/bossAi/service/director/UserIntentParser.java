@@ -97,12 +97,27 @@ public class UserIntentParser {
 
                 WHAT TO EXTRACT:
                 1. overall_goal: What kind of video do they want? (1 sentence summary)
-                2. placements: For each asset, what ROLE and POSITION does the user want?
+                2. placements: For each asset, what ROLE, POSITION, and SCENE DESCRIPTION?
                 3. pacing_preference: fast/moderate/slow/auto
                 4. structure_hints: Any structural requirements from the prompt
                 5. user_controls_order: Did the user explicitly order the assets?
                 6. editing_style: Any style preference mentioned (cinematic, fast-paced, etc.)
                 7. target_duration_ms: Preferred video length in ms (0 = auto)
+
+                SCENE DESCRIPTIONS (the key feature):
+                If the user describes what specific scenes should look like, capture that per-asset.
+                Each placement can have:
+                  - scene_description: What the user wants to SEE in this scene (visual direction)
+                  - mood: The emotional tone for this scene (calm, energetic, dramatic, mysterious, etc.)
+                Examples:
+                  - "scena z Marokiem powinna być spokojna z wolnym zoomem" →
+                    scene_description="Morocco with slow zoom", mood="calm"
+                  - "Paryż nocą, dynamicznie, szybkie cięcia" →
+                    scene_description="Paris at night, dynamic fast cuts", mood="energetic"
+                  - "zakończ CTA z produktem" →
+                    scene_description="CTA with product shot", mood="professional", role="cta"
+                  - If user describes a scene without specifying which asset →
+                    match by context (Morocco description → asset showing Morocco)
 
                 DETECTION RULES:
                 - "daj to na początku" / "put this first" / "start with this" → timing=beginning
@@ -110,34 +125,57 @@ public class UserIntentParser {
                 - "na końcu" / "at the end" / "finish with" → timing=end, role=outro
                 - "szybki montaż" / "fast edit" / "dynamic" → pacing_preference=fast
                 - "spokojny" / "calm" / "slow" → pacing_preference=slow
-                - "ten filmik powinien być po..." → timing=after specific content
+                - "scena X powinna..." / "scene X should..." → scene_description for that asset
+                - "nastrojowo" / "moody" / "dramatic" → mood for that scene
                 - If user lists assets in specific order with instructions → user_controls_order=true
                 - If user says "30 seconds" or "45s" → target_duration_ms = that value in ms
                 - If no editing instructions at all → all roles="auto", pacing="auto"
 
                 IMPORTANT:
-                - If the user doesn't mention editing/order at all, set all roles to "auto"
+                - Create a placement for EVERY uploaded asset, even if role="auto"
+                - If user describes scenes, fill scene_description and mood for each
+                - If user doesn't describe a specific scene, leave scene_description=null, mood=null
                 - Don't over-interpret — only extract what the user ACTUALLY said
                 - The user's language may be Polish, English, or mixed — understand all
 
                 Return ONLY valid JSON:
                 {
-                  "overall_goal": "educational video about AI tools",
+                  "overall_goal": "travel video showing Morocco, Paris, and Dubai",
                   "placements": [
                     {
                       "asset_index": 0,
                       "role": "intro",
                       "timing": "beginning",
                       "duration_hint_ms": 0,
-                      "user_instruction": "user said: 'put this at the beginning as intro'"
+                      "user_instruction": "user said: 'start with Morocco, calm mood'",
+                      "scene_description": "Morocco at sunset, slow zoom, warm tones",
+                      "mood": "calm"
+                    },
+                    {
+                      "asset_index": 1,
+                      "role": "content",
+                      "timing": "auto",
+                      "duration_hint_ms": 0,
+                      "user_instruction": "user said: 'Paris at night, dynamic'",
+                      "scene_description": "Paris at night with dynamic energy",
+                      "mood": "energetic"
+                    },
+                    {
+                      "asset_index": 2,
+                      "role": "outro",
+                      "timing": "end",
+                      "duration_hint_ms": 0,
+                      "user_instruction": "user said: 'end with Dubai CTA'",
+                      "scene_description": "Dubai skyline, golden tones, CTA overlay",
+                      "mood": "professional"
                     }
                   ],
                   "pacing_preference": "auto",
                   "structure_hints": ["intro first", "end with CTA"],
                   "user_controls_order": true,
-                  "editing_style": null,
+                  "editing_style": "cinematic",
                   "target_duration_ms": 0,
-                  "reasoning": "User explicitly assigned asset 0 as intro and wants it first"
+                  "reasoning": "User described 3 scenes with specific moods and visual directions"
                 }
 
                 """);

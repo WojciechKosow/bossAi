@@ -87,10 +87,29 @@ public class GenerationServiceImpl implements GenerationService {
 //            userAssets.add(musicAsset);
 //        }
 
+        // Resolve music asset by ID (reuse) — add to userAssets so buildContext picks it up
+        if (request.getMusicAssetId() != null) {
+            Asset musicAsset = assetRepository.findById(request.getMusicAssetId())
+                    .orElseThrow(() -> new ResponseStatusException(
+                            HttpStatus.NOT_FOUND, "Music asset not found: " + request.getMusicAssetId()));
+            if (!musicAsset.getUser().getId().equals(user.getId())) {
+                throw new AccessDeniedException("Music asset " + musicAsset.getId() + " is not user's asset");
+            }
+            if (musicAsset.getType() != AssetType.MUSIC) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                        "Asset " + musicAsset.getId() + " is not a MUSIC asset (type=" + musicAsset.getType() + ")");
+            }
+            userAssets = new java.util.ArrayList<>(userAssets);
+            userAssets.add(musicAsset);
+            log.info("[GenerationService] Reusing music asset: id={}, storageKey={}",
+                    musicAsset.getId(), musicAsset.getStorageKey());
+        }
+
         GenerationContext context = buildContext(generation, request, userPlan, userAssets, user);
 
-// Obsługa bezpośredniego uploadu muzyki z requestu
-        if (request.getMusicFile() != null && !request.getMusicFile().isEmpty()) {
+        // Obsługa bezpośredniego uploadu muzyki z requestu (musicFile takes lower priority than musicAssetId)
+        if (request.getMusicAssetId() == null
+                && request.getMusicFile() != null && !request.getMusicFile().isEmpty()) {
             String tempDirPath = ffmpegProperties.getTemp().getDir();
             Path musicPath = Paths.get(tempDirPath, generation.getId().toString(),
                     "music_" + generation.getId() + ".mp3");
