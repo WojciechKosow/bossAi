@@ -66,4 +66,11 @@ public class TikTokAdRequest {
      * If false (default), assets are used in the order defined by their orderIndex.
      */
     private boolean useGptOrdering = false;
+
+    /**
+     * Reuse an existing music asset by its ID instead of uploading a new file.
+     * The asset must be owned by the user and be of type MUSIC.
+     * Takes precedence over musicFile if both are provided.
+     */
+    private UUID musicAssetId;
 }
