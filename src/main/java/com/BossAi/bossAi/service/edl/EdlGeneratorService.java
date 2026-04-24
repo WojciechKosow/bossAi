@@ -9,7 +9,6 @@ import com.BossAi.bossAi.service.director.AssetProfile;
 import com.BossAi.bossAi.service.director.EffectType;
 import com.BossAi.bossAi.service.director.JustifiedCut;
 import com.BossAi.bossAi.service.director.NarrationAnalysis;
-import com.BossAi.bossAi.service.director.SceneDirective;
 import com.BossAi.bossAi.service.director.UserEditIntent;
 import com.BossAi.bossAi.service.generation.GenerationContext;
 import com.BossAi.bossAi.service.generation.context.SceneAsset;
@@ -83,11 +82,6 @@ public class EdlGeneratorService {
         String rawJson = openAiService.generateDirectorPlan(prompt);
 
         EdlDto edl = parseGptResponse(rawJson);
-
-        // ENFORCE asset assignments from justified cuts — GPT can ignore MUST_USE_ASSET,
-        // so we deterministically override its choices for segments with explicit assignments.
-        // Must run BEFORE injectAssetUrls so URLs are resolved for corrected asset_ids.
-        enforceAssetAssignments(edl, context, projectAssets);
 
         // Inject asset URLs — GPT nie zna URLi, tylko asset_id
         injectAssetUrls(edl, projectAssets);
@@ -450,16 +444,9 @@ public class EdlGeneratorService {
                     .assetType(asset.getType().name())
                     .startMs(cut.getStartMs())
                     .endMs(cut.getEndMs())
-                    .layer(0)
                     .effects(effects)
                     .transition(transition)
                     .build());
-
-            // === MULTI-LAYER: emit additional segments for extra layers ===
-            int midpoint = (cut.getStartMs() + cut.getEndMs()) / 2;
-            int sceneIdx = findSceneAtMs(midpoint, sceneBounds);
-            emitAdditionalLayers(segments, editIntent, sceneIdx, cut, visualAssets,
-                    callbackBase, context, audioAnalysis);
         }
 
         // Loguj dystrybucję assetów — per asset z assignment source
@@ -469,118 +456,6 @@ public class EdlGeneratorService {
                 segments.size(), cuts.size(), usageCounts);
 
         return segments;
-    }
-
-    /**
-     * Post-processes GPT-generated EDL to deterministically enforce asset assignments.
-     *
-     * Two-pass approach:
-     *   Pass 1: For segments matching justified cuts with explicit assignedAssetIndex,
-     *           use that asset (boundary transitions from user intent).
-     *   Pass 2: For ALL remaining segments, use scene-aware mapping — timeline position
-     *           → scene → asset. This ensures each segment shows the correct asset for
-     *           its position on the timeline, matching scene-to-asset 1:1 mapping.
-     *
-     * GPT's effects and transitions are preserved. Only asset_id is overridden.
-     */
-    private void enforceAssetAssignments(EdlDto edl, GenerationContext context,
-                                         List<ProjectAsset> projectAssets) {
-        List<ProjectAsset> visualAssets = new ArrayList<>();
-        for (ProjectAsset asset : projectAssets) {
-            String typeName = asset.getType().name();
-            if ("VIDEO".equals(typeName) || "IMAGE".equals(typeName)) {
-                visualAssets.add(asset);
-            }
-        }
-        if (visualAssets.isEmpty()) return;
-
-        List<EdlSegment> segments = edl.getSegments();
-        if (segments == null || segments.isEmpty()) return;
-
-        // Build scene bounds + asset-by-scene mapping
-        List<SceneAsset> scenes = context.getScenes();
-        List<int[]> sceneBounds = buildSceneBounds(scenes);
-
-        int voiceDurationMs = 0;
-        if (context.getWordTimings() != null && !context.getWordTimings().isEmpty()) {
-            voiceDurationMs = context.getWordTimings()
-                    .get(context.getWordTimings().size() - 1).endMs();
-        }
-        int sceneDurationMs = scenes.stream().mapToInt(SceneAsset::getDurationMs).sum();
-        if (voiceDurationMs > sceneDurationMs && sceneDurationMs > 0) {
-            double scale = (double) voiceDurationMs / sceneDurationMs;
-            sceneBounds = scaleSceneBounds(sceneBounds, scale, voiceDurationMs);
-        }
-
-        Map<Integer, ProjectAsset> assetBySceneIndex = new HashMap<>();
-        for (int i = 0; i < visualAssets.size(); i++) {
-            assetBySceneIndex.put(i, visualAssets.get(i));
-        }
-
-        List<JustifiedCut> justifiedCuts = context.getJustifiedCuts();
-        int explicitCount = 0;
-        int sceneAwareCount = 0;
-
-        for (EdlSegment segment : segments) {
-            if (segment.getLayer() > 0) continue;
-
-            String correctId = null;
-            String source = null;
-
-            // Pass 1: explicit assignment from justified cuts (boundary transitions)
-            if (justifiedCuts != null && !justifiedCuts.isEmpty()) {
-                JustifiedCut match = findMatchingCut(segment, justifiedCuts);
-                if (match != null && match.getAssignedAssetIndex() >= 0
-                        && match.getAssignedAssetIndex() < visualAssets.size()) {
-                    correctId = visualAssets.get(match.getAssignedAssetIndex()).getId().toString();
-                    source = "explicit_idx_" + match.getAssignedAssetIndex();
-                }
-            }
-
-            // Pass 2: scene-aware mapping (timeline position → scene → asset)
-            if (correctId == null) {
-                int midpoint = (segment.getStartMs() + segment.getEndMs()) / 2;
-                int sceneIdx = findSceneAtMs(midpoint, sceneBounds);
-                ProjectAsset sceneAsset = assetBySceneIndex.get(sceneIdx);
-                if (sceneAsset != null) {
-                    correctId = sceneAsset.getId().toString();
-                    source = "scene_" + sceneIdx;
-                }
-            }
-
-            if (correctId != null && !correctId.equals(segment.getAssetId())) {
-                log.debug("[EdlGenerator] ENFORCE [{}]: segment {}ms-{}ms — {} → {}",
-                        source, segment.getStartMs(), segment.getEndMs(),
-                        segment.getAssetId() != null ? segment.getAssetId().substring(0, 8) : "null",
-                        correctId.substring(0, 8));
-                segment.setAssetId(correctId);
-                if (source != null && source.startsWith("explicit")) explicitCount++;
-                else sceneAwareCount++;
-            }
-        }
-
-        if (explicitCount + sceneAwareCount > 0) {
-            log.info("[EdlGenerator] Enforced asset overrides: {} explicit, {} scene-aware",
-                    explicitCount, sceneAwareCount);
-        }
-    }
-
-    private JustifiedCut findMatchingCut(EdlSegment segment, List<JustifiedCut> cuts) {
-        JustifiedCut best = null;
-        int bestOverlap = 0;
-
-        for (JustifiedCut cut : cuts) {
-            int overlapStart = Math.max(segment.getStartMs(), cut.getStartMs());
-            int overlapEnd = Math.min(segment.getEndMs(), cut.getEndMs());
-            int overlap = Math.max(0, overlapEnd - overlapStart);
-
-            if (overlap > bestOverlap) {
-                bestOverlap = overlap;
-                best = cut;
-            }
-        }
-
-        return best;
     }
 
     /**
@@ -718,91 +593,7 @@ public class EdlGeneratorService {
         return sceneBounds.isEmpty() ? 0 : sceneBounds.get(sceneBounds.size() - 1)[2];
     }
 
-    /**
-     * Emituje dodatkowe segmenty dla warstw > 0 z SceneDirective.
-     *
-     * Jeśli scena ma SceneDirective z wieloma warstwami (np. background + primary),
-     * warstwa 0 jest już obsłużona jako główny segment. Ta metoda dodaje
-     * segmenty na warstwach 1+ z tymi samymi ramami czasowymi.
-     */
-    private void emitAdditionalLayers(
-            List<EdlSegment> segments,
-            UserEditIntent editIntent,
-            int sceneIndex,
-            JustifiedCut cut,
-            List<ProjectAsset> visualAssets,
-            String callbackBase,
-            GenerationContext context,
-            AudioAnalysisResponse audioAnalysis) {
-
-        if (editIntent == null || !editIntent.hasSceneDirectives()) return;
-
-        SceneDirective directive = editIntent.getSceneDirective(sceneIndex);
-        if (directive == null || !directive.hasMultipleLayers()) return;
-
-        for (SceneDirective.LayerDirective layer : directive.getLayers()) {
-            // Skip layer 0 — already emitted as the primary segment
-            if (layer.getLayerIndex() == 0) continue;
-            if ("background".equals(layer.getRole()) && layer.getLayerIndex() == 0) continue;
-
-            ProjectAsset layerAsset = resolveLayerAsset(layer, visualAssets);
-            if (layerAsset == null) {
-                log.debug("[EdlGenerator] Layer {} for scene {} has no resolved asset — skipping",
-                        layer.getLayerIndex(), sceneIndex);
-                continue;
-            }
-
-            segments.add(EdlSegment.builder()
-                    .id(UUID.randomUUID().toString())
-                    .assetId(layerAsset.getId().toString())
-                    .assetUrl(buildAssetUrl(callbackBase, layerAsset.getId().toString(), layerAsset.getStorageUrl()))
-                    .assetType(layerAsset.getType().name())
-                    .startMs(cut.getStartMs())
-                    .endMs(cut.getEndMs())
-                    .layer(layer.getLayerIndex())
-                    .effects(List.of())
-                    .build());
-
-            log.debug("[EdlGenerator] Emitted layer {} segment for scene {} — asset {}",
-                    layer.getLayerIndex(), sceneIndex, layerAsset.getId().toString().substring(0, 8));
-        }
-    }
-
-    /**
-     * Resolves a LayerDirective to a concrete ProjectAsset.
-     * - source=provided → look up by assetIndex
-     * - source=generate → asset should have been pre-generated in pipeline (find by generation prompt match)
-     * - source=auto → null (layer skipped)
-     */
-    private ProjectAsset resolveLayerAsset(SceneDirective.LayerDirective layer,
-                                           List<ProjectAsset> visualAssets) {
-        if (layer.isProvided() && layer.getAssetIndex() >= 0 && layer.getAssetIndex() < visualAssets.size()) {
-            return visualAssets.get(layer.getAssetIndex());
-        }
-
-        if (layer.isGenerate()) {
-            // Generated assets are added to the project's visual assets during pipeline
-            // They should be at the end of the visualAssets list (appended by LayerGenerationStep)
-            // For now, try to find by generation prompt in asset descriptions
-            if (layer.getGenerationPrompt() != null) {
-                String searchTerm = layer.getGenerationPrompt().toLowerCase();
-                for (ProjectAsset asset : visualAssets) {
-                    if (asset.getPrompt() != null && asset.getPrompt().toLowerCase().contains(
-                            searchTerm.substring(0, Math.min(30, searchTerm.length())))) {
-                        return asset;
-                    }
-                }
-            }
-            // Fallback: if generation prompt not found, use the last visual asset
-            // (generated assets are typically appended at the end)
-            if (!visualAssets.isEmpty()) {
-                log.debug("[EdlGenerator] Generated layer asset not found by prompt, using last visual asset");
-                return visualAssets.get(visualAssets.size() - 1);
-            }
-        }
-
-        return null;
-    }
+    // findFallbackAsset removed — replaced by findIntentAwareFallbackAsset
 
     private double resolveIntensityFromCut(JustifiedCut cut) {
         return switch (cut.getClassification()) {
@@ -1369,7 +1160,6 @@ public class EdlGeneratorService {
                       "asset_type": "VIDEO|IMAGE",
                       "start_ms": <int>,
                       "end_ms": <int>,
-                      "layer": <int, default 0>,
                       "effects": [{"type": "<effect_name>", "intensity": 0.0-1.0, "params": {}}],
                       "transition": {"type": "<transition_name>", "duration_ms": 300}
                     }
@@ -1482,39 +1272,6 @@ public class EdlGeneratorService {
                 sb.append("\n");
             }
             sb.append("Use these profiles to match effects to content (simple→ken_burns, complex→minimal).\n\n");
-        }
-
-        // === SCENE DIRECTIVES — multi-layer scene composition ===
-        if (editIntent != null && editIntent.hasSceneDirectives()) {
-            sb.append("=== SCENE DIRECTIVES (MULTI-LAYER COMPOSITION — MUST FOLLOW) ===\n");
-            sb.append("The user described specific scene compositions with multiple layers.\n");
-            sb.append("For scenes with multiple layers, emit MULTIPLE segments at the same time range\n");
-            sb.append("with DIFFERENT 'layer' values (layer 0 = background, layer 1 = foreground, etc.)\n\n");
-
-            for (SceneDirective directive : editIntent.getSceneDirectives()) {
-                sb.append("  Scene ").append(directive.getSceneIndex());
-                if (directive.getSceneLabel() != null) {
-                    sb.append(" [").append(directive.getSceneLabel()).append("]");
-                }
-                sb.append(": ").append(directive.getDescription() != null ? directive.getDescription() : "").append("\n");
-
-                if (directive.getLayers() != null) {
-                    for (SceneDirective.LayerDirective layer : directive.getLayers()) {
-                        sb.append("    Layer ").append(layer.getLayerIndex())
-                                .append(" (").append(layer.getRole()).append("): ");
-                        if (layer.isProvided()) {
-                            sb.append("asset_index=").append(layer.getAssetIndex());
-                        } else if (layer.isGenerate()) {
-                            sb.append("GENERATED — \"").append(layer.getGenerationPrompt()).append("\"");
-                        }
-                        sb.append("\n");
-                    }
-                }
-                if (directive.getComposition() != null) {
-                    sb.append("    Composition: ").append(directive.getComposition()).append("\n");
-                }
-            }
-            sb.append("\n");
         }
 
         // Narration
@@ -1786,13 +1543,6 @@ public class EdlGeneratorService {
                 - Only change asset when the narration TOPIC changes
                 - NEVER place an intro-role asset in the middle or end of the video
                 - NEVER place an outro-role asset at the beginning or middle of the video
-
-                MULTI-LAYER SCENES (when SCENE DIRECTIVES are provided):
-                - If a scene has multiple layers → emit multiple segments at the SAME time range
-                - Layer 0 = background (usually fullscreen), layer 1 = foreground (on top)
-                - Each layer segment has the same start_ms/end_ms but DIFFERENT layer values
-                - Different layer segments can (and should) use different asset_ids
-                - Layer 0 segments get transitions, layer 1+ segments do NOT get transitions
 
                 CUT ECONOMY:
                 - Fewer, purposeful cuts are BETTER than many cuts with asset repetition
