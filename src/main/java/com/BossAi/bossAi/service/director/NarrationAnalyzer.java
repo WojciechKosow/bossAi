@@ -228,20 +228,6 @@ public class NarrationAnalyzer {
             if (!"auto".equals(editIntent.getPacingPreference())) {
                 sb.append("User wants pacing: ").append(editIntent.getPacingPreference()).append("\n");
             }
-
-            // Scene directives — multi-layer composition
-            if (editIntent.hasSceneDirectives()) {
-                sb.append("\n=== SCENE DIRECTIVES (from user prompt) ===\n");
-                sb.append("User described specific scene compositions. Narration must match.\n");
-                for (SceneDirective sd : editIntent.getSceneDirectives()) {
-                    sb.append("  Scene ").append(sd.getSceneIndex());
-                    if (sd.getSceneLabel() != null) sb.append(" [").append(sd.getSceneLabel()).append("]");
-                    if (sd.getDescription() != null) sb.append(": ").append(sd.getDescription());
-                    sb.append("\n");
-                }
-                sb.append("Narration segments MUST align with these scene descriptions.\n");
-            }
-
             sb.append("\n");
         }
 
