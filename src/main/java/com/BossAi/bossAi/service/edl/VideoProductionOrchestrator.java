@@ -58,6 +58,7 @@ public class VideoProductionOrchestrator {
     private final CutEngine cutEngine;
     private final AssetAnalyzer assetAnalyzer;
     private final UserIntentParser userIntentParser;
+    private final LayerAssetGenerator layerAssetGenerator;
     private final ObjectMapper objectMapper;
 
     /**
@@ -84,6 +85,13 @@ public class VideoProductionOrchestrator {
             //   Te dwa kroki dają GPT "oczy" i "uszy" — zamiast ślepego montażu,
             //   system wie CO jest na assetach i CZEGO chce user.
             analyzeAssetsAndIntent(context);
+
+            // 2.6 NOWE: Generowanie warstw dla scen z multi-layer composition.
+            //   Jeśli UserIntentParser wykrył "w tle X, na środku Y" — generujemy X.
+            //   Wynik zapisywany w SceneAsset.layerAssetIds (layerIndex → ProjectAsset UUID),
+            //   a wygenerowane assety dopisywane do listy projektowej, by EdlGenerator
+            //   mógł je serwować po URL-u.
+            generateMultiLayerAssets(projectId, context, projectAssets);
 
             // 3. WARSTWA A: Analiza narracji (GPT — semantyczne segmenty + editing intent)
             //    TERAZ z kontekstem: UserEditIntent + AssetProfiles
@@ -186,6 +194,67 @@ public class VideoProductionOrchestrator {
                     editIntent.getPacingPreference());
         } catch (Exception e) {
             log.warn("[Orchestrator] User intent parsing failed — continuing without intent: {}", e.getMessage());
+        }
+    }
+
+    /**
+     * Generuje assety dla scen z multi-layer composition (layer>0).
+     *
+     * UserIntentParser może wystawić SceneDirectives, jeśli user opisał warstwy
+     * (np. "w tle X, na środku Y"). Tutaj realizujemy te dyrektywy:
+     *   1. LayerAssetGenerator generuje obrazy/video przez FalAI dla source=generate
+     *   2. Mapujemy wygenerowane ProjectAsset na SceneAsset.layerAssetIds
+     *      (klucz = layerIndex, wartość = ProjectAsset UUID)
+     *   3. Dodajemy nowe assety do listy projektAssets in-place, żeby
+     *      EdlGenerator mógł je rozwiązać po assetId → URL
+     *
+     * NIE zmienia liczby scen ani głównych assetów — tylko dorzuca warstwy.
+     */
+    private void generateMultiLayerAssets(UUID projectId,
+                                          GenerationContext context,
+                                          List<ProjectAsset> projectAssets) {
+        UserEditIntent editIntent = context.getUserEditIntent();
+        if (editIntent == null || !editIntent.hasSceneDirectives()
+                || !editIntent.needsAssetGeneration()) {
+            return;
+        }
+
+        try {
+            List<ProjectAsset> generated = layerAssetGenerator.generateLayerAssets(
+                    projectId, editIntent);
+            if (generated.isEmpty()) {
+                return;
+            }
+
+            // Dodaj wygenerowane assety do listy projektu (mutable list z DB).
+            projectAssets.addAll(generated);
+
+            // Zmapuj wygenerowane assety na sceneIndex+layerIndex w kolejności
+            // generowania (LayerAssetGenerator iteruje SceneDirectives w tej samej
+            // kolejności co my — najpierw scena, potem layery z source=generate).
+            int genIdx = 0;
+            List<SceneAsset> scenes = context.getScenes();
+            for (SceneDirective directive : editIntent.getSceneDirectives()) {
+                if (directive.getLayers() == null) continue;
+                int sceneIndex = directive.getSceneIndex();
+                if (sceneIndex < 0 || sceneIndex >= scenes.size()) continue;
+
+                SceneAsset scene = scenes.get(sceneIndex);
+                for (SceneDirective.LayerDirective layer : directive.getLayers()) {
+                    if (!layer.isGenerate()) continue;
+                    if (genIdx >= generated.size()) break;
+                    ProjectAsset asset = generated.get(genIdx++);
+                    scene.getLayerAssetIds().put(layer.getLayerIndex(), asset.getId());
+                }
+            }
+
+            log.info("[Orchestrator] Multi-layer asset generation complete — {} new assets across {} scenes",
+                    generated.size(),
+                    scenes.stream().filter(s -> !s.getLayerAssetIds().isEmpty()).count());
+
+        } catch (Exception e) {
+            log.warn("[Orchestrator] Multi-layer asset generation failed — continuing with primary layers only: {}",
+                    e.getMessage());
         }
     }
 

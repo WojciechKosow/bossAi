@@ -64,10 +64,14 @@ public class UserIntentParser {
             String rawJson = openAiService.generateDirectorPlan(prompt);
             UserEditIntent intent = parseGptResponse(rawJson);
 
+            int assetCount = customAssets != null ? customAssets.size() : 0;
+            sanitizeSceneDirectives(intent, assetCount);
+
             log.info("[UserIntentParser] Intent parsed — goal: '{}', placements: {}, " +
-                            "pacing: {}, explicit: {}, style: {}",
+                            "scene_directives: {}, pacing: {}, explicit: {}, style: {}",
                     intent.getOverallGoal(),
                     intent.getPlacements() != null ? intent.getPlacements().size() : 0,
+                    intent.getSceneDirectives() != null ? intent.getSceneDirectives().size() : 0,
                     intent.getPacingPreference(),
                     intent.hasExplicitInstructions(),
                     intent.getEditingStyle());
@@ -78,6 +82,60 @@ public class UserIntentParser {
             log.warn("[UserIntentParser] GPT parsing failed, using heuristic fallback: {}", e.getMessage());
             return buildHeuristicIntent(userPrompt, customAssets);
         }
+    }
+
+    /**
+     * Pilnuje niezmiennika: liczba SceneDirectives nigdy nie przekracza assetCount,
+     * a scene_index każdej dyrektywy mieści się w [0, assetCount). GPT bywa kreatywny —
+     * usuwamy dyrektywy poza zakresem zamiast pozwolić im rozsadzić mapowanie 1:1
+     * scene→asset (CRITICAL RULE z CLAUDE.md).
+     */
+    private void sanitizeSceneDirectives(UserEditIntent intent, int assetCount) {
+        if (intent == null || intent.getSceneDirectives() == null
+                || intent.getSceneDirectives().isEmpty()) {
+            return;
+        }
+
+        List<SceneDirective> kept = new ArrayList<>();
+        java.util.Set<Integer> seen = new java.util.HashSet<>();
+        for (SceneDirective sd : intent.getSceneDirectives()) {
+            int idx = sd.getSceneIndex();
+            if (idx < 0 || idx >= assetCount) {
+                log.warn("[UserIntentParser] Dropping SceneDirective with out-of-range scene_index={} (assetCount={})",
+                        idx, assetCount);
+                continue;
+            }
+            if (!seen.add(idx)) {
+                log.warn("[UserIntentParser] Dropping duplicate SceneDirective for scene_index={}", idx);
+                continue;
+            }
+            // Drop layers with invalid asset_index references
+            if (sd.getLayers() != null) {
+                List<SceneDirective.LayerDirective> validLayers = new ArrayList<>();
+                for (SceneDirective.LayerDirective layer : sd.getLayers()) {
+                    if ("provided".equals(layer.getSource())
+                            && (layer.getAssetIndex() < 0 || layer.getAssetIndex() >= assetCount)) {
+                        log.warn("[UserIntentParser] Dropping provided layer with invalid asset_index={} in scene {}",
+                                layer.getAssetIndex(), idx);
+                        continue;
+                    }
+                    if ("generate".equals(layer.getSource())
+                            && (layer.getGenerationPrompt() == null || layer.getGenerationPrompt().isBlank())) {
+                        log.warn("[UserIntentParser] Dropping generate layer without prompt in scene {}", idx);
+                        continue;
+                    }
+                    validLayers.add(layer);
+                }
+                sd.setLayers(validLayers);
+            }
+            // Skip directives that ended up with no layers
+            if (sd.getLayers() == null || sd.getLayers().isEmpty()) {
+                log.warn("[UserIntentParser] Dropping SceneDirective scene_index={} — no valid layers left", idx);
+                continue;
+            }
+            kept.add(sd);
+        }
+        intent.setSceneDirectives(kept);
     }
 
     // =========================================================================
@@ -119,6 +177,30 @@ public class UserIntentParser {
                   - If user describes a scene without specifying which asset →
                     match by context (Morocco description → asset showing Morocco)
 
+                MULTI-LAYER SCENES (only when user explicitly describes layered composition):
+                Sometimes users describe scenes with MULTIPLE visual elements stacked together,
+                e.g. background + foreground. Examples:
+                  - "w tle video z giełdy, na środku filmik z blondynką"
+                  - "background of city skyline, overlay product shot"
+                  - "tło: morze, na pierwszym planie: ja gadający"
+                  - "scena 2 z blondynką ma mieć w tle wykres giełdowy"
+
+                When you detect such language, populate scene_directives with one entry
+                per scene that has layers. RULES:
+                  - Each scene_directive's scene_index MUST equal the asset_index of its
+                    primary (foreground) asset — DO NOT invent extra scenes.
+                    Scene count is FIXED to the number of uploaded assets.
+                  - Each scene_directive has 1..3 layers, in this order:
+                      layer 0 = "background" (typically source="generate")
+                      layer 1 = "primary"    (typically source="provided", asset_index=scene_index)
+                      layer 2 = "overlay"    (optional)
+                  - For "generate" layers, write a concrete generation_prompt in English
+                    describing what AI should generate. Set generation_type="image".
+                  - For "provided" layers, set asset_index to the user asset that goes
+                    on this layer (usually = scene_index for the primary).
+                  - If the user did NOT describe layered composition, leave
+                    scene_directives as an empty list. Do not invent layers.
+
                 DETECTION RULES:
                 - "daj to na początku" / "put this first" / "start with this" → timing=beginning
                 - "jako intro" / "as an intro" → role=intro
@@ -127,6 +209,10 @@ public class UserIntentParser {
                 - "spokojny" / "calm" / "slow" → pacing_preference=slow
                 - "scena X powinna..." / "scene X should..." → scene_description for that asset
                 - "nastrojowo" / "moody" / "dramatic" → mood for that scene
+                - "w tle..." / "in the background..." / "background:" → layered scene with
+                  background generated layer + primary provided layer
+                - "na środku..." / "na pierwszym planie..." / "foreground..." → primary layer
+                - "overlay..." / "nakładka..." → overlay layer (layer 2)
                 - If user lists assets in specific order with instructions → user_controls_order=true
                 - If user says "30 seconds" or "45s" → target_duration_ms = that value in ms
                 - If no editing instructions at all → all roles="auto", pacing="auto"
@@ -175,7 +261,49 @@ public class UserIntentParser {
                   "user_controls_order": true,
                   "editing_style": "cinematic",
                   "target_duration_ms": 0,
+                  "scene_directives": [],
                   "reasoning": "User described 3 scenes with specific moods and visual directions"
+                }
+
+                Multi-layer example — user said "scena 1 z blondynką, w tle wykres giełdowy;
+                scena 2 fullscreen produkt" with 2 uploaded assets:
+                {
+                  "overall_goal": "product ad with blondynka against stock chart background",
+                  "placements": [
+                    {"asset_index": 0, "role": "content", "timing": "beginning", "scene_description": "blonde woman talking", "mood": "energetic"},
+                    {"asset_index": 1, "role": "cta", "timing": "end", "scene_description": "product shot", "mood": "professional"}
+                  ],
+                  "pacing_preference": "auto",
+                  "structure_hints": [],
+                  "user_controls_order": true,
+                  "editing_style": null,
+                  "target_duration_ms": 0,
+                  "scene_directives": [
+                    {
+                      "scene_index": 0,
+                      "scene_label": "blondynka with stock chart background",
+                      "description": "blonde woman in foreground, stock chart in background",
+                      "composition": "overlay",
+                      "layers": [
+                        {
+                          "layer_index": 0,
+                          "role": "background",
+                          "source": "generate",
+                          "generation_prompt": "stock market chart with green and red candles, financial trading screen, animated style",
+                          "generation_type": "image",
+                          "opacity": 1.0
+                        },
+                        {
+                          "layer_index": 1,
+                          "role": "primary",
+                          "source": "provided",
+                          "asset_index": 0,
+                          "opacity": 1.0
+                        }
+                      ]
+                    }
+                  ],
+                  "reasoning": "User described scene 0 as layered (background generated + primary provided); scene 1 stays fullscreen so no directive"
                 }
 
                 """);

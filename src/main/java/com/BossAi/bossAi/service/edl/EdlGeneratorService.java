@@ -130,6 +130,9 @@ public class EdlGeneratorService {
         // Snap segment cuts to nearest beat positions
         beatSnapSegments(edl, audioAnalysis);
 
+        // Multi-layer composition (same as deterministic path)
+        appendLayerSegments(edl, context, projectAssets);
+
         EdlValidator.ValidationResult result = edlValidator.validate(edl);
         if (!result.valid()) {
             log.warn("[EdlGenerator] GPT EDL also invalid — last resort deterministic: {}", result.errors());
@@ -316,7 +319,104 @@ public class EdlGeneratorService {
                 .build();
 
         beatSnapSegments(edl, audioAnalysis);
+
+        // Multi-layer composition: emit additional EdlSegments (layer>0) for scenes
+        // that LayerAssetGenerator populated with background/overlay assets.
+        appendLayerSegments(edl, context, projectAssets);
+
         return edl;
+    }
+
+    // =========================================================================
+    // MULTI-LAYER — emit segments with layer>0 over the same scene time range
+    // =========================================================================
+
+    /**
+     * Dla scen z wypełnioną mapą layerAssetIds (layerIndex → ProjectAsset UUID)
+     * dorzuca do EDL dodatkowe EdlSegmenty z layer>0. Każdy taki segment pokrywa
+     * pełen przedział czasowy sceny zrekonstruowany z istniejących primary segmentów
+     * (layer=0). Liczba scen i ich layout layer=0 nie zmieniają się.
+     *
+     * Wynik: Remotion dostaje stos warstw — np. layer 0 = wygenerowane stock footage,
+     * layer 1 = filmik usera nakładany na to tło.
+     */
+    private void appendLayerSegments(EdlDto edl,
+                                     GenerationContext context,
+                                     List<ProjectAsset> projectAssets) {
+        List<SceneAsset> scenes = context.getScenes();
+        if (scenes == null || scenes.isEmpty()) return;
+
+        boolean anyLayered = scenes.stream()
+                .anyMatch(s -> s.getLayerAssetIds() != null && !s.getLayerAssetIds().isEmpty());
+        if (!anyLayered) return;
+
+        List<EdlSegment> primarySegments = edl.getSegments();
+        if (primarySegments == null || primarySegments.isEmpty()) return;
+
+        // Asset → sceneIndex (1:1 by VIDEO/IMAGE insertion order, same logic as
+        // buildSegmentsFromJustifiedCuts używa do mapowania scena→asset)
+        Map<String, Integer> sceneIndexByAssetId = new HashMap<>();
+        int sIdx = 0;
+        for (ProjectAsset asset : projectAssets) {
+            String typeName = asset.getType().name();
+            if ("VIDEO".equals(typeName) || "IMAGE".equals(typeName)) {
+                sceneIndexByAssetId.put(asset.getId().toString(), sIdx++);
+            }
+        }
+
+        Map<UUID, ProjectAsset> assetById = new HashMap<>();
+        for (ProjectAsset a : projectAssets) {
+            assetById.put(a.getId(), a);
+        }
+
+        String callbackBase = remotionProperties.getCallbackBaseUrl();
+        List<EdlSegment> layerSegments = new ArrayList<>();
+
+        for (int sceneIdx = 0; sceneIdx < scenes.size(); sceneIdx++) {
+            SceneAsset scene = scenes.get(sceneIdx);
+            Map<Integer, UUID> layers = scene.getLayerAssetIds();
+            if (layers == null || layers.isEmpty()) continue;
+
+            // Wylicz czas trwania sceny z primary segmentów, które używają jej assetu
+            int sceneStart = Integer.MAX_VALUE;
+            int sceneEnd = Integer.MIN_VALUE;
+            for (EdlSegment seg : primarySegments) {
+                if (seg.getLayer() != 0) continue;
+                Integer mapped = sceneIndexByAssetId.get(seg.getAssetId());
+                if (mapped == null || mapped != sceneIdx) continue;
+                sceneStart = Math.min(sceneStart, seg.getStartMs());
+                sceneEnd = Math.max(sceneEnd, seg.getEndMs());
+            }
+            if (sceneStart == Integer.MAX_VALUE || sceneEnd <= sceneStart) {
+                log.debug("[EdlGenerator] Skipping layers for scene {} — no primary segments", sceneIdx);
+                continue;
+            }
+
+            for (Map.Entry<Integer, UUID> e : layers.entrySet()) {
+                int layerIndex = e.getKey();
+                if (layerIndex == 0) continue; // primary already emitted
+                ProjectAsset asset = assetById.get(e.getValue());
+                if (asset == null) continue;
+
+                layerSegments.add(EdlSegment.builder()
+                        .id(UUID.randomUUID().toString())
+                        .assetId(asset.getId().toString())
+                        .assetUrl(buildAssetUrl(callbackBase, asset.getId().toString(), asset.getStorageUrl()))
+                        .assetType(asset.getType().name())
+                        .startMs(sceneStart)
+                        .endMs(sceneEnd)
+                        .layer(layerIndex)
+                        .effects(new ArrayList<>())
+                        .build());
+            }
+        }
+
+        if (!layerSegments.isEmpty()) {
+            primarySegments.addAll(layerSegments);
+            log.info("[EdlGenerator] Appended {} layer segments (layer>0) for {} multi-layer scenes",
+                    layerSegments.size(),
+                    scenes.stream().filter(s -> !s.getLayerAssetIds().isEmpty()).count());
+        }
     }
 
     // =========================================================================
