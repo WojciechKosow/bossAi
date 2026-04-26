@@ -191,6 +191,12 @@ public class ScriptStep implements GenerationStep {
                     if (placement.getMood() != null) {
                         sb.append(", SCENE_MOOD=").append(placement.getMood());
                     }
+                    if (placement.getSuggestedEffect() != null) {
+                        sb.append(", USER_EFFECT=").append(placement.getSuggestedEffect());
+                    }
+                    if (placement.getSuggestedTransition() != null) {
+                        sb.append(", USER_TRANSITION=").append(placement.getSuggestedTransition());
+                    }
                 }
 
                 if (a.getDurationSeconds() != null) {

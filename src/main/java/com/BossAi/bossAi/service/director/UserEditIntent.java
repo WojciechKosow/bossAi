@@ -157,6 +157,25 @@ public class UserEditIntent {
          */
         @JsonProperty("mood")
         private String mood;
+
+        /**
+         * Sugerowany efekt wizualny dla tej sceny (z prompta usera).
+         * Wartości muszą pasować do EffectRegistry, np. zoom_in, fast_zoom, shake,
+         * pan_left, pan_right, pan_up, pan_down, ken_burns, glitch, flash,
+         * bounce, drift, slow_motion, zoom_pulse, zoom_in_offset.
+         * Null = system decyduje (domyślny tryb).
+         */
+        @JsonProperty("suggested_effect")
+        private String suggestedEffect;
+
+        /**
+         * Sugerowane przejście do następnej sceny (z prompta usera).
+         * Wartości z EffectRegistry: cut, fade, fade_white, fade_black,
+         * dissolve, wipe_left, wipe_right, slide_left, slide_right.
+         * Null = system decyduje.
+         */
+        @JsonProperty("suggested_transition")
+        private String suggestedTransition;
     }
 
     // ─── Helper methods ────────────────────────────────────────

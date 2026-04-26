@@ -5,6 +5,7 @@ import com.BossAi.bossAi.dto.edl.EdlDto;
 import com.BossAi.bossAi.entity.*;
 import com.BossAi.bossAi.service.*;
 import com.BossAi.bossAi.service.edl.EdlValidator;
+import com.BossAi.bossAi.service.edl.EffectRegistry;
 import com.BossAi.bossAi.service.edl.VideoProductionOrchestrator;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.validation.Valid;
@@ -17,6 +18,7 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 @Slf4j
@@ -31,6 +33,7 @@ public class VideoProjectController {
     private final RenderJobService renderJobService;
     private final EdlValidator edlValidator;
     private final VideoProductionOrchestrator videoProductionOrchestrator;
+    private final EffectRegistry effectRegistry;
     private final ObjectMapper objectMapper;
 
     // =========================================================================
@@ -160,6 +163,21 @@ public class VideoProjectController {
                 .source(saved.getSource())
                 .createdAt(saved.getCreatedAt())
                 .build());
+    }
+
+    /**
+     * Phase 4 — GET /api/v1/projects/effects/catalog
+     *
+     * Katalog dostępnych efektów i przejść z domyślnymi parametrami. Frontend
+     * timeline editora używa tej listy do budowy dropdownów per segment.
+     * Zwraca wszystkie typy z EffectRegistry (źródło prawdy dla całego pipeline'u).
+     */
+    @GetMapping("/effects/catalog")
+    public ResponseEntity<Map<String, Map<String, Map<String, Object>>>> getEffectsCatalog() {
+        return ResponseEntity.ok(Map.of(
+                "effects", effectRegistry.getAllEffects(),
+                "transitions", effectRegistry.getAllTransitions()
+        ));
     }
 
     /**

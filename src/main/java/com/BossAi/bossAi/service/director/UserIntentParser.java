@@ -2,6 +2,7 @@ package com.BossAi.bossAi.service.director;
 
 import com.BossAi.bossAi.entity.Asset;
 import com.BossAi.bossAi.service.OpenAiService;
+import com.BossAi.bossAi.service.edl.EffectRegistry;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
@@ -36,6 +37,7 @@ public class UserIntentParser {
 
     private final OpenAiService openAiService;
     private final ObjectMapper objectMapper;
+    private final EffectRegistry effectRegistry;
 
     /**
      * Parsuje prompt usera + listę assetów na UserEditIntent.
@@ -66,6 +68,7 @@ public class UserIntentParser {
 
             int assetCount = customAssets != null ? customAssets.size() : 0;
             sanitizeSceneDirectives(intent, assetCount);
+            sanitizePlacementEffects(intent);
 
             log.info("[UserIntentParser] Intent parsed — goal: '{}', placements: {}, " +
                             "scene_directives: {}, pacing: {}, explicit: {}, style: {}",
@@ -138,6 +141,44 @@ public class UserIntentParser {
         intent.setSceneDirectives(kept);
     }
 
+    /**
+     * Czyści suggested_effect / suggested_transition na placementach — GPT czasem
+     * zwraca nazwy spoza EffectRegistry. Nieznane wartości zerujemy do null,
+     * żeby reszta pipeline'u używała trybu auto zamiast wybuchać.
+     */
+    private void sanitizePlacementEffects(UserEditIntent intent) {
+        if (intent == null || intent.getPlacements() == null) return;
+        for (UserEditIntent.AssetPlacement p : intent.getPlacements()) {
+            String effect = p.getSuggestedEffect();
+            if (effect != null && !effect.isBlank()) {
+                String normalized = effect.trim().toLowerCase().replace(' ', '_').replace('-', '_');
+                if (effectRegistry.isValidEffect(normalized)) {
+                    p.setSuggestedEffect(normalized);
+                } else {
+                    log.warn("[UserIntentParser] Dropping unknown suggested_effect='{}' on asset {}",
+                            effect, p.getAssetIndex());
+                    p.setSuggestedEffect(null);
+                }
+            } else {
+                p.setSuggestedEffect(null);
+            }
+
+            String transition = p.getSuggestedTransition();
+            if (transition != null && !transition.isBlank()) {
+                String normalized = transition.trim().toLowerCase().replace(' ', '_').replace('-', '_');
+                if (effectRegistry.isValidTransition(normalized)) {
+                    p.setSuggestedTransition(normalized);
+                } else {
+                    log.warn("[UserIntentParser] Dropping unknown suggested_transition='{}' on asset {}",
+                            transition, p.getAssetIndex());
+                    p.setSuggestedTransition(null);
+                }
+            } else {
+                p.setSuggestedTransition(null);
+            }
+        }
+    }
+
     // =========================================================================
     // GPT PROMPT
     // =========================================================================
@@ -167,6 +208,8 @@ public class UserIntentParser {
                 Each placement can have:
                   - scene_description: What the user wants to SEE in this scene (visual direction)
                   - mood: The emotional tone for this scene (calm, energetic, dramatic, mysterious, etc.)
+                  - suggested_effect: Visual effect for this scene (only if user mentions one)
+                  - suggested_transition: Transition to next scene (only if user mentions one)
                 Examples:
                   - "scena z Marokiem powinna być spokojna z wolnym zoomem" →
                     scene_description="Morocco with slow zoom", mood="calm"
@@ -217,6 +260,31 @@ public class UserIntentParser {
                 - If user says "30 seconds" or "45s" → target_duration_ms = that value in ms
                 - If no editing instructions at all → all roles="auto", pacing="auto"
 
+                EFFECT / TRANSITION DETECTION (set per-asset suggested_effect / suggested_transition):
+                Allowed suggested_effect values (anything else → null, system will choose):
+                  zoom_in, zoom_out, fast_zoom, pan_left, pan_right, pan_up, pan_down,
+                  shake, slow_motion, speed_ramp, zoom_pulse, ken_burns, glitch, flash,
+                  bounce, drift, zoom_in_offset
+                Allowed suggested_transition values (else → null):
+                  cut, fade, fade_white, fade_black, dissolve, wipe_left, wipe_right,
+                  slide_left, slide_right
+                Examples:
+                  - "zoom na produkt" / "zoom in on product" → suggested_effect=zoom_in
+                  - "szybki zoom" / "fast zoom" → suggested_effect=fast_zoom
+                  - "trzęsie się" / "shake" / "earthquake feel" → suggested_effect=shake
+                  - "spowolnienie" / "slow motion" / "slow-mo" → suggested_effect=slow_motion
+                  - "glitch" / "zakłócenia" → suggested_effect=glitch
+                  - "ken burns" / "powolny zoom" → suggested_effect=ken_burns
+                  - "fade to black" / "zaniknij na czarno" → suggested_transition=fade_black
+                  - "przejście fade" / "smooth fade" → suggested_transition=fade
+                  - "hard cut" / "twarde cięcie" → suggested_transition=cut
+                  - "wipe w lewo" / "wipe left" → suggested_transition=wipe_left
+                  - "rozpłynij się" / "dissolve" → suggested_transition=dissolve
+                Match the instruction to the scene the user pointed at. If the user names
+                the asset by content (e.g. "scena z produktem"), apply to that asset's index.
+                If the user says it globally (e.g. "wszędzie zoom"), apply to ALL placements.
+                If the user does not request an effect for a scene → leave the field null.
+
                 IMPORTANT:
                 - Create a placement for EVERY uploaded asset, even if role="auto"
                 - If user describes scenes, fill scene_description and mood for each
@@ -233,27 +301,33 @@ public class UserIntentParser {
                       "role": "intro",
                       "timing": "beginning",
                       "duration_hint_ms": 0,
-                      "user_instruction": "user said: 'start with Morocco, calm mood'",
+                      "user_instruction": "user said: 'start with Morocco, calm mood, slow zoom'",
                       "scene_description": "Morocco at sunset, slow zoom, warm tones",
-                      "mood": "calm"
+                      "mood": "calm",
+                      "suggested_effect": "ken_burns",
+                      "suggested_transition": "fade"
                     },
                     {
                       "asset_index": 1,
                       "role": "content",
                       "timing": "auto",
                       "duration_hint_ms": 0,
-                      "user_instruction": "user said: 'Paris at night, dynamic'",
+                      "user_instruction": "user said: 'Paris at night, dynamic, shake'",
                       "scene_description": "Paris at night with dynamic energy",
-                      "mood": "energetic"
+                      "mood": "energetic",
+                      "suggested_effect": "shake",
+                      "suggested_transition": "cut"
                     },
                     {
                       "asset_index": 2,
                       "role": "outro",
                       "timing": "end",
                       "duration_hint_ms": 0,
-                      "user_instruction": "user said: 'end with Dubai CTA'",
+                      "user_instruction": "user said: 'end with Dubai CTA, fade to black'",
                       "scene_description": "Dubai skyline, golden tones, CTA overlay",
-                      "mood": "professional"
+                      "mood": "professional",
+                      "suggested_effect": "zoom_in",
+                      "suggested_transition": "fade_black"
                     }
                   ],
                   "pacing_preference": "auto",
@@ -401,6 +475,10 @@ public class UserIntentParser {
         else if (lower.contains("professional") || lower.contains("profesjonaln")) style = "professional";
         else if (lower.contains("viral") || lower.contains("trend")) style = "viral";
 
+        // Global effect/transition hints (apply to all assets when user mentions them broadly)
+        String globalEffect = detectGlobalEffect(lower);
+        String globalTransition = detectGlobalTransition(lower);
+
         // Basic placements from order
         List<UserEditIntent.AssetPlacement> placements = new ArrayList<>();
         if (customAssets != null) {
@@ -424,6 +502,8 @@ public class UserIntentParser {
                         .role(role)
                         .timing(timing)
                         .durationHintMs(0)
+                        .suggestedEffect(globalEffect)
+                        .suggestedTransition(globalTransition)
                         .build());
             }
         }
@@ -438,6 +518,53 @@ public class UserIntentParser {
                 .targetDurationMs(0)
                 .reasoning("Heuristic fallback — GPT parsing failed")
                 .build();
+    }
+
+    /**
+     * Heurystyczna detekcja globalnego efektu na podstawie prompta usera.
+     * Używana w fallbacku gdy GPT zawiedzie. Wartości muszą zgadzać się z EffectRegistry.
+     */
+    private String detectGlobalEffect(String lowerPrompt) {
+        if (lowerPrompt.contains("fast zoom") || lowerPrompt.contains("szybki zoom")) return "fast_zoom";
+        if (lowerPrompt.contains("zoom in") || lowerPrompt.contains("zoom na")
+                || lowerPrompt.contains("najedź") || lowerPrompt.contains("najechac")) return "zoom_in";
+        if (lowerPrompt.contains("zoom out") || lowerPrompt.contains("oddal")) return "zoom_out";
+        if (lowerPrompt.contains("ken burns") || lowerPrompt.contains("ken-burns")) return "ken_burns";
+        if (lowerPrompt.contains("shake") || lowerPrompt.contains("trzęsie")
+                || lowerPrompt.contains("trzasie") || lowerPrompt.contains("trzas")) return "shake";
+        if (lowerPrompt.contains("slow motion") || lowerPrompt.contains("slow-mo")
+                || lowerPrompt.contains("spowolnien") || lowerPrompt.contains("zwolniony")) return "slow_motion";
+        if (lowerPrompt.contains("glitch") || lowerPrompt.contains("zakłócen")
+                || lowerPrompt.contains("zaklocen")) return "glitch";
+        if (lowerPrompt.contains("flash") || lowerPrompt.contains("błysk")
+                || lowerPrompt.contains("blysk")) return "flash";
+        if (lowerPrompt.contains("bounce") || lowerPrompt.contains("odbicie")) return "bounce";
+        if (lowerPrompt.contains("drift")) return "drift";
+        if (lowerPrompt.contains("pan left") || lowerPrompt.contains("w lewo")) return "pan_left";
+        if (lowerPrompt.contains("pan right") || lowerPrompt.contains("w prawo")) return "pan_right";
+        return null;
+    }
+
+    /**
+     * Heurystyczna detekcja globalnego przejścia. Wartości z EffectRegistry.
+     */
+    private String detectGlobalTransition(String lowerPrompt) {
+        if (lowerPrompt.contains("fade to black") || lowerPrompt.contains("fade_black")
+                || lowerPrompt.contains("zaniknij") || lowerPrompt.contains("na czarno")) return "fade_black";
+        if (lowerPrompt.contains("fade to white") || lowerPrompt.contains("fade_white")
+                || lowerPrompt.contains("na bialo") || lowerPrompt.contains("na biało")) return "fade_white";
+        if (lowerPrompt.contains("dissolve") || lowerPrompt.contains("rozplyw")
+                || lowerPrompt.contains("rozpływ")) return "dissolve";
+        if (lowerPrompt.contains("wipe left") || lowerPrompt.contains("wipe_left")) return "wipe_left";
+        if (lowerPrompt.contains("wipe right") || lowerPrompt.contains("wipe_right")) return "wipe_right";
+        if (lowerPrompt.contains("slide left") || lowerPrompt.contains("slide_left")) return "slide_left";
+        if (lowerPrompt.contains("slide right") || lowerPrompt.contains("slide_right")) return "slide_right";
+        if (lowerPrompt.contains("hard cut") || lowerPrompt.contains("twarde ciec")
+                || lowerPrompt.contains("twarde ciec")) return "cut";
+        if (lowerPrompt.contains("smooth fade") || lowerPrompt.contains("przejscie fade")
+                || lowerPrompt.contains("przejście fade") || lowerPrompt.contains("plynne przej")
+                || lowerPrompt.contains("płynne przej")) return "fade";
+        return null;
     }
 
     /**

@@ -112,6 +112,21 @@ public class EffectRegistry {
     }
 
     /**
+     * Wszystkie znane typy efektów wraz z ich domyślnymi parametrami.
+     * Używane przez endpoint katalogu — frontend pokazuje listę w timeline editorze.
+     */
+    public Map<String, Map<String, Object>> getAllEffects() {
+        return EFFECT_DEFAULTS;
+    }
+
+    /**
+     * Wszystkie znane typy przejść wraz z domyślnymi parametrami.
+     */
+    public Map<String, Map<String, Object>> getAllTransitions() {
+        return TRANSITION_DEFAULTS;
+    }
+
+    /**
      * Tworzy EdlEffect z domyslnymi parametrami, nadpisanymi przez custom params.
      */
     public EdlEffect createEffect(String type, double intensity, Map<String, Object> customParams) {

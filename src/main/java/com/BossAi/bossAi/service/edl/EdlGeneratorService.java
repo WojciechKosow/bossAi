@@ -241,6 +241,7 @@ public class EdlGeneratorService {
             int timelineMs = 0;
             String callbackBase = remotionProperties.getCallbackBaseUrl();
 
+            UserEditIntent fallbackEditIntent = context.getUserEditIntent();
             for (int i = 0; i < context.getScenes().size(); i++) {
                 SceneAsset scene = context.getScenes().get(i);
                 ProjectAsset asset = assetBySceneIndex.get(i);
@@ -248,13 +249,33 @@ public class EdlGeneratorService {
 
                 int durationMs = (int) (scene.getDurationMs() * scale);
 
-                // Music-aware effect z DirectorPlan (po EffectAssigner)
-                List<EdlEffect> effects = buildEffectsForScene(context, audioAnalysis, i);
+                // User's explicit per-asset effect/transition hint (Phase 4) — overrides defaults.
+                UserEditIntent.AssetPlacement placement = (fallbackEditIntent != null)
+                        ? fallbackEditIntent.getPlacementForAsset(i) : null;
+                String userEffect = (placement != null
+                        && placement.getSuggestedEffect() != null
+                        && effectRegistry.isValidEffect(placement.getSuggestedEffect()))
+                        ? placement.getSuggestedEffect() : null;
+                String userTransition = (placement != null
+                        && placement.getSuggestedTransition() != null
+                        && effectRegistry.isValidTransition(placement.getSuggestedTransition()))
+                        ? placement.getSuggestedTransition() : null;
 
-                // Music-aware transition
+                // Music-aware effect z DirectorPlan (po EffectAssigner), albo user override
+                List<EdlEffect> effects;
+                if (userEffect != null) {
+                    double intensity = resolveIntensity(context, audioAnalysis, i);
+                    effects = new ArrayList<>();
+                    effects.add(effectRegistry.createEffect(userEffect, intensity, null));
+                } else {
+                    effects = buildEffectsForScene(context, audioAnalysis, i);
+                }
+
+                // Music-aware transition (user override gdy ustawione)
                 EdlTransition transition = null;
                 if (i < context.getScenes().size() - 1) {
-                    String transType = resolveTransitionForScene(context, i);
+                    String transType = userTransition != null
+                            ? userTransition : resolveTransitionForScene(context, i);
                     int transDur = resolveTransitionDuration(transType);
                     transition = EdlTransition.builder()
                             .type(transType)
@@ -583,9 +604,23 @@ public class EdlGeneratorService {
                     asset != null ? asset.getId().toString().substring(0, 8) : "NULL",
                     assignmentSource);
 
-            // Efekt z sugestii CutEngine lub z DirectorPlan
+            // User's explicit per-asset effect/transition hint (Phase 4)
+            // — overrides CutEngine suggestion when present.
+            UserEditIntent.AssetPlacement placement = (editIntent != null && asset != null)
+                    ? editIntent.getPlacementForAsset(visualAssets.indexOf(asset))
+                    : null;
+            String userEffect = (placement != null
+                    && placement.getSuggestedEffect() != null
+                    && effectRegistry.isValidEffect(placement.getSuggestedEffect()))
+                    ? placement.getSuggestedEffect() : null;
+            String userTransition = (placement != null
+                    && placement.getSuggestedTransition() != null
+                    && effectRegistry.isValidTransition(placement.getSuggestedTransition()))
+                    ? placement.getSuggestedTransition() : null;
+
+            // Efekt: user override → cut suggestion → DirectorPlan
             List<EdlEffect> effects = new ArrayList<>();
-            String effectType = cut.getSuggestedEffect();
+            String effectType = userEffect != null ? userEffect : cut.getSuggestedEffect();
             if (effectType != null && effectRegistry.isValidEffect(effectType)) {
                 double intensity = resolveIntensityFromCut(cut);
                 effects.add(effectRegistry.createEffect(effectType, intensity, null));
@@ -595,11 +630,13 @@ public class EdlGeneratorService {
                 effects = buildEffectsForScene(context, audioAnalysis, effectSceneIdx);
             }
 
-            // Przejście z klasyfikacji cięcia
+            // Przejście: user override → cut suggestion → klasyfikacja cięcia
             EdlTransition transition = null;
             if (i < cuts.size() - 1) {
-                String transType = cut.getSuggestedTransition() != null
-                        ? cut.getSuggestedTransition() : resolveTransitionFromCut(cut);
+                String transType = userTransition != null
+                        ? userTransition
+                        : (cut.getSuggestedTransition() != null
+                                ? cut.getSuggestedTransition() : resolveTransitionFromCut(cut));
                 int transDur = resolveTransitionDuration(transType);
                 transition = EdlTransition.builder()
                         .type(transType)
@@ -1411,6 +1448,12 @@ public class EdlGeneratorService {
                         if (p.getMood() != null) {
                             sb.append(", MOOD=").append(p.getMood());
                         }
+                        if (p.getSuggestedEffect() != null) {
+                            sb.append(", USER_EFFECT=").append(p.getSuggestedEffect());
+                        }
+                        if (p.getSuggestedTransition() != null) {
+                            sb.append(", USER_TRANSITION=").append(p.getSuggestedTransition());
+                        }
                         if (p.getUserInstruction() != null) {
                             sb.append(" (user said: \"").append(p.getUserInstruction()).append("\")");
                         }
@@ -1508,6 +1551,13 @@ public class EdlGeneratorService {
             }
             if (placement != null && placement.getMood() != null) {
                 sb.append("    SCENE_MOOD: ").append(placement.getMood()).append("\n");
+            }
+            // User-requested effect/transition (Phase 4) — MUST be honored
+            if (placement != null && placement.getSuggestedEffect() != null) {
+                sb.append("    USER_EFFECT (MUST USE): ").append(placement.getSuggestedEffect()).append("\n");
+            }
+            if (placement != null && placement.getSuggestedTransition() != null) {
+                sb.append("    USER_TRANSITION (MUST USE): ").append(placement.getSuggestedTransition()).append("\n");
             }
 
             if (profile != null) {
@@ -1758,13 +1808,18 @@ public class EdlGeneratorService {
                 - Each cut must have a PURPOSE — not just timing-based
 
                 EFFECTS:
+                - If a scene has USER_EFFECT (MUST USE) → use EXACTLY that effect for all segments
+                  on that scene's asset. The user's request OVERRIDES variation/Edit DNA rules.
                 - VARY effects — NEVER use the same effect on 3+ consecutive segments
+                  (only when user has NOT pinned an effect for those scenes)
                 - Match effects to visual content: close-ups→zoom_in, wide shots→pan_*, action→shake/fast_zoom
                 - Match effects to music: drops→use drop_signature from Edit DNA, builds→zoom_in/drift, quiet→pan_*/ken_burns
                 - VARY intensity: drops/peaks 0.8-1.0, builds 0.5-0.7, quiet 0.2-0.5
                 - If Edit DNA is provided: STRICTLY follow effect_palette (primary/secondary/forbidden) and cut_rhythm mode
 
                 TRANSITIONS:
+                - If a scene has USER_TRANSITION (MUST USE) → use EXACTLY that transition leaving
+                  that segment. The user's request OVERRIDES the rules below.
                 - HARD cuts → "cut" (instant, punchy)
                 - SOFT cuts → "fade" or "dissolve" (smooth, flowing)
                 - Drops/high-energy → "cut" or "wipe_left"/"wipe_right"
