@@ -73,4 +73,23 @@ public class TikTokAdRequest {
      * Takes precedence over musicFile if both are provided.
      */
     private UUID musicAssetId;
+
+    /**
+     * Explicit scene → asset mapping (Phase 2 z CLAUDE.md).
+     *
+     * Każdy element wiąże sceneIndex z assetId. Gdy lista jest niepusta,
+     * pipeline układa customMediaAssets w kolejności scen według tej mapy
+     * — pomija domyślne sortowanie po orderIndex (które reprezentuje kolejność
+     * uploadu, nie zamiar użytkownika).
+     *
+     * Reguły:
+     *   - sceneIndex w [0, customMediaAssetIds.size())
+     *   - assetId musi należeć do customMediaAssetIds
+     *   - puste pozycje (sceny bez wpisu) są dopełniane pozostałymi assetami
+     *     w kolejności orderIndex
+     *
+     * Endpoint POST /api/generations/assign-assets ustawia to pole zanim
+     * przekaże request do generateTikTokAd.
+     */
+    private List<SceneAssignment> sceneAssignments;
 }

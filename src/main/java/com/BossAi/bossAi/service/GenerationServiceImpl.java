@@ -438,6 +438,13 @@ public class GenerationServiceImpl implements GenerationService {
         // Resolve custom media assets (images + videos with user ordering)
         List<Asset> customMediaAssets = resolveCustomAssets(request.getCustomMediaAssetIds(), user);
 
+        // Phase 2.3: honor explicit scene→asset mapping if provided.
+        // sceneAssignments overrides default orderIndex ordering — assets are placed
+        // in the slots user picked, remaining slots filled with leftovers (orderIndex order).
+        if (request.getSceneAssignments() != null && !request.getSceneAssignments().isEmpty()) {
+            customMediaAssets = applySceneAssignments(customMediaAssets, request.getSceneAssignments());
+        }
+
         // Resolve custom TTS assets (voice-over clips with user ordering)
         List<Asset> customTtsAssets = resolveCustomAssets(request.getCustomTtsAssetIds(), user);
 
@@ -513,6 +520,83 @@ public class GenerationServiceImpl implements GenerationService {
                         java.util.Comparator.nullsLast(java.util.Comparator.naturalOrder())
                 ))
                 .toList();
+    }
+
+    /**
+     * Phase 2.3 — układa assety w kolejności scen wg explicit sceneAssignments.
+     *
+     * Wejście:
+     *   customMedia — assety usera już posortowane po orderIndex
+     *   assignments — lista par (sceneIndex, assetId) od usera
+     *
+     * Wyjście: lista assetów w kolejności scen. Sceny bez wpisu są dopełniane
+     * pozostałymi (nieprzypisanymi) assetami w istniejącej kolejności orderIndex.
+     *
+     * Walidacje (rzucają 400):
+     *   - assetId musi być w customMedia
+     *   - sceneIndex w [0, customMedia.size())
+     *   - duplicate sceneIndex / duplicate assetId zabronione
+     *
+     * Niezmiennik z CLAUDE.md (scene count == media.size()) zachowany — wynikowa lista
+     * ma dokładnie tyle elementów co customMedia.
+     */
+    private List<Asset> applySceneAssignments(List<Asset> customMedia,
+                                              List<com.BossAi.bossAi.request.SceneAssignment> assignments) {
+        int n = customMedia.size();
+        if (n == 0) {
+            return customMedia;
+        }
+
+        java.util.Map<UUID, Asset> assetById = new java.util.HashMap<>();
+        for (Asset a : customMedia) {
+            assetById.put(a.getId(), a);
+        }
+
+        Asset[] slots = new Asset[n];
+        java.util.Set<Integer> seenScenes = new java.util.HashSet<>();
+        java.util.Set<UUID> seenAssets = new java.util.HashSet<>();
+
+        for (var sa : assignments) {
+            int idx = sa.getSceneIndex();
+            UUID id = sa.getAssetId();
+            if (idx < 0 || idx >= n) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                        "sceneIndex " + idx + " out of range [0," + n + ")");
+            }
+            if (!seenScenes.add(idx)) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                        "duplicate sceneIndex " + idx + " in sceneAssignments");
+            }
+            Asset asset = assetById.get(id);
+            if (asset == null) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                        "assetId " + id + " is not in customMediaAssetIds");
+            }
+            if (!seenAssets.add(id)) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                        "asset " + id + " assigned to multiple scenes");
+            }
+            slots[idx] = asset;
+        }
+
+        // Fill empty slots with remaining (unassigned) assets in original orderIndex order
+        java.util.Iterator<Asset> leftover = customMedia.stream()
+                .filter(a -> !seenAssets.contains(a.getId()))
+                .iterator();
+        for (int i = 0; i < n; i++) {
+            if (slots[i] == null) {
+                if (!leftover.hasNext()) {
+                    // Should not happen — n slots, n - assignments.size() leftovers
+                    throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                            "scene " + i + " has no asset and no leftover available");
+                }
+                slots[i] = leftover.next();
+            }
+        }
+
+        log.info("[GenerationService] Applied {} explicit sceneAssignments over {} assets",
+                assignments.size(), n);
+        return java.util.Arrays.asList(slots);
     }
 
 }
