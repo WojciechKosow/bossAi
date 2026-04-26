@@ -19,6 +19,8 @@ import GenerateImagePage from "../pages/dashboard/GenerateImagePage";
 import GalleryPage from "../pages/dashboard/GalleryPage";
 import DashboardMainPage from "../pages/dashboard/DashboardMainPage";
 import BillingPage from "../pages/dashboard/BillingPage";
+import SettingsPage from "../pages/dashboard/SettingsPage";
+import OAuthSuccessPage from "../features/auth/pages/OAuthSuccessPage";
 // import DashboardLayout from "../shared/layouts/DashboardLayout";
 // import DashboardMainPage from "../shared/components/dashboard/DashboardMainPage";
 
@@ -76,6 +78,8 @@ const AppRouter = () => {
           }
         />
 
+        <Route path="/oauth-success" element={<OAuthSuccessPage />} />
+
         <Route path="/verify" element={<VerifyPage />} />
         <Route path="/check-email" element={<CheckEmail />} />
 
@@ -93,6 +97,7 @@ const AppRouter = () => {
           <Route path="gallery" element={<GalleryPage />} />
           <Route path="billing" element={<BillingPage />} />
           <Route path="generate/videos" element={<GenerateImagePage />} />
+          <Route path="settings" element={<SettingsPage />} />
         </Route>
       </Routes>
     </BrowserRouter>

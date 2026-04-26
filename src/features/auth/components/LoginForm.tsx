@@ -17,6 +17,7 @@ import { useNavigate, Link } from "react-router-dom";
 import { Loader2 } from "lucide-react";
 import { AxiosError } from "axios";
 import { useAuth } from "../context/AuthContext";
+import { GoogleLoginButton } from "./GoogleLoginButton";
 
 export const LoginForm = () => {
   const navigate = useNavigate();
@@ -141,6 +142,15 @@ export const LoginForm = () => {
           >
             Forgot password?
           </button>
+        </div>
+
+        <div className="space-y-4">
+          <GoogleLoginButton />
+          <div className="flex items-center gap-2">
+            <div className="h-px flex-1 bg-gray-200" />
+            <span className="text-xs text-gray-400">OR</span>
+            <div className="h-px flex-1 bg-gray-200" />
+          </div>
         </div>
 
         <Button

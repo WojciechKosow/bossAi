@@ -31,9 +31,9 @@ export const Topbar = ({ onMenuClick }: Props) => {
         </div>
       </div>
 
-      <div className="hidden sm:block text-sm text-muted-foreground">
+      {/* <div className="hidden sm:block text-sm text-muted-foreground">
         <ThemeToggle />
-      </div>
+      </div> */}
     </header>
   );
 };

@@ -38,7 +38,7 @@ const SectionCTA = () => {
 
         <Link
           to="/contact"
-          className="px-5 py-2.5 rounded-lg border border-border hover:bg-muted transition"
+          className="px-5 py-2.5 rounded-lg border border-border hover:bg-muted hover:text-black transition"
         >
           Contact
         </Link>
