@@ -1,157 +1,180 @@
-import { useAuth } from "../../features/auth/context/AuthContext";
-import { Sparkles, TrendingUp, Clock } from "lucide-react";
-import { useQuery } from "@tanstack/react-query";
-import axios from "@/lib/axios";
+import { Link } from "react-router-dom";
+import { motion } from "framer-motion";
 import { formatDistanceToNow } from "date-fns";
+import {
+  Sparkles,
+  ArrowRight,
+  Film,
+  Loader2,
+  Image as ImageIcon,
+  Video as VideoIcon,
+  TrendingUp,
+  Crown,
+} from "lucide-react";
+import { useAuth } from "../../features/auth/context/AuthContext";
+import { useActivePlan, useProjects } from "@/features/video/hooks";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Progress } from "@/components/ui/progress";
+import { ProjectThumbnail } from "@/features/video/components/ProjectThumbnail";
 
 const DashboardPage = () => {
   const { user } = useAuth();
+  const { data: plan } = useActivePlan();
+  const { data: projects } = useProjects();
 
-  const { data: plan } = useQuery({
-    queryKey: ["active-plan"],
-    queryFn: async () => {
-      const res = await axios.get("/api/me/plans/active-plan");
-      return res.data;
-    },
-  });
-
-  const { data: generations } = useQuery({
-    queryKey: ["recent-generations"],
-    queryFn: async () => {
-      const res = await axios.get("/api/generations/me?limit=3");
-      return res.data;
-    },
-  });
-
-  const lastGeneration =
-    generations?.length > 0
-      ? formatDistanceToNow(new Date(generations[0].createdAt), {
-          addSuffix: true,
-        })
-      : "No generations yet";
-
-  const imagesRemaining = plan ? plan.imagesTotal - plan.imagesUsed : 0;
-
-  const videosRemaining = plan ? plan.videosTotal - plan.videosUsed : 0;
+  const recent = (projects ?? []).slice(0, 3);
+  const inFlight = (projects ?? []).filter(
+    (p) => p.status === "GENERATING" || p.status === "RENDERING",
+  );
 
   return (
-    <div className="space-y-12">
-      {/* HEADER */}
-      <div>
-        <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight">
-          Welcome back, {user?.displayName}
-        </h1>
-        <p className="text-muted-foreground mt-2">
-          Here’s an overview of your activity and account status.
-        </p>
-      </div>
-
-      {/* STATS */}
-      <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard
-          title="Current Plan"
-          value={plan?.type ?? "..."}
-          icon={<Sparkles size={18} />}
-        />
-
-        <StatCard
-          title="Images Remaining"
-          value={imagesRemaining.toString()}
-          icon={<TrendingUp size={18} />}
-        />
-
-        <StatCard
-          title="Videos Remaining"
-          value={videosRemaining.toString()}
-          icon={<TrendingUp size={18} />}
-        />
-
-        <StatCard
-          title="Last Generation"
-          value={lastGeneration}
-          icon={<Clock size={18} />}
-        />
-      </div>
-
-      {/* QUICK ACTIONS */}
-      <div className="grid gap-6 md:grid-cols-2">
-        <div className="bg-card border border-border rounded-xl p-6">
-          <h2 className="text-lg font-semibold mb-4">Quick Actions</h2>
-
-          <div className="flex flex-col gap-3">
-            <a
-              href="/dashboard/generate/images"
-              className="bg-primary text-primary-foreground py-2.5 rounded-lg text-sm font-medium text-center hover:opacity-90 transition"
-            >
-              Generate New Image
-            </a>
-
-            <a
-              href="/dashboard/generate/videos"
-              className="border border-border py-2.5 rounded-lg text-sm font-medium text-center hover:bg-muted transition"
-            >
-              Generate New Video
-            </a>
+    <div className="max-w-7xl mx-auto space-y-10">
+      {/* Hero */}
+      <motion.section
+        initial={{ opacity: 0, y: 8 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="relative overflow-hidden rounded-2xl border border-border bg-card p-8 grid-bg"
+      >
+        <div className="relative z-10 flex flex-col lg:flex-row lg:items-end lg:justify-between gap-5">
+          <div>
+            <Badge variant="gradient">
+              <Sparkles size={12} /> Welcome
+            </Badge>
+            <h1 className="text-3xl sm:text-4xl font-bold tracking-tight mt-3">
+              Hi {user?.displayName ?? "creator"} —{" "}
+              <span className="gradient-text">let's make something</span>
+            </h1>
+            <p className="text-sm text-muted-foreground mt-2 max-w-xl">
+              Spin up a TikTok-ready video in minutes. Drop your assets, give
+              the AI a brief, and tweak it on the timeline.
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <Link to="/dashboard/library">
+              <Button variant="outline">View library</Button>
+            </Link>
+            <Link to="/dashboard/create">
+              <Button className="gradient-bg text-white shadow-glow">
+                <Sparkles size={14} /> New video
+                <ArrowRight size={14} />
+              </Button>
+            </Link>
           </div>
         </div>
+      </motion.section>
 
-        <div className="bg-card border border-border rounded-xl p-6">
-          <h2 className="text-lg font-semibold mb-4">Usage Overview</h2>
+      {/* Stats grid */}
+      <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <StatCard
+          icon={<Crown size={16} />}
+          label="Current plan"
+          value={plan?.type ?? "—"}
+          accent
+        />
+        <StatCard
+          icon={<VideoIcon size={16} />}
+          label="Videos remaining"
+          value={
+            plan ? `${plan.videosTotal - plan.videosUsed}/${plan.videosTotal}` : "—"
+          }
+          progress={
+            plan ? (plan.videosUsed / Math.max(1, plan.videosTotal)) * 100 : 0
+          }
+        />
+        <StatCard
+          icon={<ImageIcon size={16} />}
+          label="Image credits"
+          value={
+            plan ? `${plan.imagesTotal - plan.imagesUsed}/${plan.imagesTotal}` : "—"
+          }
+          progress={
+            plan ? (plan.imagesUsed / Math.max(1, plan.imagesTotal)) * 100 : 0
+          }
+        />
+        <StatCard
+          icon={<TrendingUp size={16} />}
+          label="Active projects"
+          value={String(inFlight.length)}
+          subtitle={
+            inFlight.length
+              ? `${inFlight.length} in progress`
+              : "Nothing rendering"
+          }
+        />
+      </section>
 
-          <div className="space-y-4 text-sm">
-            {plan && (
-              <>
-                <UsageBar
-                  label="Images"
-                  used={plan.imagesUsed}
-                  total={plan.imagesTotal}
-                />
-                <UsageBar
-                  label="Videos"
-                  used={plan.videosUsed}
-                  total={plan.videosTotal}
-                />
-              </>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* RECENT GENERATIONS */}
-      <div>
-        <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold">Recent Generations</h2>
-          <a
-            href="/dashboard/gallery"
-            className="text-sm text-primary hover:underline"
-          >
-            View all
-          </a>
-        </div>
-
-        <div className="grid gap-6 mt-6 sm:grid-cols-2 lg:grid-cols-3">
-          {generations?.map((gen: any) => (
-            <div
-              key={gen.id}
-              className="rounded-xl overflow-hidden border border-border bg-card hover:shadow-sm transition"
+      {/* Recent + in-flight */}
+      <section className="grid gap-6 lg:grid-cols-3">
+        <div className="lg:col-span-2 rounded-xl border border-border bg-card p-5">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-sm font-semibold tracking-tight">
+              Recent projects
+            </h2>
+            <Link
+              to="/dashboard/library"
+              className="text-xs text-muted-foreground hover:text-foreground inline-flex items-center gap-1"
             >
-              {gen.imageUrl && (
-                <img
-                  src={gen.imageUrl}
-                  alt="Generated"
-                  className="w-full h-48 object-cover"
-                />
-              )}
-
-              <div className="p-4 text-xs text-muted-foreground">
-                {formatDistanceToNow(new Date(gen.createdAt), {
-                  addSuffix: true,
-                })}
-              </div>
+              View all <ArrowRight size={12} />
+            </Link>
+          </div>
+          {recent.length === 0 ? (
+            <EmptyRecent />
+          ) : (
+            <div className="grid grid-cols-3 gap-4">
+              {recent.map((p) => (
+                <Link
+                  key={p.id}
+                  to={`/dashboard/projects/${p.id}`}
+                  className="group rounded-lg overflow-hidden border border-border hover:border-primary/40 transition"
+                >
+                  <div className="aspect-[9/16] bg-muted">
+                    <ProjectThumbnail projectId={p.id} status={p.status} />
+                  </div>
+                  <div className="px-3 py-2">
+                    <p className="text-xs font-medium truncate">
+                      {p.title || p.originalPrompt || "Untitled"}
+                    </p>
+                    <p className="text-[10px] text-muted-foreground mt-0.5">
+                      {formatDistanceToNow(new Date(p.createdAt), {
+                        addSuffix: true,
+                      })}
+                    </p>
+                  </div>
+                </Link>
+              ))}
             </div>
-          ))}
+          )}
         </div>
-      </div>
+
+        <div className="rounded-xl border border-border bg-card p-5">
+          <h2 className="text-sm font-semibold tracking-tight mb-4">
+            In progress
+          </h2>
+          {inFlight.length === 0 && (
+            <p className="text-xs text-muted-foreground">
+              Nothing rendering. Time to create something fresh.
+            </p>
+          )}
+          <div className="space-y-3">
+            {inFlight.map((p) => (
+              <Link
+                key={p.id}
+                to={`/dashboard/projects/${p.id}`}
+                className="block rounded-lg border border-border p-3 hover:border-primary/40 transition"
+              >
+                <div className="flex items-center gap-2 text-xs font-medium">
+                  <Loader2 size={12} className="animate-spin text-primary" />
+                  {p.status}
+                </div>
+                <p className="text-xs mt-1 truncate text-muted-foreground">
+                  {p.title || p.originalPrompt || "Untitled"}
+                </p>
+              </Link>
+            ))}
+          </div>
+        </div>
+      </section>
     </div>
   );
 };
@@ -159,50 +182,65 @@ const DashboardPage = () => {
 export default DashboardPage;
 
 const StatCard = ({
-  title,
-  value,
   icon,
-}: {
-  title: string;
-  value: string;
-  icon: React.ReactNode;
-}) => {
-  return (
-    <div className="bg-card border border-border rounded-xl p-5 flex items-center justify-between">
-      <div>
-        <p className="text-xs text-muted-foreground">{title}</p>
-        <p className="text-lg font-semibold mt-1">{value}</p>
-      </div>
-      <div className="text-muted-foreground">{icon}</div>
-    </div>
-  );
-};
-
-const UsageBar = ({
   label,
-  used,
-  total,
+  value,
+  subtitle,
+  progress,
+  accent,
 }: {
+  icon: React.ReactNode;
   label: string;
-  used: number;
-  total: number;
-}) => {
-  const percentage = total > 0 ? (used / total) * 100 : 0;
-
-  return (
-    <div>
-      <div className="flex justify-between mb-1">
-        <span>{label}</span>
-        <span>
-          {used}/{total}
-        </span>
-      </div>
-      <div className="h-2 bg-muted rounded-full overflow-hidden">
-        <div
-          className="h-full bg-primary transition-all"
-          style={{ width: `${percentage}%` }}
-        />
-      </div>
+  value: string;
+  subtitle?: string;
+  progress?: number;
+  accent?: boolean;
+}) => (
+  <motion.div
+    initial={{ opacity: 0, y: 8 }}
+    animate={{ opacity: 1, y: 0 }}
+    transition={{ duration: 0.25 }}
+    className="rounded-xl border border-border bg-card p-5"
+  >
+    <div className="flex items-center justify-between">
+      <p className="text-[11px] uppercase tracking-wider text-muted-foreground">
+        {label}
+      </p>
+      <span
+        className={
+          accent
+            ? "size-7 rounded-md gradient-bg text-white flex items-center justify-center"
+            : "size-7 rounded-md bg-muted text-muted-foreground flex items-center justify-center"
+        }
+      >
+        {icon}
+      </span>
     </div>
-  );
-};
+    <p className="text-2xl font-semibold mt-2 tabular-nums truncate">{value}</p>
+    {subtitle && (
+      <p className="text-xs text-muted-foreground mt-1">{subtitle}</p>
+    )}
+    {progress !== undefined && (
+      <div className="mt-3">
+        <Progress value={progress} />
+      </div>
+    )}
+  </motion.div>
+);
+
+const EmptyRecent = () => (
+  <div className="rounded-lg border border-dashed border-border p-8 text-center">
+    <div className="size-10 rounded-xl gradient-bg mx-auto flex items-center justify-center shadow-glow">
+      <Film className="size-4 text-white" />
+    </div>
+    <p className="text-sm font-medium mt-3">No projects yet</p>
+    <p className="text-xs text-muted-foreground mt-1">
+      Create your first video to see it here.
+    </p>
+    <Link to="/dashboard/create" className="inline-block mt-4">
+      <Button size="sm" className="gradient-bg text-white shadow-glow">
+        <Sparkles size={12} /> Get started
+      </Button>
+    </Link>
+  </div>
+);

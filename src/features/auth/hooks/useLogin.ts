@@ -8,11 +8,11 @@ export const useLogin = () => {
   return useMutation({
     mutationFn: loginRequest,
     onSuccess: (data, variables) => {
-      const storage = variables.rememberMe
+      const storage = (variables as { rememberMe?: boolean }).rememberMe
         ? localStorage
         : sessionStorage;
 
-      storage.setItem("access_token", data.token);
+      storage.setItem("access_token", data.token ?? "");
       setUser(data.user);
     },
   });

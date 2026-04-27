@@ -1,6 +1,5 @@
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import MainLayout from "../shared/layouts/MainLayout";
-// import DashboardLayout from "../shared/layouts/DashboardLayout";
 
 import Landing from "../pages/Landing";
 
@@ -10,21 +9,18 @@ import CheckEmail from "../features/auth/pages/CheckEmail";
 import VerifyPage from "../features/auth/pages/VerifyPage";
 import { ForgotPasswordForm } from "../features/auth/pages/ForgotPasswordForm";
 import ResetPassword from "../features/auth/pages/ResetPasswordPage";
+import OAuthSuccessPage from "../features/auth/pages/OAuthSuccessPage";
 
 import { PrivateRoute } from "../features/auth/guards/PrivateRoute";
 import { PublicOnlyRoute } from "../features/auth/guards/PublicOnlyRoute";
+
 import DashboardLayout from "../shared/layouts/DashboardLayout";
 import DashboardPage from "../pages/dashboard/DashboardPage";
-import GenerateImagePage from "../pages/dashboard/GenerateImagePage";
-import GalleryPage from "../pages/dashboard/GalleryPage";
-import DashboardMainPage from "../pages/dashboard/DashboardMainPage";
+import CreateVideoPage from "../pages/dashboard/CreateVideoPage";
+import LibraryPage from "../pages/dashboard/LibraryPage";
+import ProjectEditorPage from "../pages/dashboard/ProjectEditorPage";
 import BillingPage from "../pages/dashboard/BillingPage";
 import SettingsPage from "../pages/dashboard/SettingsPage";
-import OAuthSuccessPage from "../features/auth/pages/OAuthSuccessPage";
-// import DashboardLayout from "../shared/layouts/DashboardLayout";
-// import DashboardMainPage from "../shared/components/dashboard/DashboardMainPage";
-
-// import Dashboard from "../features/dashboard/pages/Dashboard";
 
 const AppRouter = () => {
   return (
@@ -79,7 +75,6 @@ const AppRouter = () => {
         />
 
         <Route path="/oauth-success" element={<OAuthSuccessPage />} />
-
         <Route path="/verify" element={<VerifyPage />} />
         <Route path="/check-email" element={<CheckEmail />} />
 
@@ -92,12 +87,25 @@ const AppRouter = () => {
             </PrivateRoute>
           }
         >
-          <Route path="" element={<DashboardPage />} />
-          <Route path="generate/images" element={<GenerateImagePage />} />
-          <Route path="gallery" element={<GalleryPage />} />
+          <Route index element={<DashboardPage />} />
+          <Route path="create" element={<CreateVideoPage />} />
+          <Route path="library" element={<LibraryPage />} />
+          <Route path="projects/:id" element={<ProjectEditorPage />} />
           <Route path="billing" element={<BillingPage />} />
-          <Route path="generate/videos" element={<GenerateImagePage />} />
           <Route path="settings" element={<SettingsPage />} />
+          {/* legacy redirects */}
+          <Route
+            path="generate/images"
+            element={<Navigate to="/dashboard/create" replace />}
+          />
+          <Route
+            path="generate/videos"
+            element={<Navigate to="/dashboard/create" replace />}
+          />
+          <Route
+            path="gallery"
+            element={<Navigate to="/dashboard/library" replace />}
+          />
         </Route>
       </Routes>
     </BrowserRouter>

@@ -1,39 +1,31 @@
-import { Search, Menu } from "lucide-react";
-import { useAuth } from "../../../features/auth/context/AuthContext";
+import { Menu, Sparkles } from "lucide-react";
+import { Link } from "react-router-dom";
 import ThemeToggle from "../ThemeToggle";
+import { Button } from "@/components/ui/button";
 
 type Props = {
   onMenuClick?: () => void;
 };
 
 export const Topbar = ({ onMenuClick }: Props) => {
-  const { user } = useAuth();
-
   return (
-    <header className="h-16 border-b border-border bg-card px-4 sm:px-6 lg:px-8 flex items-center justify-between">
-      <div className="flex items-center gap-4 w-full max-w-md">
+    <header className="h-14 border-b border-border bg-card/70 backdrop-blur px-4 sm:px-6 lg:px-8 flex items-center justify-between sticky top-0 z-30">
+      <div className="flex items-center gap-3">
         <button
           onClick={onMenuClick}
-          className="lg:hidden text-muted-foreground"
+          className="lg:hidden text-muted-foreground hover:text-foreground"
         >
-          <Menu size={20} />
+          <Menu size={18} />
         </button>
-
-        <div className="relative w-full">
-          <Search
-            size={16}
-            className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
-          />
-          <input
-            placeholder="Search..."
-            className="w-full pl-9 pr-4 py-2 rounded-md bg-muted text-sm outline-none focus:ring-2 focus:ring-primary transition"
-          />
-        </div>
       </div>
-
-      {/* <div className="hidden sm:block text-sm text-muted-foreground">
+      <div className="flex items-center gap-2">
         <ThemeToggle />
-      </div> */}
+        <Link to="/dashboard/create">
+          <Button size="sm" className="gradient-bg text-white shadow-glow">
+            <Sparkles size={14} /> New video
+          </Button>
+        </Link>
+      </div>
     </header>
   );
 };
