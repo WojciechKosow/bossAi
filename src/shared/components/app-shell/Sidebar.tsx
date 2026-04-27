@@ -1,21 +1,20 @@
 import { NavLink, useNavigate } from "react-router-dom";
 import {
   LayoutDashboard,
-  Image,
-  Video,
+  Sparkles,
   CreditCard,
   Settings,
   LogOut,
-  GalleryVertical,
+  Film,
   X,
 } from "lucide-react";
 import { useAuth } from "../../../features/auth/context/AuthContext";
+import { cn } from "@/lib/utils";
 
 const navItems = [
-  { name: "Dashboard", path: "/dashboard", icon: LayoutDashboard },
-  { name: "Generate Images", path: "/dashboard/generate/images", icon: Image },
-  { name: "Generate Videos", path: "/dashboard/generate/videos", icon: Video },
-  { name: "Gallery", path: "/dashboard/gallery", icon: GalleryVertical },
+  { name: "Overview", path: "/dashboard", icon: LayoutDashboard },
+  { name: "Create video", path: "/dashboard/create", icon: Sparkles },
+  { name: "Library", path: "/dashboard/library", icon: Film },
   { name: "Billing", path: "/dashboard/billing", icon: CreditCard },
   { name: "Settings", path: "/dashboard/settings", icon: Settings },
 ];
@@ -38,18 +37,18 @@ export const Sidebar = ({ mobile, isOpen, onClose }: Props) => {
   if (mobile) {
     return (
       <>
-        {/* Overlay */}
         <div
-          className={`fixed inset-0 bg-black/40 z-40 transition-opacity lg:hidden ${
-            isOpen ? "opacity-100" : "opacity-0 pointer-events-none"
-          }`}
+          className={cn(
+            "fixed inset-0 bg-background/60 backdrop-blur-sm z-40 transition-opacity lg:hidden",
+            isOpen ? "opacity-100" : "opacity-0 pointer-events-none",
+          )}
           onClick={onClose}
         />
-
-        {/* Drawer */}
         <aside
-          className={`fixed top-0 left-0 h-full w-64 bg-card border-r border-border z-50 transform transition-transform duration-300 lg:hidden
-          ${isOpen ? "translate-x-0" : "-translate-x-full"}`}
+          className={cn(
+            "fixed top-0 left-0 h-full w-64 bg-card border-r border-border z-50 transform transition-transform duration-300 lg:hidden",
+            isOpen ? "translate-x-0" : "-translate-x-full",
+          )}
         >
           <SidebarContent onClose={onClose} handleLogout={handleLogout} />
         </aside>
@@ -71,20 +70,35 @@ const SidebarContent = ({
   handleLogout: () => void;
   onClose?: () => void;
 }) => {
+  const { user } = useAuth();
+
   return (
     <div className="flex flex-col h-full w-full">
-      {/* Logo */}
-      <div className="px-6 py-6 border-b border-border flex items-center justify-between">
-        <span className="text-xl font-semibold">Toucan Ai</span>
+      {/* Brand */}
+      <div className="px-5 py-5 border-b border-border flex items-center justify-between">
+        <div className="flex items-center gap-2.5">
+          <div className="size-8 rounded-lg gradient-bg flex items-center justify-center shadow-glow">
+            <Sparkles className="size-4 text-white" />
+          </div>
+          <div>
+            <p className="text-sm font-bold leading-none">BossAI</p>
+            <p className="text-[10px] text-muted-foreground mt-0.5">
+              TikTok Studio
+            </p>
+          </div>
+        </div>
         {onClose && (
-          <button onClick={onClose} className="lg:hidden">
-            <X size={20} />
+          <button
+            onClick={onClose}
+            className="lg:hidden text-muted-foreground hover:text-foreground"
+          >
+            <X size={18} />
           </button>
         )}
       </div>
 
       {/* Navigation */}
-      <nav className="flex-1 mt-6 flex flex-col gap-1 px-3">
+      <nav className="flex-1 mt-4 flex flex-col gap-0.5 px-3">
         {navItems.map(({ name, path, icon: Icon }) => (
           <NavLink
             key={name}
@@ -92,29 +106,49 @@ const SidebarContent = ({
             onClick={onClose}
             end={path === "/dashboard"}
             className={({ isActive }) =>
-              `flex items-center gap-3 px-3 py-2 rounded-md transition-all text-sm
-               ${
-                 isActive
-                   ? "bg-primary text-primary-foreground"
-                   : "text-muted-foreground hover:bg-muted hover:text-foreground"
-               }`
+              cn(
+                "group flex items-center gap-3 px-3 py-2 rounded-lg transition-all text-sm relative",
+                isActive
+                  ? "bg-accent text-accent-foreground font-medium"
+                  : "text-muted-foreground hover:bg-muted hover:text-foreground",
+              )
             }
           >
-            <Icon size={18} />
-            {name}
+            {({ isActive }) => (
+              <>
+                {isActive && (
+                  <span className="absolute left-0 top-1/2 -translate-y-1/2 h-5 w-0.5 rounded-r-full gradient-bg" />
+                )}
+                <Icon size={16} />
+                {name}
+              </>
+            )}
           </NavLink>
         ))}
       </nav>
 
-      {/* Logout always bottom */}
-      <div className="p-4 border-t border-border mt-auto">
-        <button
-          onClick={handleLogout}
-          className="flex items-center gap-3 text-muted-foreground hover:text-foreground transition-all text-sm w-full"
-        >
-          <LogOut size={18} />
-          Logout
-        </button>
+      {/* User card */}
+      <div className="m-3 rounded-lg border border-border bg-muted/30 p-3">
+        <div className="flex items-center gap-2.5">
+          <div className="size-8 rounded-full gradient-bg flex items-center justify-center text-white text-xs font-bold uppercase">
+            {user?.displayName?.[0] ?? "U"}
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-xs font-medium truncate">
+              {user?.displayName ?? "—"}
+            </p>
+            <p className="text-[10px] text-muted-foreground truncate">
+              {user?.email ?? ""}
+            </p>
+          </div>
+          <button
+            onClick={handleLogout}
+            className="text-muted-foreground hover:text-destructive transition"
+            title="Log out"
+          >
+            <LogOut size={14} />
+          </button>
+        </div>
       </div>
     </div>
   );

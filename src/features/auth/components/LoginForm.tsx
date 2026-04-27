@@ -46,7 +46,7 @@ export const LoginForm = () => {
     try {
       const res = await loginMutation.mutateAsync(values);
 
-      login(res.token, res.user);
+      login(res.token ?? "", res.user);
 
       navigate("/dashboard");
 

@@ -23,6 +23,8 @@ dist-ssr
 *.sln
 *.sw?
 
+*.tsbuildinfo
+
 echo "
 # dependencies
 node_modules

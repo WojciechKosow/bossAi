@@ -7,9 +7,7 @@ const BillingPage = () => {
   const { data: activePlan } = useQuery({
     queryKey: ["active-plan"],
     queryFn: async () => {
-      const res = await axios.get(
-        "http://localhost:8080/api/me/plans/active-plan",
-      );
+      const res = await axios.get("/api/me/plans/active-plan");
       return res.data;
     },
   });
@@ -17,7 +15,7 @@ const BillingPage = () => {
   const { data: userPlans } = useQuery({
     queryKey: ["user-plans"],
     queryFn: async () => {
-      const res = await axios.get("http://localhost:8080/api/me/plans");
+      const res = await axios.get("/api/me/plans");
       return res.data;
     },
   });
@@ -25,7 +23,7 @@ const BillingPage = () => {
   const { data: allPlans } = useQuery({
     queryKey: ["all-plans"],
     queryFn: async () => {
-      const res = await axios.get("http://localhost:8080/api/plans");
+      const res = await axios.get("/api/plans");
       return res.data;
     },
   });
