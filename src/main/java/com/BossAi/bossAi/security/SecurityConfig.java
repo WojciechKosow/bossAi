@@ -39,7 +39,16 @@ public class SecurityConfig {
                 .csrf(csrf -> csrf.disable())
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
-                        .requestMatchers("/api/auth/**", "/oauth2/**", "/internal/**").permitAll()
+                        .requestMatchers(
+                                "/api/auth/**",
+                                "/oauth2/**",
+                                "/internal/**",
+                                // UUID-keyed asset blobs: equivalent to a signed
+                                // URL since asset IDs are 122-bit random UUIDs.
+                                // Lets <img>/<video> tags load previews without
+                                // an Authorization header.
+                                "/api/assets/file/**"
+                        ).permitAll()
                         .anyRequest().authenticated()
                 )
                 .oauth2Login(oauth -> oauth
