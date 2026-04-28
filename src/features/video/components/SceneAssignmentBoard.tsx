@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Image as ImageIcon, Film, GripVertical, Sparkles } from "lucide-react";
 import type { AssetDTO, PromptAnalysisResponse, UUID } from "../types";
-import { assetFileUrl } from "../api";
+import { AssetMedia } from "./AssetMedia";
 import { cn } from "@/lib/utils";
 
 const formatDuration = (ms: number) => {
@@ -106,20 +106,11 @@ export const SceneAssignmentBoard = ({
 
                 <div className="w-24 sm:w-28 aspect-[9/16] rounded-lg overflow-hidden bg-muted border border-border flex items-center justify-center">
                   {asset ? (
-                    asset.type === "VIDEO" ? (
-                      <video
-                        src={assetFileUrl(asset.id)}
-                        muted
-                        playsInline
-                        className="size-full object-cover"
-                      />
-                    ) : (
-                      <img
-                        src={assetFileUrl(asset.id)}
-                        alt={asset.originalFilename}
-                        className="size-full object-cover"
-                      />
-                    )
+                    <AssetMedia
+                      assetId={asset.id}
+                      type={asset.type}
+                      alt={asset.originalFilename}
+                    />
                   ) : (
                     <div className="text-[10px] text-muted-foreground p-2 text-center">
                       <Sparkles size={14} className="mx-auto mb-1" />
@@ -206,20 +197,12 @@ export const SceneAssignmentBoard = ({
                     dragAssetId === a.id && "scale-95 opacity-80",
                   )}
                 >
-                  {a.type === "VIDEO" ? (
-                    <video
-                      src={assetFileUrl(a.id)}
-                      muted
-                      playsInline
-                      className="size-full object-cover"
-                    />
-                  ) : (
-                    <img
-                      src={assetFileUrl(a.id)}
-                      alt={a.originalFilename}
-                      className="size-full object-cover"
-                    />
-                  )}
+                  <AssetMedia
+                    assetId={a.id}
+                    type={a.type}
+                    alt={a.originalFilename}
+                  />
+
                   <div className="absolute top-1 left-1 bg-black/60 text-white rounded p-0.5">
                     <GripVertical size={10} />
                   </div>

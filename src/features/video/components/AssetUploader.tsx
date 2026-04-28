@@ -2,7 +2,7 @@ import { useCallback, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { UploadCloud, ImageIcon, Film, Music, Mic, X, Loader2 } from "lucide-react";
 import { useDeleteAsset, useUploadAsset } from "../hooks";
-import { assetFileUrl } from "../api";
+import { AssetMedia } from "./AssetMedia";
 import type { AssetDTO, AssetType } from "../types";
 import { cn } from "@/lib/utils";
 
@@ -139,18 +139,11 @@ export const AssetUploader = ({
                   animate={{ opacity: 1, scale: 1 }}
                   transition={{ duration: 0.2 }}
                 >
-                  {a.type === "IMAGE" ? (
-                    <img
-                      src={assetFileUrl(a.id)}
+                  {a.type === "IMAGE" || a.type === "VIDEO" ? (
+                    <AssetMedia
+                      assetId={a.id}
+                      type={a.type}
                       alt={a.originalFilename}
-                      className="size-full object-cover"
-                    />
-                  ) : a.type === "VIDEO" ? (
-                    <video
-                      src={assetFileUrl(a.id)}
-                      className="size-full object-cover"
-                      muted
-                      playsInline
                     />
                   ) : (
                     <div className="size-full flex items-center justify-center">
