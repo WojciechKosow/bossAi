@@ -89,7 +89,14 @@ public class AssetController {
 
         var asset = assetRepository.findById(id);
 
-        Path path = Paths.get(asset.get().getStorageKey());
+        if (asset.isEmpty()) {
+            return ResponseEntity.notFound().build();
+        }
+
+        // Resolve through StorageService so the configured storage root
+        // (e.g. data/assets) is applied. Using Paths.get(storageKey) directly
+        // resolves relative to the JVM CWD and never finds the file.
+        Path path = storageService.resolvePath(asset.get().getStorageKey());
 
         if (!Files.exists(path)) {
             return ResponseEntity.notFound().build();
@@ -112,6 +119,7 @@ public class AssetController {
         }
         return ResponseEntity.ok()
                 .contentType(MediaType.parseMediaType(contentType))
+                .header("Accept-Ranges", "bytes")
                 .header("Content-Disposition", "inline; filename=\"" + path.getFileName() + "\"")
                 .body(resource);
     }
