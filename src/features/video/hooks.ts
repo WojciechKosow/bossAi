@@ -4,6 +4,7 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
+import axios from "@/lib/axios";
 import {
   analyzePrompt,
   deleteAsset,
@@ -62,6 +63,33 @@ export const useDeleteAsset = () => {
       qc.invalidateQueries({ queryKey: ["assets"] });
     },
   });
+};
+
+/**
+ * Fetch an asset binary with the JWT bearer header and expose it as a
+ * blob URL. Browser <img>/<video> tags can't carry the Authorization
+ * header, and `/api/assets/file/**` is auth-protected on the backend,
+ * so naive `<img src="/api/assets/file/{id}">` returns 401.
+ *
+ * Cached forever per asset id, so re-mounting the same tile reuses the
+ * blob instead of re-downloading.
+ */
+export const useAssetBlobUrl = (
+  assetId: UUID | null | undefined,
+): string | null => {
+  const { data } = useQuery({
+    queryKey: ["asset-blob", assetId],
+    queryFn: async () => {
+      const res = await axios.get(`/api/assets/file/${assetId}`, {
+        responseType: "blob",
+      });
+      return URL.createObjectURL(res.data as Blob);
+    },
+    enabled: !!assetId,
+    staleTime: Infinity,
+    gcTime: 1000 * 60 * 30,
+  });
+  return data ?? null;
 };
 
 /* ---------- analyze + start ---------- */
