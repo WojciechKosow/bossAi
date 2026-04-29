@@ -94,7 +94,9 @@ const CreateVideoPage = () => {
   /* ---- actions ---- */
 
   const canAnalyze =
-    prompt.trim().length >= 10 && prompt.length <= 2000 && !analyzeMut.isPending;
+    prompt.trim().length >= 10 &&
+    prompt.length <= 2000 &&
+    !analyzeMut.isPending;
 
   const onAnalyze = async () => {
     if (!canAnalyze) return;
@@ -103,7 +105,7 @@ const CreateVideoPage = () => {
         prompt,
         style,
         customMediaAssetIds: assets.map((a) => a.id),
-        analyzeAssets: false,
+        analyzeAssets: true,
       });
       setAnalysis(result);
       setStep("review");
@@ -125,6 +127,7 @@ const CreateVideoPage = () => {
         sceneAssignments,
         useGptOrdering: false,
         reuseAssets: true,
+        forceReuseForTesting: false,
       });
       setGenerationId(res.generationId);
       setStep("generating");
@@ -171,7 +174,10 @@ const CreateVideoPage = () => {
             className="grid grid-cols-1 xl:grid-cols-[1fr_360px] gap-6"
           >
             <div className="space-y-6">
-              <Section title="Describe your video" subtitle="Be vivid. The model loves details.">
+              <Section
+                title="Describe your video"
+                subtitle="Be vivid. The model loves details."
+              >
                 <div className="rounded-xl border border-border bg-card p-1 focus-within:shadow-glow transition">
                   <textarea
                     value={prompt}
@@ -249,7 +255,10 @@ const CreateVideoPage = () => {
             className="space-y-6"
           >
             <ReviewSummary analysis={analysis} />
-            <Section title="Scene blueprint" subtitle="Reassign assets via drag & drop. Empty scenes will be AI-generated.">
+            <Section
+              title="Scene blueprint"
+              subtitle="Reassign assets via drag & drop. Empty scenes will be AI-generated."
+            >
               <SceneAssignmentBoard
                 analysis={analysis}
                 assets={assets}
@@ -306,7 +315,10 @@ const CreateVideoPage = () => {
                 {progress?.message ?? "Spinning up the pipeline…"}
               </p>
               <div className="mt-8 space-y-2">
-                <Progress value={progress?.percent ?? 0} indeterminate={!progress} />
+                <Progress
+                  value={progress?.percent ?? 0}
+                  indeterminate={!progress}
+                />
                 <div className="flex items-center justify-between text-xs text-muted-foreground">
                   <span>{progress?.step ?? "INITIALIZING"}</span>
                   <span className="tabular-nums">
@@ -315,7 +327,8 @@ const CreateVideoPage = () => {
                 </div>
               </div>
               <p className="text-xs text-muted-foreground mt-6">
-                You can leave this page — we'll drop you in the editor when it's ready.
+                You can leave this page — we'll drop you in the editor when it's
+                ready.
               </p>
             </div>
           </motion.div>
@@ -369,7 +382,9 @@ const Stepper = ({ current }: { current: Step }) => {
           <span
             className={cn(
               "hidden sm:inline",
-              i === idx ? "text-foreground font-medium" : "text-muted-foreground",
+              i === idx
+                ? "text-foreground font-medium"
+                : "text-muted-foreground",
             )}
           >
             {stepLabels[s]}
