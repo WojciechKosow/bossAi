@@ -77,14 +77,31 @@ const CreateVideoPage = () => {
     setAssignments(next);
   }, [analysis]);
 
-  /* navigate to project page when generation done */
+  /**
+   * Once the SSE stream signals DONE, route the user to wherever their
+   * video lives:
+   *   - editable project (timeline-first pipeline) → /projects/{id}
+   *   - generation-only (legacy pipeline)          → /library/preview/{id}
+   *
+   * Projects list refreshes every 10s but DONE can fire before the bridge
+   * has committed the VideoProject — we wait one refetch, then fall back
+   * to the preview page so the user is never stranded.
+   */
   useEffect(() => {
-    if (!done || !generationId || !projects) return;
-    const project = projects.find((p) => p.generationId === generationId);
+    if (!done || !generationId) return;
+    const project = (projects ?? []).find(
+      (p) => p.generationId === generationId,
+    );
     if (project) {
       toast.success("Your video is ready!");
       navigate(`/dashboard/projects/${project.id}`);
+      return;
     }
+    const fallback = window.setTimeout(() => {
+      toast.success("Your video is ready!");
+      navigate(`/dashboard/library/preview/${generationId}`);
+    }, 4000);
+    return () => window.clearTimeout(fallback);
   }, [done, generationId, projects, navigate, toast]);
 
   useEffect(() => {

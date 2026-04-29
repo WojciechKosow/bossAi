@@ -46,8 +46,12 @@ export const Timeline = ({
   const [pps, setPps] = useState(90);
   const trackRef = useRef<HTMLDivElement>(null);
 
-  const layers = useMemo(() => groupByLayer(edl.segments), [edl.segments]);
-  const audioTracks = edl.audioTracks ?? [];
+  const layers = useMemo(
+    () => groupByLayer(edl.segments ?? []),
+    [edl.segments],
+  );
+  const audioTracks = edl.audio_tracks ?? [];
+  const textOverlays = edl.text_overlays ?? [];
   const totalMs = totalDurationFromSegments(edl);
   const totalSeconds = Math.ceil(totalMs / 1000) + 2;
   const widthPx = msToPx(totalSeconds * 1000, pps);
@@ -203,7 +207,7 @@ export const Timeline = ({
               label={t.type === "music" ? "Music" : "Voice"}
             />
           ))}
-          {edl.textOverlays && edl.textOverlays.length > 0 && (
+          {textOverlays.length > 0 && (
             <TrackLabel
               icon={<Type size={12} className="text-chart-4" />}
               label="Subs"
@@ -256,13 +260,19 @@ export const Timeline = ({
             ))}
 
             {/* subtitles strip */}
-            {edl.textOverlays && edl.textOverlays.length > 0 && (
+            {textOverlays.length > 0 && (
               <div
                 className="relative border-b border-border/60"
                 style={{ height: LAYER_HEIGHT }}
               >
-                {edl.textOverlays.map((to, i) => (
-                  <SubBlock key={i} startMs={to.startMs} endMs={to.endMs} text={to.text} pps={pps} />
+                {textOverlays.map((to, i) => (
+                  <SubBlock
+                    key={to.id ?? i}
+                    startMs={to.start_ms}
+                    endMs={to.end_ms}
+                    text={to.text}
+                    pps={pps}
+                  />
                 ))}
               </div>
             )}
@@ -405,8 +415,10 @@ const AudioBlock = ({
   pps: number;
   totalMs: number;
 }) => {
-  const left = msToPx(track.startMs, pps);
-  const width = msToPx(Math.max(0, totalMs - track.startMs), pps);
+  const start = track.start_ms ?? 0;
+  const end = track.end_ms ?? totalMs;
+  const left = msToPx(start, pps);
+  const width = msToPx(Math.max(0, end - start), pps);
   return (
     <div
       className={cn(

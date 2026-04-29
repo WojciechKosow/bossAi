@@ -47,9 +47,9 @@ export const removeSegment = (edl: EdlDto, id: string): EdlDto => ({
 });
 
 export const totalDurationFromSegments = (edl: EdlDto): number => {
-  if (!edl.segments.length) return edl.metadata.totalDurationMs ?? 0;
+  if (!edl.segments?.length) return edl.metadata?.total_duration_ms ?? 0;
   return Math.max(
-    edl.metadata.totalDurationMs ?? 0,
+    edl.metadata?.total_duration_ms ?? 0,
     ...edl.segments.map((s) => s.end_ms),
   );
 };
