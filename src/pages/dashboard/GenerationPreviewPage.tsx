@@ -3,8 +3,9 @@ import { useNavigate, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, Download, Loader2, Sparkles } from "lucide-react";
 import { motion } from "framer-motion";
-import { getGeneration } from "@/features/video/api";
-import { useProjects } from "@/features/video/hooks";
+import { assetFileUrl, getGeneration } from "@/features/video/api";
+import { useAssets, useProjects } from "@/features/video/hooks";
+import { AssetMedia } from "@/features/video/components/AssetMedia";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 
@@ -26,10 +27,28 @@ const GenerationPreviewPage = () => {
   });
 
   const { data: projects } = useProjects();
+  const { data: assets } = useAssets();
+
   const linkedProject = useMemo(
     () => (projects ?? []).find((p) => p.generationId === id),
     [projects, id],
   );
+
+  /**
+   * Generation.videoUrl points at a multi-segment storage-key path
+   * (/api/assets/file/video/final/{uuid}/final.mp4) which doesn't match the
+   * single-UUID file route, so it 404s. Find the matching VIDEO asset by
+   * generationId and use its UUID URL instead — that does work.
+   */
+  const videoAsset = useMemo(() => {
+    if (!id || !assets) return undefined;
+    return assets.find(
+      (a) =>
+        a.type === "VIDEO" &&
+        (a.source ?? "AI_GENERATED") === "AI_GENERATED" &&
+        a.generationId === id,
+    );
+  }, [assets, id]);
 
   useEffect(() => {
     if (linkedProject) {
@@ -79,29 +98,30 @@ const GenerationPreviewPage = () => {
       >
         <div className="rounded-xl border border-border bg-black overflow-hidden">
           <div className="aspect-[9/16] relative flex items-center justify-center bg-black">
-            {generation.videoUrl ? (
-              <video
-                src={generation.videoUrl}
+            {videoAsset ? (
+              <AssetMedia
+                assetId={videoAsset.id}
+                type="VIDEO"
+                preview={false}
                 className="size-full object-contain"
-                playsInline
-                controls
-                autoPlay
-                muted
               />
             ) : (
               <div className="text-center text-muted-foreground p-6">
                 <Loader2 className="mx-auto size-5 animate-spin mb-2" />
-                <p className="text-xs">{generation.status} · waiting for render…</p>
+                <p className="text-xs">
+                  {generation.status} ·{" "}
+                  {isProcessing
+                    ? "rendering…"
+                    : "looking up rendered video…"}
+                </p>
               </div>
             )}
           </div>
-          {generation.videoUrl && (
+          {videoAsset && (
             <div className="px-3 py-2 border-t border-border flex items-center justify-between bg-card">
-              <span className="text-xs text-muted-foreground">
-                Preview
-              </span>
+              <span className="text-xs text-muted-foreground">Preview</span>
               <a
-                href={generation.videoUrl}
+                href={assetFileUrl(videoAsset.id)}
                 download
                 className="text-xs text-muted-foreground hover:text-foreground inline-flex items-center gap-1.5 transition"
               >

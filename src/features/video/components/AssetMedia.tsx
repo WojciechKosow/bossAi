@@ -54,6 +54,7 @@ export const AssetMedia = ({
         muted={preview}
         autoPlay={preview}
         loop={preview}
+        controls={!preview}
         playsInline
       />
     );
