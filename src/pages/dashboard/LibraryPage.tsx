@@ -1,7 +1,6 @@
 import { useMemo } from "react";
 import { Link } from "react-router-dom";
 import { motion } from "framer-motion";
-import { formatDistanceToNow } from "date-fns";
 import {
   Film,
   Plus,
@@ -21,6 +20,10 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { AssetMedia } from "@/features/video/components/AssetMedia";
 import { assetFileUrl } from "@/features/video/api";
+import {
+  computeItemTitle,
+  computeRelativeTimestamp,
+} from "@/features/video/components/libraryUtils";
 import type {
   AssetDTO,
   GenerationDTO,
@@ -67,19 +70,19 @@ const buildItems = (
   // 1. Projects — editable timeline items.
   for (const p of projects ?? []) {
     const gen = p.generationId ? generationById.get(p.generationId) : undefined;
+    const createdAt =
+      p.createdAt ?? gen?.createdAt ?? new Date().toISOString();
     items.push({
       key: `project:${p.id}`,
       kind: "project",
       generationId: p.generationId,
       project: p,
       status: p.status,
-      title: p.title || gen?.id?.slice(0, 8),
+      title: computeItemTitle({ project: p, generation: gen, createdAt }),
       prompt: p.originalPrompt,
-      createdAt: p.createdAt ?? gen?.createdAt ?? new Date().toISOString(),
+      createdAt,
     });
 
-    // If we ever get generationId on AssetDTO, skip duplicate asset cards
-    // for the same logical video.
     (assets ?? [])
       .filter(
         (a) =>
@@ -99,15 +102,16 @@ const buildItems = (
     if (claimedAssetIds.has(a.id)) continue;
 
     const gen = a.generationId ? generationById.get(a.generationId) : undefined;
+    const createdAt = a.createdAt ?? new Date().toISOString();
     items.push({
       key: `asset:${a.id}`,
       kind: "asset",
       generationId: a.generationId,
       asset: a,
       status: "READY",
-      title: gen?.id?.slice(0, 8),
+      title: computeItemTitle({ asset: a, generation: gen, createdAt }),
       prompt: undefined,
-      createdAt: a.createdAt ?? new Date().toISOString(),
+      createdAt,
     });
   }
 
@@ -198,9 +202,11 @@ const ItemCard = ({ item, index }: { item: LibraryItem; index: number }) => {
   const target =
     item.kind === "project"
       ? `/dashboard/projects/${item.project!.id}`
-      : item.generationId
-        ? `/dashboard/library/preview/${item.generationId}`
-        : `/dashboard/library`;
+      : item.asset
+        ? `/dashboard/library/preview/asset/${item.asset.id}`
+        : item.generationId
+          ? `/dashboard/library/preview/${item.generationId}`
+          : `/dashboard/library`;
   const downloadHref =
     item.kind === "asset" && item.asset
       ? assetFileUrl(item.asset.id)
@@ -256,7 +262,7 @@ const ItemCard = ({ item, index }: { item: LibraryItem; index: number }) => {
       </Link>
       <div className="px-4 py-3 flex items-center justify-between text-xs">
         <span className="text-muted-foreground">
-          {formatDistanceToNow(new Date(item.createdAt), { addSuffix: true })}
+          {computeRelativeTimestamp(item.createdAt)}
         </span>
         <div className="flex items-center gap-2">
           {downloadHref && (

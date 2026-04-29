@@ -20,6 +20,7 @@ import CreateVideoPage from "../pages/dashboard/CreateVideoPage";
 import LibraryPage from "../pages/dashboard/LibraryPage";
 import ProjectEditorPage from "../pages/dashboard/ProjectEditorPage";
 import GenerationPreviewPage from "../pages/dashboard/GenerationPreviewPage";
+import AssetPreviewPage from "../pages/dashboard/AssetPreviewPage";
 import BillingPage from "../pages/dashboard/BillingPage";
 import SettingsPage from "../pages/dashboard/SettingsPage";
 
@@ -91,6 +92,10 @@ const AppRouter = () => {
           <Route index element={<DashboardPage />} />
           <Route path="create" element={<CreateVideoPage />} />
           <Route path="library" element={<LibraryPage />} />
+          <Route
+            path="library/preview/asset/:assetId"
+            element={<AssetPreviewPage />}
+          />
           <Route
             path="library/preview/:id"
             element={<GenerationPreviewPage />}
