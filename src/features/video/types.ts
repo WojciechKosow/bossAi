@@ -60,12 +60,20 @@ export type TransitionType =
 export interface AssetDTO {
   id: UUID;
   type: AssetType;
-  originalFilename: string;
+  source?: AssetSource;
+  generationId?: UUID;
+  originalFilename?: string;
   orderIndex?: number;
   description?: string;
   url?: string;
+  durationSeconds?: number;
+  width?: number;
+  height?: number;
   createdAt?: string;
+  expiresAt?: string;
 }
+
+export type AssetSource = "AI_GENERATED" | "USER_UPLOAD" | "SYSTEM_GENERATED";
 
 export interface SceneLayer {
   layerIndex: number;
