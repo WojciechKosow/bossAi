@@ -16,6 +16,7 @@ public class AssetDTO {
     private UUID id;
     private AssetType type;
     private AssetSource source;
+    private UUID generationId;
     private String url;
     private Integer orderIndex;
     private Integer durationSeconds;
