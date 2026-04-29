@@ -93,9 +93,13 @@ public class RenderStep implements GenerationStep {
         byte[] videoBytes = Files.readAllBytes(finalOutput);
         String storageKey = "video/final/" + context.getGenerationId() + "/final.mp4";
         storageService.save(videoBytes, storageKey);
-        String finalUrl = storageService.generateUrl(storageKey);
 
-        assetService.createAsset(
+        // Create the asset row first; we use its UUID for the public URL.
+        // storageService.generateUrl(key) returns a multi-segment path that
+        // doesn't match the single-UUID /api/assets/file/{id} route, so the
+        // returned URL won't actually serve the file. Routing through the
+        // asset UUID gives us a URL that resolves correctly.
+        com.BossAi.bossAi.dto.AssetDTO videoAsset = assetService.createAsset(
                 context.getUserId(),
                 AssetType.VIDEO,
                 AssetSource.AI_GENERATED,
@@ -103,6 +107,8 @@ public class RenderStep implements GenerationStep {
                 storageKey,
                 context.getGenerationId()
         );
+
+        String finalUrl = "/api/assets/file/" + videoAsset.getId();
 
         context.setFinalVideoLocalPath(finalOutput.toString());
         context.setFinalVideoUrl(finalUrl);

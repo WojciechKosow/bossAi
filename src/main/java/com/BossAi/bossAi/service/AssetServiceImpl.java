@@ -190,11 +190,17 @@ public class AssetServiceImpl implements AssetService {
     }
 
     private AssetDTO mapToDto(Asset asset) {
+        // Build a URL that actually resolves: /api/assets/file/{assetUuid}.
+        // storageService.generateUrl(storageKey) returns a multi-segment path
+        // that doesn't match the single-UUID file route — keeping it would
+        // hand the frontend a 404-bound URL.
+        String url = "/api/assets/file/" + asset.getId();
         return new AssetDTO(
                 asset.getId(),
                 asset.getType(),
                 asset.getSource(),
-                storageService.generateUrl(asset.getStorageKey()),
+                asset.getGenerationId(),
+                url,
                 asset.getOrderIndex(),
                 asset.getDurationSeconds(),
                 asset.getWidth(),
