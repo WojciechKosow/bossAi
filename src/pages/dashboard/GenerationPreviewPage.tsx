@@ -1,13 +1,20 @@
-import { useEffect, useMemo } from "react";
+import { useMemo } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, Download, Loader2, Sparkles } from "lucide-react";
+import {
+  ArrowLeft,
+  Download,
+  Loader2,
+  Pencil,
+  Sparkles,
+} from "lucide-react";
 import { motion } from "framer-motion";
 import { assetFileUrl, getGeneration } from "@/features/video/api";
 import { useAssets, useProjects } from "@/features/video/hooks";
 import { AssetMedia } from "@/features/video/components/AssetMedia";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { computeItemTitle } from "@/features/video/components/libraryUtils";
 
 const GenerationPreviewPage = () => {
   const { id } = useParams<{ id: string }>();
@@ -50,11 +57,16 @@ const GenerationPreviewPage = () => {
     );
   }, [assets, id]);
 
-  useEffect(() => {
-    if (linkedProject) {
-      navigate(`/dashboard/projects/${linkedProject.id}`, { replace: true });
-    }
-  }, [linkedProject, navigate]);
+  const title = useMemo(
+    () =>
+      computeItemTitle({
+        project: linkedProject,
+        asset: videoAsset,
+        generation,
+        createdAt: generation?.createdAt,
+      }),
+    [linkedProject, videoAsset, generation],
+  );
 
   if (isLoading || !generation) {
     return (
@@ -133,13 +145,9 @@ const GenerationPreviewPage = () => {
 
         <div className="space-y-4">
           <div className="rounded-xl border border-border bg-card p-5">
-            <h1 className="text-xl font-semibold tracking-tight">
-              Generation result
+            <h1 className="text-xl font-semibold tracking-tight line-clamp-2">
+              {title}
             </h1>
-            <p className="text-sm text-muted-foreground mt-2">
-              This generation isn't backed by an editable timeline project.
-              You can preview, download, or kick off a new edit.
-            </p>
             <div className="mt-4 grid grid-cols-2 gap-3 text-xs">
               <Field label="Generation ID" value={generation.id.slice(0, 8) + "…"} />
               <Field
@@ -156,29 +164,50 @@ const GenerationPreviewPage = () => {
             </div>
           </div>
 
-          <div className="rounded-xl border border-border bg-card p-5">
-            <p className="text-sm font-semibold flex items-center gap-2">
-              <Sparkles size={14} className="text-primary" />
-              Want to edit?
-            </p>
-            <p className="text-xs text-muted-foreground mt-1.5">
-              Editable timelines are produced when the new pipeline is
-              enabled on the backend (
-              <code className="font-mono text-[10px]">
-                rendering.use-new-pipeline=true
-              </code>
-              ). Newer generations from that pipeline will open in the
-              full editor automatically.
-            </p>
-            <div className="mt-4 flex items-center gap-2">
+          {linkedProject ? (
+            <div className="rounded-xl border border-border bg-card p-5">
+              <p className="text-sm font-semibold flex items-center gap-2">
+                <Pencil size={14} className="text-primary" />
+                Edit on the timeline
+              </p>
+              <p className="text-xs text-muted-foreground mt-1.5">
+                This generation has an editable timeline project. Open the
+                editor to rearrange clips, swap assets, or change effects.
+              </p>
               <Button
-                onClick={() => navigate("/dashboard/create")}
-                className="gradient-bg text-white shadow-glow"
+                onClick={() =>
+                  navigate(`/dashboard/projects/${linkedProject.id}`)
+                }
+                className="mt-4 gradient-bg text-white shadow-glow"
               >
-                <Sparkles size={14} /> Create new video
+                <Pencil size={14} /> Open editor
               </Button>
             </div>
-          </div>
+          ) : (
+            <div className="rounded-xl border border-border bg-card p-5">
+              <p className="text-sm font-semibold flex items-center gap-2">
+                <Sparkles size={14} className="text-primary" />
+                Want to edit?
+              </p>
+              <p className="text-xs text-muted-foreground mt-1.5">
+                Editable timelines are produced when the new pipeline is
+                enabled on the backend (
+                <code className="font-mono text-[10px]">
+                  rendering.use-new-pipeline=true
+                </code>
+                ). Newer generations from that pipeline will open in the
+                full editor automatically.
+              </p>
+              <div className="mt-4 flex items-center gap-2">
+                <Button
+                  onClick={() => navigate("/dashboard/create")}
+                  className="gradient-bg text-white shadow-glow"
+                >
+                  <Sparkles size={14} /> Create new video
+                </Button>
+              </div>
+            </div>
+          )}
         </div>
       </motion.div>
     </div>

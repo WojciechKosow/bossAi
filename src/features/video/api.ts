@@ -56,6 +56,15 @@ export const assetFileUrl = (id: UUID): string => {
   return `${base}/api/assets/file/${id}`;
 };
 
+/**
+ * Asset detail isn't a separate endpoint on the backend — every user-scoped
+ * asset is in the /api/assets list. Pull from the list and find by id.
+ */
+export const findAsset = async (id: UUID): Promise<AssetDTO | undefined> => {
+  const all = await listAssets();
+  return all.find((a) => a.id === id);
+};
+
 /* ============ GENERATIONS ============ */
 
 export const analyzePrompt = async (
