@@ -71,7 +71,7 @@ export const InspectorPanel = ({ edl, segment, onChange }: Props) => {
   const setTransition = (type: TransitionType) => {
     update({
       transition:
-        type === "cut" ? { type: "cut" } : { type, durationMs: 300 },
+        type === "cut" ? { type: "cut" } : { type, duration_ms: 300 },
     });
   };
 
@@ -172,12 +172,12 @@ export const InspectorPanel = ({ edl, segment, onChange }: Props) => {
         {segment.transition && segment.transition.type !== "cut" && (
           <FieldNum
             label="Duration (ms)"
-            value={segment.transition.durationMs ?? 300}
+            value={segment.transition.duration_ms ?? 300}
             onChange={(v) =>
               update({
                 transition: {
                   type: segment.transition!.type,
-                  durationMs: Math.max(50, v),
+                  duration_ms: Math.max(50, v),
                 },
               })
             }

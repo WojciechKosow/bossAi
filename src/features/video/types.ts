@@ -60,12 +60,20 @@ export type TransitionType =
 export interface AssetDTO {
   id: UUID;
   type: AssetType;
-  originalFilename: string;
+  source?: AssetSource;
+  generationId?: UUID;
+  originalFilename?: string;
   orderIndex?: number;
   description?: string;
   url?: string;
+  durationSeconds?: number;
+  width?: number;
+  height?: number;
   createdAt?: string;
+  expiresAt?: string;
 }
+
+export type AssetSource = "AI_GENERATED" | "USER_UPLOAD" | "SYSTEM_GENERATED";
 
 export interface SceneLayer {
   layerIndex: number;
@@ -190,13 +198,16 @@ export interface RenderJobDTO {
 
 export interface EdlEffect {
   type: EffectType;
+  start_ms?: number;
+  end_ms?: number;
   intensity?: number;
   params?: Record<string, unknown>;
 }
 
 export interface EdlTransition {
   type: TransitionType;
-  durationMs?: number;
+  duration_ms?: number;
+  params?: Record<string, unknown>;
 }
 
 export interface EdlSegment {
@@ -217,15 +228,22 @@ export interface EdlAudioTrack {
   id: UUID;
   asset_id: UUID;
   asset_url?: string;
-  type: "voiceover" | "music";
-  startMs: number;
-  volume: number;
+  type: "voiceover" | "music" | string;
+  start_ms: number;
+  end_ms?: number | null;
+  volume?: number;
+  fade_in_ms?: number;
+  fade_out_ms?: number;
+  trim_in_ms?: number;
+  trim_out_ms?: number | null;
 }
 
 export interface EdlTextOverlay {
+  id?: string;
   text: string;
-  startMs: number;
-  endMs: number;
+  type?: string;
+  start_ms: number;
+  end_ms: number;
   style?: Record<string, unknown>;
   position?: Record<string, unknown>;
   animation?: string;
@@ -233,27 +251,31 @@ export interface EdlTextOverlay {
 
 export interface EdlWhisperWord {
   word: string;
-  startMs: number;
-  endMs: number;
+  start_ms: number;
+  end_ms: number;
+  sentence_index?: number;
 }
 
 export interface EdlMetadata {
   title?: string;
-  totalDurationMs: number;
+  style?: string;
+  total_duration_ms: number;
   bpm?: number;
   width: number;
   height: number;
   fps: number;
+  pacing?: string;
+  color_grade?: Record<string, unknown>;
 }
 
 export interface EdlDto {
   version: string;
   metadata: EdlMetadata;
   segments: EdlSegment[];
-  audioTracks?: EdlAudioTrack[];
-  textOverlays?: EdlTextOverlay[];
-  whisperWords?: EdlWhisperWord[];
-  subtitleConfig?: Record<string, unknown>;
+  audio_tracks?: EdlAudioTrack[];
+  text_overlays?: EdlTextOverlay[];
+  whisper_words?: EdlWhisperWord[];
+  subtitle_config?: Record<string, unknown>;
 }
 
 export interface EdlVersionDTO {

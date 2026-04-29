@@ -19,6 +19,7 @@ import DashboardPage from "../pages/dashboard/DashboardPage";
 import CreateVideoPage from "../pages/dashboard/CreateVideoPage";
 import LibraryPage from "../pages/dashboard/LibraryPage";
 import ProjectEditorPage from "../pages/dashboard/ProjectEditorPage";
+import GenerationPreviewPage from "../pages/dashboard/GenerationPreviewPage";
 import BillingPage from "../pages/dashboard/BillingPage";
 import SettingsPage from "../pages/dashboard/SettingsPage";
 
@@ -90,6 +91,10 @@ const AppRouter = () => {
           <Route index element={<DashboardPage />} />
           <Route path="create" element={<CreateVideoPage />} />
           <Route path="library" element={<LibraryPage />} />
+          <Route
+            path="library/preview/:id"
+            element={<GenerationPreviewPage />}
+          />
           <Route path="projects/:id" element={<ProjectEditorPage />} />
           <Route path="billing" element={<BillingPage />} />
           <Route path="settings" element={<SettingsPage />} />
