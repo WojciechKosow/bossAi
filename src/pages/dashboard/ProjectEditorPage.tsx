@@ -33,8 +33,12 @@ const ProjectEditorPage = () => {
   const navigate = useNavigate();
   const toast = useToast();
 
-  const { data: project } = useProject(id ?? null);
-  const { data: timeline, isLoading: timelineLoading } = useTimeline(id ?? null);
+  const { data: project, error: projectError } = useProject(id ?? null);
+  const {
+    data: timeline,
+    isLoading: timelineLoading,
+    error: timelineError,
+  } = useTimeline(id ?? null);
   const { data: render } = useRenderStatus(id ?? null);
   const saveMut = useSaveTimeline();
   const renderMut = useTriggerRender();
@@ -133,6 +137,20 @@ const ProjectEditorPage = () => {
       toast.error(e?.response?.data?.message ?? "Failed to queue render");
     }
   };
+
+  if (projectError || timelineError) {
+    return (
+      <ErrorState
+        title={projectError ? "Project not found" : "Timeline not available"}
+        description={
+          projectError
+            ? "This project may have been deleted, or it never had an editable timeline. You can preview the rendered video from the library."
+            : "The backend hasn't generated a timeline for this project yet. This usually means the new pipeline isn't enabled (rendering.use-new-pipeline)."
+        }
+        onBack={() => navigate("/dashboard/library")}
+      />
+    );
+  }
 
   if (timelineLoading || !edl) {
     return (
@@ -246,7 +264,7 @@ const ProjectEditorPage = () => {
               </button>
               <span className="text-xs font-mono text-muted-foreground">
                 {formatTime(playheadMs)} /{" "}
-                {formatTime(edl.metadata.totalDurationMs ?? 0)}
+                {formatTime(edl.metadata?.total_duration_ms ?? 0)}
               </span>
             </div>
             {render?.outputUrl && (
@@ -314,3 +332,24 @@ const ProjectEditorPage = () => {
 };
 
 export default ProjectEditorPage;
+
+const ErrorState = ({
+  title,
+  description,
+  onBack,
+}: {
+  title: string;
+  description: string;
+  onBack: () => void;
+}) => (
+  <div className="max-w-xl mx-auto rounded-2xl border border-border bg-card p-10 text-center mt-10">
+    <div className="size-12 rounded-xl bg-destructive/10 text-destructive mx-auto flex items-center justify-center">
+      <ArrowLeft className="size-5 rotate-45" />
+    </div>
+    <h2 className="text-lg font-semibold mt-5">{title}</h2>
+    <p className="text-sm text-muted-foreground mt-2">{description}</p>
+    <Button onClick={onBack} className="mt-6 gradient-bg text-white shadow-glow">
+      <ArrowLeft size={14} /> Back to library
+    </Button>
+  </div>
+);
