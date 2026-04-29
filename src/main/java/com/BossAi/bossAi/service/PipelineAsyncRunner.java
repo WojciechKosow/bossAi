@@ -92,15 +92,40 @@ public class PipelineAsyncRunner {
             // Zapisz DONE status PRZED bridge
             generationRepository.save(generation);
 
-            // ── NEW PIPELINE: bridge assets → VideoProject → EDL → Remotion ──
-            if (useNewPipeline) {
+            // Always bootstrap a VideoProject + ProjectAssets so the user can find
+            // their video in the library and open the timeline editor.
+            UUID projectId = null;
+            try {
+                String userEmail = generation.getUser().getEmail();
+                projectId = assetBridgeService.bridgeToVideoProject(context, generation, userEmail);
+                log.info("[PipelineAsyncRunner] Project bridged — projectId: {}", projectId);
+            } catch (Exception ex) {
+                log.warn("[PipelineAsyncRunner] Project bridge failed (non-blocking) — {}",
+                        ex.getMessage(), ex);
+            }
+
+            // Synthesize a basic EDL + completed RenderJob (using the legacy
+            // pipeline's mp4) — separate transaction so a serialization hiccup
+            // here doesn't roll back the project. Editor can render the timeline
+            // immediately; user can still preview via the legacy mp4.
+            if (projectId != null) {
                 try {
-                    String userEmail = generation.getUser().getEmail();
-                    UUID projectId = assetBridgeService.bridgeToVideoProject(context, generation, userEmail);
-                    log.info("[PipelineAsyncRunner] New pipeline triggered — projectId: {}", projectId);
+                    assetBridgeService.bootstrapEdlAndRender(
+                            projectId, context, context.getFinalVideoUrl());
+                } catch (Exception ex) {
+                    log.warn("[PipelineAsyncRunner] EDL bootstrap failed (non-blocking) — {}",
+                            ex.getMessage(), ex);
+                }
+            }
+
+            // Heavy timeline-first pipeline (audio analysis + GPT EDL + Remotion).
+            // Behind a flag because it depends on external microservices.
+            if (useNewPipeline && projectId != null) {
+                try {
                     videoProductionOrchestrator.produceVideo(projectId, context);
                 } catch (Exception ex) {
-                    log.warn("[PipelineAsyncRunner] New pipeline failed (non-blocking) — {}", ex.getMessage());
+                    log.warn("[PipelineAsyncRunner] New pipeline failed (non-blocking) — {}",
+                            ex.getMessage());
                 }
             }
 
