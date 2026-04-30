@@ -7,6 +7,8 @@ import {
   Pause,
   Play,
   Download,
+  Volume2,
+  VolumeX,
 } from "lucide-react";
 import {
   useProject,
@@ -20,6 +22,10 @@ import {
   InspectorActions,
   InspectorPanel,
 } from "@/features/video/components/timeline/InspectorPanel";
+import {
+  EdlPlayer,
+  type EdlPlayerHandle,
+} from "@/features/video/components/timeline/EdlPlayer";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
@@ -49,7 +55,10 @@ const ProjectEditorPage = () => {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [playing, setPlaying] = useState(false);
   const [playheadMs, setPlayheadMs] = useState(0);
-  const videoRef = useRef<HTMLVideoElement>(null);
+  const [masterVolume, setMasterVolume] = useState(1);
+
+  // Ref to the EDL player so we can call play/pause/seek imperatively
+  const playerRef = useRef<EdlPlayerHandle>(null);
 
   /* hydrate edl from API once */
   useEffect(() => {
@@ -63,11 +72,7 @@ const ProjectEditorPage = () => {
   useEffect(() => {
     if (!timeline) return;
     const baseline = originalRef.current;
-    if (
-      baseline &&
-      baseline.version !== timeline.version &&
-      !dirty
-    ) {
+    if (baseline && baseline.version !== timeline.version && !dirty) {
       originalRef.current = timeline;
       setEdl(timeline);
     }
@@ -84,40 +89,25 @@ const ProjectEditorPage = () => {
     [edl, selectedId],
   );
 
-  /**
-   * RenderJob.outputUrl is a path relative to the API host
-   * ("/api/assets/file/{uuid}"). Browsers resolve <video src> against the
-   * frontend origin, so we need to prefix the API base URL ourselves.
-   */
-  const previewVideoUrl = useMemo(
+  // Download URL still points to the last rendered MP4 (useful for export)
+  const downloadUrl = useMemo(
     () => absoluteUrl(render?.outputUrl),
     [render?.outputUrl],
   );
 
-  /* playhead ↔ video sync */
-  useEffect(() => {
-    const v = videoRef.current;
-    if (!v) return;
-    const onTime = () => setPlayheadMs(Math.round(v.currentTime * 1000));
-    v.addEventListener("timeupdate", onTime);
-    return () => v.removeEventListener("timeupdate", onTime);
-  }, [previewVideoUrl]);
-
+  /* scrub: user dragged the playhead on the timeline */
   const onScrub = (ms: number) => {
     setPlayheadMs(ms);
-    const v = videoRef.current;
-    if (v) v.currentTime = ms / 1000;
+    playerRef.current?.seek(ms);
   };
 
   const togglePlay = () => {
-    const v = videoRef.current;
-    if (!v) return;
-    if (v.paused) {
-      v.play();
-      setPlaying(true);
+    const p = playerRef.current;
+    if (!p) return;
+    if (playing) {
+      p.pause();
     } else {
-      v.pause();
-      setPlaying(false);
+      p.play();
     }
   };
 
@@ -221,55 +211,48 @@ const ProjectEditorPage = () => {
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-[420px_1fr] gap-5">
-        {/* preview */}
+        {/* ── Live preview ── */}
         <motion.div
           layout
           className="rounded-xl border border-border bg-black overflow-hidden flex flex-col"
         >
-          <div className="aspect-[9/16] bg-black relative flex items-center justify-center">
-            {previewVideoUrl ? (
-              <video
-                ref={videoRef}
-                src={previewVideoUrl}
-                playsInline
-                className="size-full object-contain"
-                onPause={() => setPlaying(false)}
-                onPlay={() => setPlaying(true)}
-              />
-            ) : (
-              <div className="text-center text-muted-foreground p-6">
-                <Loader2 className="mx-auto size-5 animate-spin mb-2" />
-                <p className="text-xs">Waiting for first render…</p>
-              </div>
-            )}
+          <div className="aspect-[9/16] bg-black relative">
+            <EdlPlayer
+              ref={playerRef}
+              edl={edl}
+              className="size-full"
+              onTimeUpdate={(ms) => setPlayheadMs(ms)}
+              onPlayStateChange={(p) => setPlaying(p)}
+              masterVolume={masterVolume}
+            />
 
-            {previewVideoUrl && (
-              <button
-                onClick={togglePlay}
-                className="absolute inset-0 flex items-center justify-center group"
-              >
-                <AnimatePresence>
-                  {!playing && (
-                    <motion.div
-                      key="play"
-                      initial={{ opacity: 0, scale: 0.7 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      exit={{ opacity: 0, scale: 0.7 }}
-                      className="size-16 rounded-full gradient-bg flex items-center justify-center shadow-glow"
-                    >
-                      <Play className="size-7 text-white ml-0.5" />
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-              </button>
-            )}
+            {/* Big play button overlay */}
+            <button
+              onClick={togglePlay}
+              className="absolute inset-0 flex items-center justify-center group"
+            >
+              <AnimatePresence>
+                {!playing && (
+                  <motion.div
+                    key="play"
+                    initial={{ opacity: 0, scale: 0.7 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={{ opacity: 0, scale: 0.7 }}
+                    className="size-16 rounded-full gradient-bg flex items-center justify-center shadow-glow"
+                  >
+                    <Play className="size-7 text-white ml-0.5" />
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </button>
           </div>
+
+          {/* Transport bar */}
           <div className="px-3 py-2 border-t border-border flex items-center justify-between bg-card">
             <div className="flex items-center gap-2">
               <button
                 onClick={togglePlay}
-                disabled={!previewVideoUrl}
-                className="size-8 rounded-md bg-muted hover:bg-accent text-foreground disabled:opacity-50 flex items-center justify-center transition"
+                className="size-8 rounded-md bg-muted hover:bg-accent text-foreground flex items-center justify-center transition"
               >
                 {playing ? <Pause size={14} /> : <Play size={14} />}
               </button>
@@ -278,16 +261,45 @@ const ProjectEditorPage = () => {
                 {formatTime(edl.metadata?.total_duration_ms ?? 0)}
               </span>
             </div>
-            {previewVideoUrl && (
-              <a
-                href={previewVideoUrl}
-                download
-                className="text-xs text-muted-foreground hover:text-foreground inline-flex items-center gap-1.5 transition"
+
+            <div className="flex items-center gap-2">
+              {/* Master volume */}
+              <button
+                onClick={() => setMasterVolume((v) => (v > 0 ? 0 : 1))}
+                className="text-muted-foreground hover:text-foreground transition"
+                title={masterVolume === 0 ? "Unmute" : "Mute"}
               >
-                <Download size={12} /> mp4
-              </a>
-            )}
+                {masterVolume === 0 ? (
+                  <VolumeX size={14} />
+                ) : (
+                  <Volume2 size={14} />
+                )}
+              </button>
+              <input
+                type="range"
+                min={0}
+                max={1}
+                step={0.01}
+                value={masterVolume}
+                onChange={(e) => setMasterVolume(Number(e.target.value))}
+                className="w-20 h-1 accent-primary cursor-pointer"
+                title={`Volume: ${Math.round(masterVolume * 100)}%`}
+              />
+
+              {/* Download renders separately from the live preview */}
+              {downloadUrl && (
+                <a
+                  href={downloadUrl}
+                  download
+                  title="Download last render"
+                  className="text-xs text-muted-foreground hover:text-foreground inline-flex items-center gap-1.5 transition"
+                >
+                  <Download size={12} /> mp4
+                </a>
+              )}
+            </div>
           </div>
+
           {isRendering && (
             <div className="px-3 py-2 border-t border-border">
               <Progress
@@ -298,7 +310,7 @@ const ProjectEditorPage = () => {
           )}
         </motion.div>
 
-        {/* inspector */}
+        {/* Inspector + Timeline */}
         <div className="space-y-5">
           <Timeline
             edl={edl}
@@ -359,7 +371,10 @@ const ErrorState = ({
     </div>
     <h2 className="text-lg font-semibold mt-5">{title}</h2>
     <p className="text-sm text-muted-foreground mt-2">{description}</p>
-    <Button onClick={onBack} className="mt-6 gradient-bg text-white shadow-glow">
+    <Button
+      onClick={onBack}
+      className="mt-6 gradient-bg text-white shadow-glow"
+    >
       <ArrowLeft size={14} /> Back to library
     </Button>
   </div>
