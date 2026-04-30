@@ -57,6 +57,23 @@ export const assetFileUrl = (id: UUID): string => {
 };
 
 /**
+ * Backend endpoints (RenderJob.outputUrl, Generation.videoUrl, AssetDTO.url)
+ * return paths relative to the API host (e.g. "/api/assets/file/{uuid}").
+ * Embedding those directly in <video src> / <img src> / <a href> resolves
+ * against the *frontend* origin and 404s, since the dev server runs on a
+ * different port from the API. This helper prefixes axios.defaults.baseURL
+ * when the value isn't already absolute.
+ */
+export const absoluteUrl = (
+  path: string | null | undefined,
+): string | undefined => {
+  if (!path) return undefined;
+  if (/^(https?:|blob:|data:)/.test(path)) return path;
+  const base = axios.defaults.baseURL ?? "";
+  return `${base}${path.startsWith("/") ? path : `/${path}`}`;
+};
+
+/**
  * Asset detail isn't a separate endpoint on the backend — every user-scoped
  * asset is in the /api/assets list. Pull from the list and find by id.
  */

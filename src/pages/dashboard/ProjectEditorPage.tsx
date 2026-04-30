@@ -25,6 +25,7 @@ import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { useToast } from "@/components/ui/toast";
 import type { EdlDto } from "@/features/video/types";
+import { absoluteUrl } from "@/features/video/api";
 import { cn } from "@/lib/utils";
 import { formatTime } from "@/features/video/components/timeline/timelineUtils";
 
@@ -83,6 +84,16 @@ const ProjectEditorPage = () => {
     [edl, selectedId],
   );
 
+  /**
+   * RenderJob.outputUrl is a path relative to the API host
+   * ("/api/assets/file/{uuid}"). Browsers resolve <video src> against the
+   * frontend origin, so we need to prefix the API base URL ourselves.
+   */
+  const previewVideoUrl = useMemo(
+    () => absoluteUrl(render?.outputUrl),
+    [render?.outputUrl],
+  );
+
   /* playhead ↔ video sync */
   useEffect(() => {
     const v = videoRef.current;
@@ -90,7 +101,7 @@ const ProjectEditorPage = () => {
     const onTime = () => setPlayheadMs(Math.round(v.currentTime * 1000));
     v.addEventListener("timeupdate", onTime);
     return () => v.removeEventListener("timeupdate", onTime);
-  }, [render?.outputUrl]);
+  }, [previewVideoUrl]);
 
   const onScrub = (ms: number) => {
     setPlayheadMs(ms);
@@ -216,10 +227,10 @@ const ProjectEditorPage = () => {
           className="rounded-xl border border-border bg-black overflow-hidden flex flex-col"
         >
           <div className="aspect-[9/16] bg-black relative flex items-center justify-center">
-            {render?.outputUrl ? (
+            {previewVideoUrl ? (
               <video
                 ref={videoRef}
-                src={render.outputUrl}
+                src={previewVideoUrl}
                 playsInline
                 className="size-full object-contain"
                 onPause={() => setPlaying(false)}
@@ -232,7 +243,7 @@ const ProjectEditorPage = () => {
               </div>
             )}
 
-            {render?.outputUrl && (
+            {previewVideoUrl && (
               <button
                 onClick={togglePlay}
                 className="absolute inset-0 flex items-center justify-center group"
@@ -257,7 +268,7 @@ const ProjectEditorPage = () => {
             <div className="flex items-center gap-2">
               <button
                 onClick={togglePlay}
-                disabled={!render?.outputUrl}
+                disabled={!previewVideoUrl}
                 className="size-8 rounded-md bg-muted hover:bg-accent text-foreground disabled:opacity-50 flex items-center justify-center transition"
               >
                 {playing ? <Pause size={14} /> : <Play size={14} />}
@@ -267,9 +278,9 @@ const ProjectEditorPage = () => {
                 {formatTime(edl.metadata?.total_duration_ms ?? 0)}
               </span>
             </div>
-            {render?.outputUrl && (
+            {previewVideoUrl && (
               <a
-                href={render.outputUrl}
+                href={previewVideoUrl}
                 download
                 className="text-xs text-muted-foreground hover:text-foreground inline-flex items-center gap-1.5 transition"
               >
