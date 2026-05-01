@@ -96,8 +96,33 @@ public class AssetBridgeService {
             }
         }
 
-        // 4. Rejestruj voice
-        if (context.getVoiceLocalPath() != null) {
+        // 4. Rejestruj custom TTS clipy (oddzielne assety) — pozwala edytować voice per-clip na timeline
+        if (context.hasCustomTts()) {
+            for (int i = 0; i < context.getCustomTtsAssets().size(); i++) {
+                Asset ttsAsset = context.getCustomTtsAssets().get(i);
+                String filename = ttsAsset.getOriginalFilename() != null && !ttsAsset.getOriginalFilename().isBlank()
+                        ? ttsAsset.getOriginalFilename()
+                        : String.format("tts_clip_%02d.mp3", i);
+
+                ProjectAsset projectTtsAsset = projectAssetService.createAsset(
+                        projectId,
+                        AssetType.VOICE,
+                        AssetSource.USER_UPLOAD,
+                        filename,
+                        "audio/mpeg"
+                );
+
+                projectAssetService.markReady(
+                        projectTtsAsset.getId(),
+                        ttsAsset.getStorageKey(),
+                        ttsAsset.getSizeBytes(),
+                        ttsAsset.getDurationSeconds() != null ? ttsAsset.getDurationSeconds().doubleValue() : null,
+                        null,
+                        null
+                );
+            }
+        } else if (context.getVoiceLocalPath() != null) {
+            // Legacy single voice asset (AI TTS or user-recorded voice)
             ProjectAsset voiceAsset = projectAssetService.createAsset(
                     projectId,
                     AssetType.VOICE,
@@ -209,18 +234,38 @@ public class AssetBridgeService {
 
         // Audio tracks
         List<EdlAudioTrack> audioTracks = new ArrayList<>();
-        Optional<ProjectAsset> voice = projectAssets.stream()
+        List<ProjectAsset> voiceAssets = projectAssets.stream()
                 .filter(a -> a.getType() == AssetType.VOICE)
-                .findFirst();
-        voice.ifPresent(v -> audioTracks.add(EdlAudioTrack.builder()
-                .id(UUID.randomUUID().toString())
-                .assetId(v.getId().toString())
-                .assetUrl(v.getStorageUrl())
-                .type("voiceover")
-                .startMs(0)
-                .endMs(totalMs)
-                .volume(1.0)
-                .build()));
+                .toList();
+
+        if (!voiceAssets.isEmpty()) {
+            int voiceCursorMs = 0;
+            for (int i = 0; i < voiceAssets.size(); i++) {
+                ProjectAsset v = voiceAssets.get(i);
+                int clipDurationMs = v.getDurationSeconds() != null
+                        ? Math.max(1, (int) Math.round(v.getDurationSeconds() * 1000.0))
+                        : Math.max(1, totalMs - voiceCursorMs);
+
+                int clipEndMs = (i == voiceAssets.size() - 1)
+                        ? totalMs
+                        : Math.min(totalMs, voiceCursorMs + clipDurationMs);
+
+                audioTracks.add(EdlAudioTrack.builder()
+                        .id(UUID.randomUUID().toString())
+                        .assetId(v.getId().toString())
+                        .assetUrl(v.getStorageUrl())
+                        .type("voiceover")
+                        .startMs(Math.max(0, voiceCursorMs))
+                        .endMs(Math.max(voiceCursorMs + 1, clipEndMs))
+                        .volume(1.0)
+                        .build());
+
+                voiceCursorMs = clipEndMs;
+                if (voiceCursorMs >= totalMs) {
+                    break;
+                }
+            }
+        }
 
         Optional<ProjectAsset> music = projectAssets.stream()
                 .filter(a -> a.getType() == AssetType.MUSIC)
