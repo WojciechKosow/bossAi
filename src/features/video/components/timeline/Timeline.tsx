@@ -251,11 +251,25 @@ export const Timeline = ({
                 className="relative border-b border-border/60"
                 style={{ height: LAYER_HEIGHT }}
               >
-                <AudioBlock
-                  track={track}
-                  pps={pps}
-                  totalMs={totalMs}
-                />
+                {track.type === "voiceover" || track.type === "voice" ? (
+                  /* one block per video segment so voice mirrors scene structure */
+                  layers[0]?.segments.map((seg) => (
+                    <AudioBlock
+                      key={seg.id}
+                      track={track}
+                      pps={pps}
+                      totalMs={totalMs}
+                      overrideStart={seg.start_ms}
+                      overrideEnd={seg.end_ms}
+                    />
+                  ))
+                ) : (
+                  <AudioBlock
+                    track={track}
+                    pps={pps}
+                    totalMs={totalMs}
+                  />
+                )}
               </div>
             ))}
 
@@ -410,13 +424,17 @@ const AudioBlock = ({
   track,
   pps,
   totalMs,
+  overrideStart,
+  overrideEnd,
 }: {
   track: EdlAudioTrack;
   pps: number;
   totalMs: number;
+  overrideStart?: number;
+  overrideEnd?: number;
 }) => {
-  const start = track.start_ms ?? 0;
-  const end = track.end_ms ?? totalMs;
+  const start = overrideStart ?? track.start_ms ?? 0;
+  const end = overrideEnd ?? track.end_ms ?? totalMs;
   const left = msToPx(start, pps);
   const width = msToPx(Math.max(0, end - start), pps);
   return (
