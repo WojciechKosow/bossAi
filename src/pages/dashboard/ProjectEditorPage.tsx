@@ -17,7 +17,10 @@ import {
   useTimeline,
   useTriggerRender,
 } from "@/features/video/hooks";
-import { Timeline } from "@/features/video/components/timeline/Timeline";
+import {
+  Timeline,
+  type TimelineHandle,
+} from "@/features/video/components/timeline/Timeline";
 import {
   InspectorActions,
   InspectorPanel,
@@ -54,11 +57,19 @@ const ProjectEditorPage = () => {
   const originalRef = useRef<EdlDto | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [playing, setPlaying] = useState(false);
+
+  // playheadMs is used ONLY for the transport bar display and for syncing the
+  // Timeline on ruler-click scrubs. Playback updates bypass React state entirely
+  // via the imperative handle below, so this state is throttled.
   const [playheadMs, setPlayheadMs] = useState(0);
   const [masterVolume, setMasterVolume] = useState(1);
 
-  // Ref to the EDL player so we can call play/pause/seek imperatively
   const playerRef = useRef<EdlPlayerHandle>(null);
+  // Imperative handle: lets us move the timeline playhead without re-rendering
+  const timelineRef = useRef<TimelineHandle>(null);
+
+  // Tracks last time we updated the React display state (throttled to ~12 fps)
+  const lastDisplayUpdateRef = useRef(0);
 
   /* hydrate edl from API once */
   useEffect(() => {
@@ -89,15 +100,15 @@ const ProjectEditorPage = () => {
     [edl, selectedId],
   );
 
-  // Download URL still points to the last rendered MP4 (useful for export)
   const downloadUrl = useMemo(
     () => absoluteUrl(render?.outputUrl),
     [render?.outputUrl],
   );
 
-  /* scrub: user dragged the playhead on the timeline */
+  /* scrub: user clicked the ruler in Timeline */
   const onScrub = (ms: number) => {
     setPlayheadMs(ms);
+    lastDisplayUpdateRef.current = performance.now(); // reset throttle
     playerRef.current?.seek(ms);
   };
 
@@ -221,7 +232,19 @@ const ProjectEditorPage = () => {
               ref={playerRef}
               edl={edl}
               className="size-full"
-              onTimeUpdate={(ms) => setPlayheadMs(ms)}
+              onTimeUpdate={(ms) => {
+                // 1. Update timeline playhead imperatively — no React re-render,
+                //    runs at full RAF speed (60 fps).
+                timelineRef.current?.updatePlayhead(ms);
+
+                // 2. Update the transport bar display at ~12 fps to avoid
+                //    re-rendering the whole page on every animation frame.
+                const now = performance.now();
+                if (now - lastDisplayUpdateRef.current > 80) {
+                  lastDisplayUpdateRef.current = now;
+                  setPlayheadMs(ms);
+                }
+              }}
               onPlayStateChange={(p) => setPlaying(p)}
               masterVolume={masterVolume}
             />
@@ -263,7 +286,6 @@ const ProjectEditorPage = () => {
             </div>
 
             <div className="flex items-center gap-2">
-              {/* Master volume */}
               <button
                 onClick={() => setMasterVolume((v) => (v > 0 ? 0 : 1))}
                 className="text-muted-foreground hover:text-foreground transition"
@@ -286,7 +308,6 @@ const ProjectEditorPage = () => {
                 title={`Volume: ${Math.round(masterVolume * 100)}%`}
               />
 
-              {/* Download renders separately from the live preview */}
               {downloadUrl && (
                 <a
                   href={downloadUrl}
@@ -313,6 +334,7 @@ const ProjectEditorPage = () => {
         {/* Inspector + Timeline */}
         <div className="space-y-5">
           <Timeline
+            ref={timelineRef}
             edl={edl}
             selectedSegmentId={selectedId}
             onSelectSegment={setSelectedId}
