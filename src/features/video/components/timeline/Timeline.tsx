@@ -55,6 +55,13 @@ interface SegmentDragState {
   mode: DragMode;
 }
 
+interface AudioDragState {
+  trackId: string;
+  startX: number;
+  origStart: number;
+  origEnd: number;
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 /** Prevent all text / image selection on the page during drag operations. */
@@ -120,6 +127,7 @@ export const Timeline = forwardRef<TimelineHandle, Props>(
 
     const dragEdlRef = useRef<EdlDto | null>(null);
     const segDragRef = useRef<SegmentDragState | null>(null);
+    const audioDragRef = useRef<AudioDragState | null>(null);
     const edlRef = useRef(edl);
     edlRef.current = edl;
 
@@ -247,6 +255,62 @@ export const Timeline = forwardRef<TimelineHandle, Props>(
         window.addEventListener("mouseup", handleUp);
       },
       [onScrub],
+    );
+
+    const onAudioMouseDown = useCallback(
+      (e: React.MouseEvent, track: EdlAudioTrack) => {
+        e.stopPropagation();
+        e.preventDefault();
+        lockSelection();
+
+        const originalEnd =
+          track.end_ms == null ? track.start_ms + 1000 : track.end_ms;
+
+        audioDragRef.current = {
+          trackId: track.id,
+          startX: e.clientX,
+          origStart: track.start_ms ?? 0,
+          origEnd: originalEnd,
+        };
+        dragEdlRef.current = null;
+        setIsDragging(true);
+
+        function handleMove(ev: MouseEvent) {
+          const d = audioDragRef.current;
+          if (!d) return;
+
+          const deltaMs = pxToMs(ev.clientX - d.startX, ppsRef.current);
+          const len = Math.max(100, d.origEnd - d.origStart);
+          const nextStart = Math.max(0, d.origStart + deltaMs);
+          const nextEnd = nextStart + len;
+
+          const base = edlRef.current;
+          const newEdl: EdlDto = {
+            ...base,
+            audio_tracks: (base.audio_tracks ?? []).map((t) =>
+              t.id === d.trackId ? { ...t, start_ms: nextStart, end_ms: nextEnd } : t,
+            ),
+          };
+          dragEdlRef.current = newEdl;
+          setDragEdl(newEdl);
+        }
+
+        function handleUp() {
+          const committed = dragEdlRef.current;
+          if (committed) onChange(committed);
+          dragEdlRef.current = null;
+          audioDragRef.current = null;
+          setDragEdl(null);
+          setIsDragging(false);
+          unlockSelection();
+          window.removeEventListener("mousemove", handleMove);
+          window.removeEventListener("mouseup", handleUp);
+        }
+
+        window.addEventListener("mousemove", handleMove);
+        window.addEventListener("mouseup", handleUp);
+      },
+      [onChange],
     );
 
     // ── Toolbar ───────────────────────────────────────────────────────────────
@@ -409,10 +473,16 @@ export const Timeline = forwardRef<TimelineHandle, Props>(
                         totalMs={totalMs}
                         overrideStart={seg.start_ms}
                         overrideEnd={seg.end_ms}
+                        draggable={false}
                       />
                     ))
                   ) : (
-                    <AudioBlock track={track} pps={pps} totalMs={totalMs} />
+                    <AudioBlock
+                      track={track}
+                      pps={pps}
+                      totalMs={totalMs}
+                      onMouseDown={onAudioMouseDown}
+                    />
                   )}
                 </div>
               ))}
@@ -583,12 +653,16 @@ const AudioBlock = memo(
     totalMs,
     overrideStart,
     overrideEnd,
+    onMouseDown,
+    draggable = true,
   }: {
     track: EdlAudioTrack;
     pps: number;
     totalMs: number;
     overrideStart?: number;
     overrideEnd?: number;
+    onMouseDown?: (e: React.MouseEvent, track: EdlAudioTrack) => void;
+    draggable?: boolean;
   }) => {
     const start = overrideStart ?? track.start_ms ?? 0;
     const end = overrideEnd ?? track.end_ms ?? totalMs;
@@ -597,8 +671,12 @@ const AudioBlock = memo(
 
     return (
       <div
+        onMouseDown={
+          draggable && onMouseDown ? (e) => onMouseDown(e, track) : undefined
+        }
         className={cn(
           "absolute top-2 bottom-2 rounded-md overflow-hidden border border-transparent",
+          draggable && onMouseDown && "cursor-grab active:cursor-grabbing",
           track.type === "music"
             ? "bg-gradient-to-r from-emerald-600/30 via-emerald-500/20 to-emerald-400/20"
             : "bg-gradient-to-r from-amber-600/30 via-amber-500/20 to-amber-400/20",
