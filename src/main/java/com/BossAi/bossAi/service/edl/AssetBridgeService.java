@@ -238,7 +238,37 @@ public class AssetBridgeService {
                 .filter(a -> a.getType() == AssetType.VOICE)
                 .toList();
 
-        if (!voiceAssets.isEmpty()) {
+        if (voiceAssets.size() == 1 && sceneCount > 1) {
+            // One MP3 covering the whole narration but several scenes — split
+            // it into per-scene EdlAudioTrack entries that all reference the
+            // same asset, with start_ms/end_ms for the timeline slot and
+            // trim_in_ms/trim_out_ms for the slice of the source file. This
+            // gives the editor independently movable voice blocks (mirroring
+            // how custom-TTS already works), while the renderer keeps reading
+            // from the single underlying MP3.
+            ProjectAsset voice = voiceAssets.get(0);
+            int voiceCursorMs = 0;
+            for (int i = 0; i < sceneCount; i++) {
+                SceneAsset scene = context.getScenes().get(i);
+                int duration = Math.max(500, scene.getDurationMs());
+                int sliceEnd = voiceCursorMs + duration;
+                audioTracks.add(EdlAudioTrack.builder()
+                        .id(UUID.randomUUID().toString())
+                        .assetId(voice.getId().toString())
+                        .assetUrl(voice.getStorageUrl())
+                        .type("voiceover")
+                        .startMs(voiceCursorMs)
+                        .endMs(sliceEnd)
+                        .trimInMs(voiceCursorMs)
+                        .trimOutMs(sliceEnd)
+                        .volume(1.0)
+                        .build());
+                voiceCursorMs = sliceEnd;
+            }
+        } else if (!voiceAssets.isEmpty()) {
+            // Multiple voice clips (custom TTS) — emit one track per clip,
+            // each pointing at its own asset. Single-voice + single-scene
+            // also lands here and produces a single track 0..totalMs.
             int voiceCursorMs = 0;
             for (int i = 0; i < voiceAssets.size(); i++) {
                 ProjectAsset v = voiceAssets.get(i);
