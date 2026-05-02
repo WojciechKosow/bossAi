@@ -47,6 +47,7 @@ const ProjectEditorPage = () => {
   const [edl, setEdl] = useState<EdlDto | null>(null);
   const originalRef = useRef<EdlDto | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedAudioId, setSelectedAudioId] = useState<string | null>(null);
   const [playing, setPlaying] = useState(false);
   const [playheadMs, setPlayheadMs] = useState(0);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -82,6 +83,12 @@ const ProjectEditorPage = () => {
   const selectedSegment = useMemo(
     () => edl?.segments.find((s) => s.id === selectedId) ?? null,
     [edl, selectedId],
+  );
+
+  const selectedAudioTrack = useMemo(
+    () =>
+      edl?.audio_tracks?.find((t) => t.id === selectedAudioId) ?? null,
+    [edl, selectedAudioId],
   );
 
   /**
@@ -304,6 +311,8 @@ const ProjectEditorPage = () => {
             edl={edl}
             selectedSegmentId={selectedId}
             onSelectSegment={setSelectedId}
+            selectedAudioId={selectedAudioId}
+            onSelectAudio={setSelectedAudioId}
             onChange={setEdl}
             playheadMs={playheadMs}
             onScrub={onScrub}
@@ -311,6 +320,7 @@ const ProjectEditorPage = () => {
           <InspectorPanel
             edl={edl}
             segment={selectedSegment}
+            audioTrack={selectedAudioTrack}
             onChange={setEdl}
           />
         </div>
