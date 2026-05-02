@@ -288,7 +288,9 @@ export const Timeline = forwardRef<TimelineHandle, Props>(
           const newEdl: EdlDto = {
             ...base,
             audio_tracks: (base.audio_tracks ?? []).map((t) =>
-              t.id === d.trackId ? { ...t, start_ms: nextStart, end_ms: nextEnd } : t,
+              t.id === d.trackId
+                ? { ...t, start_ms: nextStart, end_ms: nextEnd }
+                : t,
             ),
           };
           dragEdlRef.current = newEdl;
