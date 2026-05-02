@@ -39,6 +39,26 @@ const MAX_PPS = 220;
 
 type DragMode = "move" | "trim-left" | "trim-right";
 
+type DragState =
+  | {
+      kind: "segment";
+      id: string;
+      mode: DragMode;
+      startX: number;
+      origStart: number;
+      origEnd: number;
+    }
+  | {
+      kind: "audio";
+      id: string;
+      mode: DragMode;
+      startX: number;
+      origStart: number;
+      origEnd: number;
+      origTrimIn: number;
+      origTrimOut: number;
+    };
+
 export const Timeline = ({
   edl,
   selectedSegmentId,
@@ -58,7 +78,7 @@ export const Timeline = ({
   );
   const audioTracks = edl.audio_tracks ?? [];
 
-  /* group audio by row (one row per type, all clips of that type in it) */
+  /* group audio by row (one row per type, all clips of that type live in it) */
   const audioRows = useMemo(() => {
     const map = new Map<string, EdlAudioTrack[]>();
     for (const t of audioTracks) {
@@ -66,7 +86,6 @@ export const Timeline = ({
       if (!map.has(key)) map.set(key, []);
       map.get(key)!.push(t);
     }
-    // voiceover above music for consistency with traditional NLE layout
     const order = ["voiceover", "music"];
     return Array.from(map.entries())
       .sort(([a], [b]) => {
@@ -82,106 +101,61 @@ export const Timeline = ({
   const totalSeconds = Math.ceil(totalMs / 1000) + 2;
   const widthPx = msToPx(totalSeconds * 1000, pps);
 
-  /* drag state — segments and audio share the same listeners but use
-     different refs so we don't mix the two */
-  const segDragRef = useRef<{
-    segId: string;
-    startX: number;
-    origStart: number;
-    origEnd: number;
-    mode: DragMode;
-  } | null>(null);
+  /* ── drag wiring ────────────────────────────────────────────────────────
+     window listeners are registered ONCE on mount so we don't churn through
+     stale closures every re-render. The handlers read everything fresh via
+     refs, so each mousemove sees the latest edl/pps/onChange. */
+  const dragRef = useRef<DragState | null>(null);
+  const edlRef = useRef(edl);
+  const ppsRef = useRef(pps);
+  const onChangeRef = useRef(onChange);
+  edlRef.current = edl;
+  ppsRef.current = pps;
+  onChangeRef.current = onChange;
 
-  const audioDragRef = useRef<{
-    trackId: string;
-    startX: number;
-    origStart: number;
-    origEnd: number;
-    origTrimIn: number;
-    origTrimOut: number;
-    mode: DragMode;
-  } | null>(null);
+  useEffect(() => {
+    let raf = 0;
+    let lastEvent: MouseEvent | null = null;
 
-  const onSegmentMouseDown = (
-    e: React.MouseEvent,
-    seg: EdlSegment,
-    mode: DragMode,
-  ) => {
-    e.stopPropagation();
-    onSelectSegment(seg.id);
-    onSelectAudio(null);
-    segDragRef.current = {
-      segId: seg.id,
-      startX: e.clientX,
-      origStart: seg.start_ms,
-      origEnd: seg.end_ms,
-      mode,
-    };
-    window.addEventListener("mousemove", onMouseMove);
-    window.addEventListener("mouseup", onMouseUp);
-  };
+    const apply = () => {
+      raf = 0;
+      const e = lastEvent;
+      const d = dragRef.current;
+      if (!e || !d) return;
 
-  const onAudioMouseDown = (
-    e: React.MouseEvent,
-    track: EdlAudioTrack,
-    mode: DragMode,
-  ) => {
-    e.stopPropagation();
-    onSelectAudio(track.id);
-    onSelectSegment(null);
-    const start = track.start_ms ?? 0;
-    const end = track.end_ms ?? totalMs;
-    audioDragRef.current = {
-      trackId: track.id,
-      startX: e.clientX,
-      origStart: start,
-      origEnd: end,
-      origTrimIn: track.trim_in_ms ?? 0,
-      origTrimOut: track.trim_out_ms ?? end,
-      mode,
-    };
-    window.addEventListener("mousemove", onMouseMove);
-    window.addEventListener("mouseup", onMouseUp);
-  };
+      const deltaMs = pxToMs(e.clientX - d.startX, ppsRef.current);
+      const cur = edlRef.current;
 
-  const onMouseMove = (e: MouseEvent) => {
-    if (segDragRef.current) {
-      const d = segDragRef.current;
-      const deltaMs = pxToMs(e.clientX - d.startX, pps);
-      const seg = edl.segments.find((s) => s.id === d.segId);
-      if (!seg) return;
+      if (d.kind === "segment") {
+        const seg = cur.segments.find((s) => s.id === d.id);
+        if (!seg) return;
 
-      let nextStart = seg.start_ms;
-      let nextEnd = seg.end_ms;
+        let nextStart = seg.start_ms;
+        let nextEnd = seg.end_ms;
 
-      if (d.mode === "move") {
-        const len = d.origEnd - d.origStart;
-        nextStart = Math.max(0, d.origStart + deltaMs);
-        nextEnd = nextStart + len;
-      } else if (d.mode === "trim-left") {
-        nextStart = Math.max(
-          0,
-          Math.min(d.origEnd - 100, d.origStart + deltaMs),
-        );
-      } else if (d.mode === "trim-right") {
-        nextEnd = Math.max(d.origStart + 100, d.origEnd + deltaMs);
+        if (d.mode === "move") {
+          const len = d.origEnd - d.origStart;
+          nextStart = Math.max(0, d.origStart + deltaMs);
+          nextEnd = nextStart + len;
+        } else if (d.mode === "trim-left") {
+          nextStart = Math.max(
+            0,
+            Math.min(d.origEnd - 100, d.origStart + deltaMs),
+          );
+        } else if (d.mode === "trim-right") {
+          nextEnd = Math.max(d.origStart + 100, d.origEnd + deltaMs);
+        }
+
+        onChangeRef.current({
+          ...cur,
+          segments: cur.segments.map((s) =>
+            s.id === d.id ? { ...s, start_ms: nextStart, end_ms: nextEnd } : s,
+          ),
+        });
+        return;
       }
 
-      onChange({
-        ...edl,
-        segments: edl.segments.map((s) =>
-          s.id === d.segId
-            ? { ...s, start_ms: nextStart, end_ms: nextEnd }
-            : s,
-        ),
-      });
-      return;
-    }
-
-    if (audioDragRef.current) {
-      const d = audioDragRef.current;
-      const deltaMs = pxToMs(e.clientX - d.startX, pps);
-
+      // audio
       let nextStart = d.origStart;
       let nextEnd = d.origEnd;
       let nextTrimIn = d.origTrimIn;
@@ -194,25 +168,25 @@ export const Timeline = ({
         nextStart = Math.max(0, d.origStart + deltaMs);
         nextEnd = nextStart + len;
       } else if (d.mode === "trim-left") {
-        // start_ms and trim_in_ms move together. Clamp so trim_in stays >=0,
+        // start_ms and trim_in_ms shift together. Clamp so trim_in stays >=0,
         // start stays >=0, and the block stays at least 100ms wide.
-        const maxLeft = Math.min(d.origStart, d.origTrimIn); // how far left we can shift
-        const maxRight = d.origEnd - 100 - d.origStart; // how far right (before collapsing)
+        const maxLeft = Math.min(d.origStart, d.origTrimIn);
+        const maxRight = d.origEnd - 100 - d.origStart;
         const clamped = Math.max(-maxLeft, Math.min(maxRight, deltaMs));
         nextStart = d.origStart + clamped;
         nextTrimIn = d.origTrimIn + clamped;
       } else if (d.mode === "trim-right") {
-        // end_ms and trim_out_ms move together. Lower bound keeps block >=100ms.
+        // end_ms and trim_out_ms shift together.
         const minLeft = -(d.origEnd - 100 - d.origStart);
         const clamped = Math.max(minLeft, deltaMs);
         nextEnd = d.origEnd + clamped;
         nextTrimOut = d.origTrimOut + clamped;
       }
 
-      onChange({
-        ...edl,
-        audio_tracks: (edl.audio_tracks ?? []).map((t) =>
-          t.id === d.trackId
+      onChangeRef.current({
+        ...cur,
+        audio_tracks: (cur.audio_tracks ?? []).map((t) =>
+          t.id === d.id
             ? {
                 ...t,
                 start_ms: nextStart,
@@ -223,17 +197,74 @@ export const Timeline = ({
             : t,
         ),
       });
-    }
+    };
+
+    const onMove = (e: MouseEvent) => {
+      if (!dragRef.current) return;
+      e.preventDefault(); // suppress text/image selection while dragging
+      lastEvent = e;
+      if (!raf) raf = requestAnimationFrame(apply);
+    };
+
+    const onUp = () => {
+      dragRef.current = null;
+      lastEvent = null;
+      if (raf) {
+        cancelAnimationFrame(raf);
+        raf = 0;
+      }
+    };
+
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      if (raf) cancelAnimationFrame(raf);
+    };
+  }, []);
+
+  const onSegmentMouseDown = (
+    e: React.MouseEvent,
+    seg: EdlSegment,
+    mode: DragMode,
+  ) => {
+    e.stopPropagation();
+    e.preventDefault();
+    onSelectSegment(seg.id);
+    onSelectAudio(null);
+    dragRef.current = {
+      kind: "segment",
+      id: seg.id,
+      mode,
+      startX: e.clientX,
+      origStart: seg.start_ms,
+      origEnd: seg.end_ms,
+    };
   };
 
-  const onMouseUp = () => {
-    segDragRef.current = null;
-    audioDragRef.current = null;
-    window.removeEventListener("mousemove", onMouseMove);
-    window.removeEventListener("mouseup", onMouseUp);
+  const onAudioMouseDown = (
+    e: React.MouseEvent,
+    track: EdlAudioTrack,
+    mode: DragMode,
+  ) => {
+    e.stopPropagation();
+    e.preventDefault();
+    onSelectAudio(track.id);
+    onSelectSegment(null);
+    const start = track.start_ms ?? 0;
+    const end = track.end_ms ?? totalMs;
+    dragRef.current = {
+      kind: "audio",
+      id: track.id,
+      mode,
+      startX: e.clientX,
+      origStart: start,
+      origEnd: end,
+      origTrimIn: track.trim_in_ms ?? 0,
+      origTrimOut: track.trim_out_ms ?? end,
+    };
   };
-
-  useEffect(() => () => onMouseUp(), []);
 
   const onRulerClick = (e: React.MouseEvent) => {
     if (!trackRef.current) return;
@@ -344,7 +375,10 @@ export const Timeline = ({
         </div>
 
         {/* tracks scroll */}
-        <div ref={trackRef} className="flex-1 overflow-x-auto overflow-y-auto scrollbar-thin">
+        <div
+          ref={trackRef}
+          className="flex-1 overflow-x-auto overflow-y-auto scrollbar-thin"
+        >
           <div style={{ width: widthPx }} className="relative">
             <Ruler
               pps={pps}
@@ -500,7 +534,6 @@ const SegmentBlock = ({
       )}
       style={{ left, width }}
     >
-      {/* gradient body */}
       <div
         className={cn(
           "absolute inset-0",
@@ -518,11 +551,11 @@ const SegmentBlock = ({
       )}
       <div className="absolute inset-0 flex items-center px-2 text-[10px] font-medium text-white drop-shadow tracking-wide">
         <span className="truncate flex-1">
-          {seg.asset_type} · {Math.round((seg.end_ms - seg.start_ms) / 100) / 10}s
+          {seg.asset_type} ·{" "}
+          {Math.round((seg.end_ms - seg.start_ms) / 100) / 10}s
         </span>
         {hasEffects && <Sparkles size={10} className="ml-1 shrink-0" />}
       </div>
-      {/* trim handles */}
       <div
         onMouseDown={(e) => onMouseDown(e, seg, "trim-left")}
         className="absolute left-0 top-0 bottom-0 w-1.5 cursor-w-resize hover:bg-white/40"
@@ -584,7 +617,6 @@ const AudioBlock = ({
           {Math.round((end - start) / 100) / 10}s
         </span>
       </div>
-      {/* trim handles */}
       <div
         onMouseDown={(e) => onMouseDown(e, track, "trim-left")}
         className="absolute left-0 top-0 bottom-0 w-1.5 cursor-w-resize hover:bg-white/40"
