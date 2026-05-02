@@ -56,6 +56,7 @@ const ProjectEditorPage = () => {
   const [edl, setEdl] = useState<EdlDto | null>(null);
   const originalRef = useRef<EdlDto | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedAudioId, setSelectedAudioId] = useState<string | null>(null);
   const [playing, setPlaying] = useState(false);
 
   // playheadMs is used ONLY for the transport bar display and for syncing the
@@ -100,7 +101,18 @@ const ProjectEditorPage = () => {
     [edl, selectedId],
   );
 
-  const downloadUrl = useMemo(
+  const selectedAudioTrack = useMemo(
+    () =>
+      edl?.audio_tracks?.find((t) => t.id === selectedAudioId) ?? null,
+    [edl, selectedAudioId],
+  );
+
+  /**
+   * RenderJob.outputUrl is a path relative to the API host
+   * ("/api/assets/file/{uuid}"). Browsers resolve <video src> against the
+   * frontend origin, so we need to prefix the API base URL ourselves.
+   */
+  const previewVideoUrl = useMemo(
     () => absoluteUrl(render?.outputUrl),
     [render?.outputUrl],
   );
@@ -338,6 +350,8 @@ const ProjectEditorPage = () => {
             edl={edl}
             selectedSegmentId={selectedId}
             onSelectSegment={setSelectedId}
+            selectedAudioId={selectedAudioId}
+            onSelectAudio={setSelectedAudioId}
             onChange={setEdl}
             playheadMs={playheadMs}
             onScrub={onScrub}
@@ -345,6 +359,7 @@ const ProjectEditorPage = () => {
           <InspectorPanel
             edl={edl}
             segment={selectedSegment}
+            audioTrack={selectedAudioTrack}
             onChange={setEdl}
           />
         </div>
