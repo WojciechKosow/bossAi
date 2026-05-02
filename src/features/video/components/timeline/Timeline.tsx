@@ -141,7 +141,8 @@ export const Timeline = forwardRef<TimelineHandle, Props>(function Timeline(
     () => ({
       updatePlayhead: (ms: number) => {
         const el = playheadRef.current;
-        if (el) el.style.transform = `translateX(${msToPx(ms, ppsRef.current)}px)`;
+        if (el)
+          el.style.transform = `translateX(${msToPx(ms, ppsRef.current)}px)`;
       },
     }),
     [],
@@ -655,8 +656,8 @@ const AudioBlock = ({
       <div className="absolute inset-0 flex items-center gap-1 px-2 text-[10px] font-medium text-foreground/80 pointer-events-none">
         {isMusic ? <Music size={10} /> : <Mic size={10} />}
         <span className="truncate">
-          {isMusic ? "music" : "voice"} ·{" "}
-          {Math.round((end - start) / 100) / 10}s
+          {isMusic ? "music" : "voice"} · {Math.round((end - start) / 100) / 10}
+          s
         </span>
       </div>
       <div

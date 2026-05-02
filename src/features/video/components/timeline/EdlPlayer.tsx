@@ -256,10 +256,6 @@ export const EdlPlayer = forwardRef<EdlPlayerHandle, Props>(
       [edl.audio_tracks],
     );
 
-    // console.log(edl);
-    // console.log(edl.whisper_words[0], edl.whisper_words[117]);
-    console.log(JSON.stringify(edl.audio_tracks[0], null, 2));
-
     const totalMs = useMemo(() => totalDurationFromSegments(edl), [edl]);
 
     const sortedSegments = useMemo(
