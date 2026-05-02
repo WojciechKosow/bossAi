@@ -136,6 +136,7 @@ export interface TikTokAdRequest {
   customTtsAssetIds?: UUID[];
   useGptOrdering?: boolean;
   reuseAssets?: boolean;
+  forceReuseForTesting?: boolean;
   sceneAssignments?: SceneAssignment[];
 }
 

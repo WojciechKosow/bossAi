@@ -320,9 +320,9 @@ const ProjectEditorPage = () => {
                 title={`Volume: ${Math.round(masterVolume * 100)}%`}
               />
 
-              {downloadUrl && (
+              {previewVideoUrl && (
                 <a
-                  href={downloadUrl}
+                  href={previewVideoUrl}
                   download
                   title="Download last render"
                   className="text-xs text-muted-foreground hover:text-foreground inline-flex items-center gap-1.5 transition"
