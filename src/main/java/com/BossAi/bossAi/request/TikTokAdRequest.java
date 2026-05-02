@@ -45,7 +45,7 @@ public class TikTokAdRequest {
      * No fal.ai API calls are made — saves money during testing.
      * DO NOT use in production.
      */
-    private boolean forceReuseForTesting = false;
+    private boolean forceReuseForTesting = true;
 
     /**
      * Custom visual assets (images + videos) uploaded by user, ordered by user.

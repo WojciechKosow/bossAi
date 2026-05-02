@@ -51,38 +51,6 @@ public class AssetController {
         return ResponseEntity.ok("Successfully deleted an asset.");
     }
 
-    /**
-     * 🔥 KLUCZOWY ENDPOINT POD REMOTION
-     * Zamiast path → używamy assetId
-     */
-//    @GetMapping("/file/{assetId}")
-//    public ResponseEntity<Resource> getFile(@PathVariable UUID assetId) throws Exception {
-//
-//        // 🔹 1. Pobierz asset (musisz mieć taką metodę w serwisie)
-//        var asset = assetRepository.findById(assetId);
-//
-//        // 🔹 2. Ścieżka do pliku
-//        Path filePath = Paths.get(asset.get().getStorageKey());
-//
-//        if (!Files.exists(filePath)) {
-//            return ResponseEntity.notFound().build();
-//        }
-//
-//        // 🔹 3. Resource (POPRAWNY import ze Springa)
-//        Resource resource = new UrlResource(filePath.toUri());
-//
-//        // 🔹 4. Content-Type (KLUCZOWE dla video)
-//        String contentType = Files.probeContentType(filePath);
-//        if (contentType == null) {
-//            contentType = "application/octet-stream";
-//        }
-//
-//        // 🔹 5. Response gotowy pod streaming
-//        return ResponseEntity.ok()
-//                .header("Accept-Ranges", "bytes") // ważne dla video
-//                .contentType(MediaType.parseMediaType(contentType))
-//                .body(resource);
-//    }
 
     @GetMapping("/file/{id}")
     public ResponseEntity<Resource> getFile(@PathVariable UUID id) throws Exception {
@@ -106,7 +74,6 @@ public class AssetController {
 
         String contentType = Files.probeContentType(path);
 
-        // 🔥 fallback dla Windows (często null)
         if (contentType == null) {
             String filename = path.getFileName().toString().toLowerCase();
 

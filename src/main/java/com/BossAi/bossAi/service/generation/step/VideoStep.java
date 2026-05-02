@@ -275,6 +275,14 @@ public class VideoStep implements GenerationStep {
                     }
                 }
 
+                if (context.isReuseAssets()) {
+                    throw new IllegalStateException(
+                            "[VideoStep] Brak reusable assetu VIDEO dla sceny "
+                                    + scene.getIndex()
+                                    + " (tryb reuse-only włączony)"
+                    );
+                }
+
                 processVideoScene(scene, modelId, workDir, context);
                 videoCount++;
             } else {

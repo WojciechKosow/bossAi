@@ -20,6 +20,7 @@ public interface AssetRepository extends JpaRepository<Asset, UUID> {
     Optional<Asset> findByGenerationId(UUID generationId);
 
     List<Asset> findByUserAndReusableTrueAndTypeAndPromptIsNotNull(User user, AssetType type);
+    List<Asset> findByUserAndReusableTrueAndType(User user, AssetType type);
 
     List<Asset> findByUserAndReusableTrueAndTypeInAndPromptIsNotNull(User user, List<AssetType> types);
 

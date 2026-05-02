@@ -238,14 +238,46 @@ public class AssetBridgeService {
                 .filter(a -> a.getType() == AssetType.VOICE)
                 .toList();
 
-        if (voiceAssets.size() == 1 && sceneCount > 1) {
-            // One MP3 covering the whole narration but several scenes — split
-            // it into per-scene EdlAudioTrack entries that all reference the
-            // same asset, with start_ms/end_ms for the timeline slot and
-            // trim_in_ms/trim_out_ms for the slice of the source file. This
-            // gives the editor independently movable voice blocks (mirroring
-            // how custom-TTS already works), while the renderer keeps reading
-            // from the single underlying MP3.
+        if (context.hasCustomTts() && voiceAssets.size() > 1) {
+            log.info("[AssetBridge] Custom TTS path: {} voice assets", voiceAssets.size());
+        } else {
+            log.info("[AssetBridge] Fallback path: hasCustomTts={}, voiceAssets={}",
+                    context.hasCustomTts(), voiceAssets.size());
+        }
+
+        if (context.hasCustomTts() && voiceAssets.size() > 1) {
+            // Multiple voice ProjectAssets = one per custom TTS clip.
+            // Each has its own durationSeconds — emit one track per clip,
+            // placed sequentially so the editor can move them independently.
+            int voiceCursorMs = 0;
+            for (int i = 0; i < voiceAssets.size(); i++) {
+                ProjectAsset v = voiceAssets.get(i);
+                int clipDurationMs = v.getDurationSeconds() != null
+                        ? Math.max(1, (int) Math.round(v.getDurationSeconds() * 1000.0))
+                        : (i < context.getCustomTtsAssets().size()
+                        ? estimateTtsDuration(context.getCustomTtsAssets().get(i))
+                        : Math.max(1, totalMs / voiceAssets.size()));
+
+                int clipEndMs = Math.min(totalMs, voiceCursorMs + clipDurationMs);
+
+                audioTracks.add(EdlAudioTrack.builder()
+                        .id(UUID.randomUUID().toString())
+                        .assetId(v.getId().toString())
+                        .assetUrl(v.getStorageUrl())
+                        .type("voiceover")
+                        .startMs(voiceCursorMs)
+                        .endMs(clipEndMs)
+                        .trimInMs(0)
+                        .trimOutMs(clipDurationMs)
+                        .volume(1.0)
+                        .build());
+
+                voiceCursorMs = clipEndMs;
+                if (voiceCursorMs >= totalMs) break;
+            }
+        } else if (voiceAssets.size() == 1 && sceneCount > 1) {
+            // Single MP3 covering whole narration — split into per-scene slots
+            // so editor gets independently movable blocks (all point to same asset).
             ProjectAsset voice = voiceAssets.get(0);
             int voiceCursorMs = 0;
             for (int i = 0; i < sceneCount; i++) {
@@ -266,9 +298,6 @@ public class AssetBridgeService {
                 voiceCursorMs = sliceEnd;
             }
         } else if (!voiceAssets.isEmpty()) {
-            // Multiple voice clips (custom TTS) — emit one track per clip,
-            // each pointing at its own asset. Single-voice + single-scene
-            // also lands here and produces a single track 0..totalMs.
             int voiceCursorMs = 0;
             for (int i = 0; i < voiceAssets.size(); i++) {
                 ProjectAsset v = voiceAssets.get(i);
@@ -291,9 +320,7 @@ public class AssetBridgeService {
                         .build());
 
                 voiceCursorMs = clipEndMs;
-                if (voiceCursorMs >= totalMs) {
-                    break;
-                }
+                if (voiceCursorMs >= totalMs) break;
             }
         }
 
@@ -360,5 +387,13 @@ public class AssetBridgeService {
             return AssetType.VIDEO;
         }
         return AssetType.VIDEO;
+    }
+
+    /** Estimates TTS clip duration from file size (roughly 128kbps MP3 = 16 bytes/ms). */
+    private int estimateTtsDuration(Asset asset) {
+        if (asset.getSizeBytes() != 0 && asset.getSizeBytes() > 0) {
+            return (int) Math.max(500, asset.getSizeBytes() / 16);
+        }
+        return 3000; // 3s default fallback
     }
 }

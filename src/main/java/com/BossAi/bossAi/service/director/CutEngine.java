@@ -1171,7 +1171,11 @@ public class CutEngine {
 
             CutCandidate source = candidateMap.get(startMs);
 
-            JustifiedCut.Builder builder = JustifiedCut.builder()
+//            JustifiedCut.JustifiedCutBuilder builder = JustifiedCut.builder()
+//                    .startMs(startMs)
+//                    .endMs(endMs);
+
+            var builder = JustifiedCut.builder()
                     .startMs(startMs)
                     .endMs(endMs);
 
