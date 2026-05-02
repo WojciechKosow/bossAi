@@ -1,4 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  forwardRef,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { motion } from "framer-motion";
 import {
   Maximize,
@@ -20,6 +27,15 @@ import {
   totalDurationFromSegments,
 } from "./timelineUtils";
 
+/**
+ * Imperative handle exposed to the parent so the EdlPlayer's RAF tick can
+ * push the playhead position straight into the DOM (translateX) without
+ * triggering a React re-render of the timeline on every frame.
+ */
+export interface TimelineHandle {
+  updatePlayhead: (ms: number) => void;
+}
+
 interface Props {
   edl: EdlDto;
   selectedSegmentId: string | null;
@@ -27,6 +43,8 @@ interface Props {
   selectedAudioId: string | null;
   onSelectAudio: (id: string | null) => void;
   onChange: (next: EdlDto) => void;
+  /** Initial / scrub-driven playhead position. Live playback updates bypass
+   *  this and go straight to the imperative handle. */
   playheadMs: number;
   onScrub: (ms: number) => void;
 }
@@ -59,18 +77,22 @@ type DragState =
       origTrimOut: number;
     };
 
-export const Timeline = ({
-  edl,
-  selectedSegmentId,
-  onSelectSegment,
-  selectedAudioId,
-  onSelectAudio,
-  onChange,
-  playheadMs,
-  onScrub,
-}: Props) => {
+export const Timeline = forwardRef<TimelineHandle, Props>(function Timeline(
+  {
+    edl,
+    selectedSegmentId,
+    onSelectSegment,
+    selectedAudioId,
+    onSelectAudio,
+    onChange,
+    playheadMs,
+    onScrub,
+  },
+  ref,
+) {
   const [pps, setPps] = useState(90);
   const trackRef = useRef<HTMLDivElement>(null);
+  const playheadRef = useRef<HTMLDivElement>(null);
 
   const layers = useMemo(
     () => groupByLayer(edl.segments ?? []),
@@ -112,6 +134,18 @@ export const Timeline = ({
   edlRef.current = edl;
   ppsRef.current = pps;
   onChangeRef.current = onChange;
+
+  // Imperative playhead update — bypass React, write directly into DOM.
+  useImperativeHandle(
+    ref,
+    () => ({
+      updatePlayhead: (ms: number) => {
+        const el = playheadRef.current;
+        if (el) el.style.transform = `translateX(${msToPx(ms, ppsRef.current)}px)`;
+      },
+    }),
+    [],
+  );
 
   useEffect(() => {
     let raf = 0;
@@ -201,7 +235,7 @@ export const Timeline = ({
 
     const onMove = (e: MouseEvent) => {
       if (!dragRef.current) return;
-      e.preventDefault(); // suppress text/image selection while dragging
+      e.preventDefault(); // suppress text/image selection during drag
       lastEvent = e;
       if (!raf) raf = requestAnimationFrame(apply);
     };
@@ -444,10 +478,17 @@ export const Timeline = ({
               </div>
             )}
 
-            {/* playhead */}
+            {/* playhead — position written via translateX through the
+                 imperative handle, so RAF playback doesn't trigger React
+                 re-renders here. */}
             <div
+              ref={playheadRef}
               className="absolute top-0 bottom-0 w-px bg-primary z-20 pointer-events-none"
-              style={{ left: msToPx(playheadMs, pps) }}
+              style={{
+                left: 0,
+                willChange: "transform",
+                transform: `translateX(${msToPx(playheadMs, pps)}px)`,
+              }}
             >
               <div className="size-3 rounded-full bg-primary -translate-x-1/2 -translate-y-1 shadow-glow" />
             </div>
@@ -456,7 +497,7 @@ export const Timeline = ({
       </div>
     </div>
   );
-};
+});
 
 const TrackLabel = ({
   icon,
@@ -466,7 +507,7 @@ const TrackLabel = ({
   label: string;
 }) => (
   <div
-    className="border-b border-border/60 flex items-center gap-2 px-3 text-xs text-muted-foreground"
+    className="border-b border-border/60 flex items-center gap-2 px-3 text-xs text-muted-foreground select-none"
     style={{ height: LAYER_HEIGHT }}
   >
     {icon}
@@ -492,13 +533,13 @@ const Ruler = ({
   return (
     <div
       onClick={onClick}
-      className="relative cursor-crosshair border-b border-border bg-[hsl(var(--surface-3))]"
+      className="relative cursor-crosshair border-b border-border bg-[hsl(var(--surface-3))] select-none"
       style={{ height }}
     >
       {ticks.map((s) => (
         <div
           key={s}
-          className="absolute top-0 bottom-0 border-l border-border/60 text-[10px] text-muted-foreground tabular-nums pl-1 pt-0.5"
+          className="absolute top-0 bottom-0 border-l border-border/60 text-[10px] text-muted-foreground tabular-nums pl-1 pt-0.5 pointer-events-none"
           style={{ left: msToPx(s * 1000, pps) }}
         >
           {s}s
@@ -536,7 +577,7 @@ const SegmentBlock = ({
     >
       <div
         className={cn(
-          "absolute inset-0",
+          "absolute inset-0 pointer-events-none",
           seg.asset_type === "VIDEO"
             ? "bg-gradient-to-br from-violet-500/80 via-fuchsia-500/70 to-rose-500/70"
             : "bg-gradient-to-br from-sky-500/80 via-cyan-500/70 to-emerald-500/70",
@@ -545,11 +586,12 @@ const SegmentBlock = ({
       {seg.asset_url && seg.asset_type === "IMAGE" && (
         <img
           src={seg.asset_url}
-          className="absolute inset-0 size-full object-cover opacity-50 mix-blend-overlay"
+          className="absolute inset-0 size-full object-cover opacity-50 mix-blend-overlay pointer-events-none"
           alt=""
+          draggable={false}
         />
       )}
-      <div className="absolute inset-0 flex items-center px-2 text-[10px] font-medium text-white drop-shadow tracking-wide">
+      <div className="absolute inset-0 flex items-center px-2 text-[10px] font-medium text-white drop-shadow tracking-wide pointer-events-none">
         <span className="truncate flex-1">
           {seg.asset_type} ·{" "}
           {Math.round((seg.end_ms - seg.start_ms) / 100) / 10}s
@@ -558,11 +600,11 @@ const SegmentBlock = ({
       </div>
       <div
         onMouseDown={(e) => onMouseDown(e, seg, "trim-left")}
-        className="absolute left-0 top-0 bottom-0 w-1.5 cursor-w-resize hover:bg-white/40"
+        className="absolute left-0 top-0 bottom-0 w-1.5 cursor-w-resize hover:bg-white/40 z-10"
       />
       <div
         onMouseDown={(e) => onMouseDown(e, seg, "trim-right")}
-        className="absolute right-0 top-0 bottom-0 w-1.5 cursor-e-resize hover:bg-white/40"
+        className="absolute right-0 top-0 bottom-0 w-1.5 cursor-e-resize hover:bg-white/40 z-10"
       />
     </motion.div>
   );
@@ -604,13 +646,13 @@ const AudioBlock = ({
     >
       <div
         className={cn(
-          "absolute inset-0",
+          "absolute inset-0 pointer-events-none",
           isMusic
             ? "bg-gradient-to-r from-emerald-600/40 via-emerald-500/25 to-emerald-400/25"
             : "bg-gradient-to-r from-amber-600/40 via-amber-500/25 to-amber-400/25",
         )}
       />
-      <div className="absolute inset-0 flex items-center gap-1 px-2 text-[10px] font-medium text-foreground/80">
+      <div className="absolute inset-0 flex items-center gap-1 px-2 text-[10px] font-medium text-foreground/80 pointer-events-none">
         {isMusic ? <Music size={10} /> : <Mic size={10} />}
         <span className="truncate">
           {isMusic ? "music" : "voice"} ·{" "}
@@ -619,11 +661,11 @@ const AudioBlock = ({
       </div>
       <div
         onMouseDown={(e) => onMouseDown(e, track, "trim-left")}
-        className="absolute left-0 top-0 bottom-0 w-1.5 cursor-w-resize hover:bg-white/40"
+        className="absolute left-0 top-0 bottom-0 w-1.5 cursor-w-resize hover:bg-white/40 z-10"
       />
       <div
         onMouseDown={(e) => onMouseDown(e, track, "trim-right")}
-        className="absolute right-0 top-0 bottom-0 w-1.5 cursor-e-resize hover:bg-white/40"
+        className="absolute right-0 top-0 bottom-0 w-1.5 cursor-e-resize hover:bg-white/40 z-10"
       />
     </motion.div>
   );
