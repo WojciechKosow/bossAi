@@ -13,6 +13,7 @@ import com.BossAi.bossAi.service.director.UserEditIntent;
 import com.BossAi.bossAi.service.dna.AssetClassifierService;
 import com.BossAi.bossAi.service.dna.DnaPresetConfig;
 import com.BossAi.bossAi.service.dna.DnaPresetService;
+import com.BossAi.bossAi.service.dna.TextOverlayGeneratorService;
 import com.BossAi.bossAi.service.generation.GenerationContext;
 import com.BossAi.bossAi.service.generation.context.SceneAsset;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -24,8 +25,6 @@ import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
@@ -62,6 +61,7 @@ public class EdlGeneratorService {
     private final RemotionRendererProperties remotionProperties;
     private final DnaPresetService dnaPresetService;
     private final AssetClassifierService assetClassifierService;
+    private final TextOverlayGeneratorService textOverlayGeneratorService;
 
     @Value("${dna.presets.enabled:false}")
     private boolean dnaPresetsEnabled;
@@ -117,7 +117,7 @@ public class EdlGeneratorService {
             enrichEffectsFromEditDna(edl, editDna);
 
             // Apply DNA preset (overrides EditDna color grade when both present)
-            applyDnaToEdl(edl, dnaConfig);
+            applyDnaToEdl(edl, dnaConfig, context);
 
             EdlValidator.ValidationResult result = edlValidator.validate(edl);
             if (result.valid()) {
@@ -147,8 +147,8 @@ public class EdlGeneratorService {
         // Uzupelnij brakujace nested objects (GPT czesto pomija style/position/effects)
         ensureNestedDefaults(edl);
 
-        // Apply DNA preset (overrides EditDna color grade + sets subtitle/audio config)
-        applyDnaToEdl(edl, dnaConfig);
+        // Apply DNA preset (overrides EditDna color grade + sets subtitle/audio/overlay config)
+        applyDnaToEdl(edl, dnaConfig, context);
 
         // Snap segment cuts to nearest beat positions
         beatSnapSegments(edl, audioAnalysis);
@@ -1834,7 +1834,7 @@ public class EdlGeneratorService {
      * Safe to call with dnaConfig=null — does nothing.
      * DNA color grade takes precedence over EditDna color grade when both are present.
      */
-    private void applyDnaToEdl(EdlDto edl, DnaPresetConfig dnaConfig) {
+    private void applyDnaToEdl(EdlDto edl, DnaPresetConfig dnaConfig, GenerationContext context) {
         if (dnaConfig == null) return;
 
         if (edl.getMetadata() != null) {
@@ -1875,9 +1875,24 @@ public class EdlGeneratorService {
             }
         }
 
-        log.info("[EdlGenerator] Applied DNA preset '{}' — pacing={}, color_grade={}",
+        // Build DNA text overlays (HOOK, RESULT, CTA) and replace existing ones.
+        // Existing subtitle-type overlays (whisper words) are preserved separately —
+        // text_overlays only holds non-subtitle overlays at this stage.
+        int totalDurationMs = edl.getMetadata() != null ? edl.getMetadata().getTotalDurationMs() : 0;
+        Map<String, String> textOverrides = context.getUserDnaInput() != null
+                ? context.getUserDnaInput().getTextPlaceholderOverrides() : null;
+
+        List<EdlTextOverlay> dnaOverlays = textOverlayGeneratorService.generate(
+                dnaConfig, edl.getTextOverlays(), textOverrides, totalDurationMs);
+
+        if (!dnaOverlays.isEmpty()) {
+            edl.setTextOverlays(dnaOverlays);
+        }
+
+        log.info("[EdlGenerator] Applied DNA preset '{}' — pacing={}, color_grade={}, textOverlays={}",
                 dnaConfig.getId(), dnaConfig.getPacing(),
-                dnaConfig.getColorGrade() != null ? dnaConfig.getColorGrade().getPreset() : "none");
+                dnaConfig.getColorGrade() != null ? dnaConfig.getColorGrade().getPreset() : "none",
+                dnaOverlays.size());
     }
 
     /**
