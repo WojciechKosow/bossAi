@@ -160,11 +160,23 @@ public class VideoStep implements GenerationStep {
                 }
             }
 
-            // Fallback: convert image to clip via FFmpeg (free, no API call)
-            log.warn("[VideoStep] TEST MODE — scene {} → FFmpeg Ken Burns (no fal.ai call)",
-                    scene.getIndex());
-            String clipPath = imageToClipStep.convertImageToClip(scene, workDir);
-            scene.setVideoLocalPath(clipPath);
+            // Fallback: custom IMAGE from storage or AI-generated imageUrl → FFmpeg Ken Burns
+            List<Asset> customMedia = context.getCustomMediaAssets();
+            if (i < customMedia.size() && customMedia.get(i).getType() == AssetType.IMAGE) {
+                Asset customAsset = customMedia.get(i);
+                log.warn("[VideoStep] TEST MODE — scene {} CUSTOM IMAGE from storage → FFmpeg Ken Burns", scene.getIndex());
+                byte[] imageBytes = storageService.load(customAsset.getStorageKey());
+                String ext = detectImageExtension(customAsset.getMimeType(), customAsset.getFilename());
+                Path imagePath = workDir.resolve(String.format("scene_%02d_custom%s", scene.getIndex(), ext));
+                Files.write(imagePath, imageBytes);
+                String clipPath = imageToClipStep.convertLocalImageToClip(
+                        imagePath, scene.getDurationMs(), scene.getIndex(), workDir);
+                scene.setVideoLocalPath(clipPath);
+            } else {
+                log.warn("[VideoStep] TEST MODE — scene {} → FFmpeg Ken Burns from imageUrl", scene.getIndex());
+                String clipPath = imageToClipStep.convertImageToClip(scene, workDir);
+                scene.setVideoLocalPath(clipPath);
+            }
             ffmpegCount++;
         }
 
@@ -236,11 +248,19 @@ public class VideoStep implements GenerationStep {
                                 scene.getIndex(), e.getMessage());
                     }
                 }
-                // Custom IMAGE asset → process as image scene (Ken Burns)
+                // Custom IMAGE asset → load from storage, then FFmpeg Ken Burns
                 if (customAsset.getType() == AssetType.IMAGE) {
-                    log.info("[VideoStep] Scena {} CUSTOM IMAGE → FFmpeg Ken Burns", scene.getIndex());
-                    processImageScene(scene, workDir);
+                    log.info("[VideoStep] Scena {} CUSTOM IMAGE → FFmpeg Ken Burns (from storage)", scene.getIndex());
+                    byte[] imageBytes = storageService.load(customAsset.getStorageKey());
+                    String ext = detectImageExtension(customAsset.getMimeType(), customAsset.getFilename());
+                    Path imagePath = workDir.resolve(String.format("scene_%02d_custom%s", scene.getIndex(), ext));
+                    Files.write(imagePath, imageBytes);
+                    String clipPath = imageToClipStep.convertLocalImageToClip(
+                            imagePath, scene.getDurationMs(), scene.getIndex(), workDir);
+                    scene.setVideoLocalPath(clipPath);
                     customCount++;
+                    log.info("[VideoStep] Scena {} CUSTOM IMAGE DONE — {} bytes → {}",
+                            scene.getIndex(), imageBytes.length, clipPath);
                     continue;
                 }
             }
@@ -455,6 +475,28 @@ public class VideoStep implements GenerationStep {
         }
 
         log.debug("[VideoStep][{}] OK", phase);
+    }
+
+    /**
+     * Detects the file extension for an image asset from its MIME type or filename.
+     * Returns ".jpg" as fallback if neither provides a clear answer.
+     */
+    private String detectImageExtension(String mimeType, String filename) {
+        if (mimeType != null) {
+            String lower = mimeType.toLowerCase(Locale.ROOT);
+            if (lower.contains("png"))  return ".png";
+            if (lower.contains("webp")) return ".webp";
+            if (lower.contains("gif"))  return ".gif";
+            if (lower.contains("jpeg") || lower.contains("jpg")) return ".jpg";
+        }
+        if (filename != null) {
+            String lower = filename.toLowerCase(Locale.ROOT);
+            if (lower.endsWith(".png"))  return ".png";
+            if (lower.endsWith(".webp")) return ".webp";
+            if (lower.endsWith(".gif"))  return ".gif";
+            if (lower.endsWith(".jpeg") || lower.endsWith(".jpg")) return ".jpg";
+        }
+        return ".jpg";
     }
 
     private Path getWorkingDir(GenerationContext context) {
