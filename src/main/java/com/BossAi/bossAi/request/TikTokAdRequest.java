@@ -92,4 +92,11 @@ public class TikTokAdRequest {
      * przekaże request do generateTikTokAd.
      */
     private List<SceneAssignment> sceneAssignments;
+
+    /**
+     * Toucan DNA preset ID — drives beat structure, effects, color arc, text overlays.
+     * E.g. "PROBLEM_PAYOFF". Null = no preset (legacy behaviour).
+     * Requires feature flag dna.presets.enabled=true.
+     */
+    private String dnaPreset;
 }
