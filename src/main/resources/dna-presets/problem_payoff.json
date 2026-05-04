@@ -1,0 +1,312 @@
+{
+  "id": "PROBLEM_PAYOFF",
+  "display_name": "Problem → Payoff",
+  "pacing": "FAST",
+
+  "color_grade": {
+    "preset": "problem_payoff",
+    "contrast_boost": 1.3,
+    "saturation": 0.7,
+    "brightness": 0.95,
+    "vignette": 0.2
+  },
+
+  "beats": {
+    "A": {
+      "name": "HOOK / BÓL",
+      "start_ms": 0,
+      "end_ms": 3000,
+      "min_duration_ms": 1500,
+      "max_duration_ms": 2500,
+      "color_grade_override": {
+        "saturation": 0.6,
+        "contrast_boost": 1.4,
+        "brightness": 0.95,
+        "vignette": 0.2
+      },
+      "scene_patterns": [
+        {
+          "effect": {
+            "type": "fast_zoom",
+            "intensity": 0.9,
+            "params": { "scale_to": 1.5 }
+          },
+          "transition": {
+            "type": "cut",
+            "duration_ms": 0
+          },
+          "color_grade_override": {
+            "saturation": 0.6,
+            "contrast_boost": 1.4,
+            "brightness": 0.95,
+            "vignette": 0.2
+          }
+        },
+        {
+          "effect": {
+            "type": "shake",
+            "intensity": 0.4,
+            "params": { "axis": "both" }
+          },
+          "transition": {
+            "type": "cut",
+            "duration_ms": 0
+          },
+          "color_grade_override": {
+            "saturation": 0.6,
+            "contrast_boost": 1.3,
+            "brightness": 0.95,
+            "vignette": 0.2
+          }
+        }
+      ]
+    },
+
+    "B": {
+      "name": "ESKALACJA",
+      "start_ms": 3000,
+      "end_ms": 8000,
+      "min_duration_ms": 2000,
+      "max_duration_ms": 2500,
+      "color_grade_override": {
+        "saturation": 0.7,
+        "contrast_boost": 1.3,
+        "brightness": 0.9,
+        "vignette": 0.2
+      },
+      "scene_patterns": [
+        {
+          "effect": {
+            "type": "drift",
+            "intensity": 0.4,
+            "params": { "direction": "diagonal", "percent": 10 }
+          },
+          "transition": {
+            "type": "cut",
+            "duration_ms": 0
+          },
+          "color_grade_override": {
+            "saturation": 0.7,
+            "contrast_boost": 1.3,
+            "brightness": 0.9,
+            "vignette": 0.2
+          }
+        }
+      ]
+    },
+
+    "C": {
+      "name": "PRODUKT W AKCJI",
+      "start_ms": 8000,
+      "end_ms": 20000,
+      "min_duration_ms": 3000,
+      "max_duration_ms": 4000,
+      "color_grade_override": {
+        "saturation": 1.0,
+        "contrast_boost": 1.1,
+        "brightness": 1.0,
+        "vignette": 0.1
+      },
+      "scene_patterns": [
+        {
+          "effect": {
+            "type": "ken_burns",
+            "intensity": 0.5,
+            "params": { "scale_from": 1.0, "scale_to": 1.15, "speed": "slow" }
+          },
+          "transition": {
+            "type": "fade",
+            "duration_ms": 200
+          },
+          "color_grade_override": {
+            "saturation": 1.0,
+            "contrast_boost": 1.1,
+            "brightness": 1.0,
+            "vignette": 0.1
+          }
+        },
+        {
+          "effect": {
+            "type": "slow_zoom_in",
+            "intensity": 0.4,
+            "params": { "scale_from": 1.0, "scale_to": 1.1 }
+          },
+          "transition": {
+            "type": "fade",
+            "duration_ms": 200
+          },
+          "color_grade_override": {
+            "saturation": 1.05,
+            "contrast_boost": 1.1,
+            "brightness": 1.0,
+            "vignette": 0.1
+          }
+        }
+      ]
+    },
+
+    "D": {
+      "name": "TRANSFORMACJA",
+      "start_ms": 20000,
+      "end_ms": 27000,
+      "min_duration_ms": 3000,
+      "max_duration_ms": 4000,
+      "color_grade_override": {
+        "saturation": 1.15,
+        "contrast_boost": 1.2,
+        "brightness": 1.05,
+        "vignette": 0.05
+      },
+      "scene_patterns": [
+        {
+          "effect": {
+            "type": "fade_in",
+            "intensity": 0.6,
+            "params": {}
+          },
+          "transition": {
+            "type": "wipe_right",
+            "duration_ms": 400
+          },
+          "color_grade_override": {
+            "saturation": 1.15,
+            "contrast_boost": 1.2,
+            "brightness": 1.05,
+            "vignette": 0.05
+          }
+        }
+      ]
+    },
+
+    "E": {
+      "name": "CTA",
+      "start_ms": 27000,
+      "end_ms": 30000,
+      "min_duration_ms": 3000,
+      "max_duration_ms": 3000,
+      "color_grade_override": {
+        "saturation": 1.1,
+        "contrast_boost": 1.1,
+        "brightness": 1.0,
+        "vignette": 0.05
+      },
+      "scene_patterns": [
+        {
+          "effect": {
+            "type": "slow_zoom_in",
+            "intensity": 0.2,
+            "params": { "scale_from": 1.0, "scale_to": 1.05 }
+          },
+          "transition": {
+            "type": "fade_out",
+            "duration_ms": 500
+          },
+          "color_grade_override": {
+            "saturation": 1.1,
+            "contrast_boost": 1.1,
+            "brightness": 1.0,
+            "vignette": 0.05
+          }
+        }
+      ]
+    }
+  },
+
+  "subtitle_config": {
+    "enabled": true,
+    "position": "bottom_third",
+    "font_family": "Inter",
+    "font_size": 44,
+    "font_weight": "bold",
+    "highlight_color": "#FFD700",
+    "stroke_color": "#000000",
+    "stroke_width": 3,
+    "highlight_mode": "word",
+    "max_words_per_group": 3,
+    "animation": "karaoke"
+  },
+
+  "audio_config": {
+    "voiceover_volume": 1.0,
+    "voiceover_fade_out_ms": 300,
+    "volume_by_beat": {
+      "A": 0.08,
+      "B": 0.10,
+      "C": 0.12,
+      "D": 0.15,
+      "E": 0.20
+    },
+    "music_fade_in_ms": 500,
+    "music_fade_out_ms": 800,
+    "music_style": "energetic_upbeat"
+  },
+
+  "text_overlay_templates": [
+    {
+      "beat": "A",
+      "placeholder": "{HOOK_TEXT}",
+      "type": "TEXT_OVERLAY",
+      "start_ms": 0,
+      "end_ms": 2500,
+      "layer": 2,
+      "position": "center",
+      "animation": "punch_in",
+      "animation_duration_ms": 150,
+      "style": {
+        "font_family": "Inter",
+        "font_size": 58,
+        "font_weight": "bold",
+        "color": "#FFFFFF",
+        "stroke_color": "#000000",
+        "stroke_width": 4,
+        "background_color": null,
+        "background_padding": 0,
+        "border_radius": null
+      }
+    },
+    {
+      "beat": "D",
+      "placeholder": "{RESULT_TEXT}",
+      "type": "TEXT_OVERLAY",
+      "start_ms": 20000,
+      "end_ms": 27000,
+      "layer": 2,
+      "position": "bottom_third",
+      "animation": "slide_up",
+      "animation_duration_ms": 300,
+      "style": {
+        "font_family": "Inter",
+        "font_size": 52,
+        "font_weight": "bold",
+        "color": "#FFD700",
+        "stroke_color": "#000000",
+        "stroke_width": 3,
+        "background_color": null,
+        "background_padding": 0,
+        "border_radius": null
+      }
+    },
+    {
+      "beat": "E",
+      "placeholder": "{CTA_TEXT}",
+      "type": "TEXT_OVERLAY",
+      "start_ms": 27000,
+      "end_ms": 30000,
+      "layer": 2,
+      "position": "bottom_quarter",
+      "animation": "fade_in",
+      "animation_duration_ms": 200,
+      "style": {
+        "font_family": "Inter",
+        "font_size": 46,
+        "font_weight": "bold",
+        "color": "#FFFFFF",
+        "stroke_color": null,
+        "stroke_width": 0,
+        "background_color": "#E63946",
+        "background_padding": 20,
+        "border_radius": 8
+      }
+    }
+  ]
+}
