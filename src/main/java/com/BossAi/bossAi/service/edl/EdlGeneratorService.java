@@ -10,13 +10,20 @@ import com.BossAi.bossAi.service.director.EffectType;
 import com.BossAi.bossAi.service.director.JustifiedCut;
 import com.BossAi.bossAi.service.director.NarrationAnalysis;
 import com.BossAi.bossAi.service.director.UserEditIntent;
+import com.BossAi.bossAi.service.dna.DnaPresetConfig;
+import com.BossAi.bossAi.service.dna.DnaPresetService;
 import com.BossAi.bossAi.service.generation.GenerationContext;
 import com.BossAi.bossAi.service.generation.context.SceneAsset;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Service;
+
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
@@ -52,6 +59,10 @@ public class EdlGeneratorService {
     private final EffectRegistry effectRegistry;
     private final EdlValidator edlValidator;
     private final RemotionRendererProperties remotionProperties;
+    private final DnaPresetService dnaPresetService;
+
+    @Value("${dna.presets.enabled:false}")
+    private boolean dnaPresetsEnabled;
 
     // =========================================================================
     // PUBLIC API
@@ -86,8 +97,12 @@ public class EdlGeneratorService {
         boolean hasJustifiedCuts = context.getJustifiedCuts() != null
                 && !context.getJustifiedCuts().isEmpty();
 
-        log.info("[EdlGenerator] Generating EDL — scenes: {}, hasAudio: {}, hasEditDna: {}, hasJustifiedCuts: {}",
-                context.sceneCount(), audioAnalysis != null, editDna != null, hasJustifiedCuts);
+        // Resolve DNA preset config once — null when feature flag is off or no preset set
+        DnaPresetConfig dnaConfig = resolveDnaConfig(context);
+
+        log.info("[EdlGenerator] Generating EDL — scenes: {}, hasAudio: {}, hasEditDna: {}, hasJustifiedCuts: {}, dnaPreset: {}",
+                context.sceneCount(), audioAnalysis != null, editDna != null, hasJustifiedCuts,
+                dnaConfig != null ? dnaConfig.getId() : "none");
 
         // PRIMARY PATH: deterministic EDL from CutEngine's justified cuts
         if (hasJustifiedCuts) {
@@ -98,6 +113,9 @@ public class EdlGeneratorService {
             // Enrich with EditDna (color grade, effect palette)
             injectColorGrade(edl, editDna);
             enrichEffectsFromEditDna(edl, editDna);
+
+            // Apply DNA preset (overrides EditDna color grade when both present)
+            applyDnaToEdl(edl, dnaConfig);
 
             EdlValidator.ValidationResult result = edlValidator.validate(edl);
             if (result.valid()) {
@@ -111,7 +129,7 @@ public class EdlGeneratorService {
         }
 
         // FALLBACK PATH: GPT generates full EDL
-        String prompt = buildGptPrompt(context, audioAnalysis, projectAssets, editDna);
+        String prompt = buildGptPrompt(context, audioAnalysis, projectAssets, editDna, dnaConfig);
         String rawJson = openAiService.generateDirectorPlan(prompt);
         EdlDto edl = parseGptResponse(rawJson);
 
@@ -126,6 +144,9 @@ public class EdlGeneratorService {
 
         // Uzupelnij brakujace nested objects (GPT czesto pomija style/position/effects)
         ensureNestedDefaults(edl);
+
+        // Apply DNA preset (overrides EditDna color grade + sets subtitle/audio config)
+        applyDnaToEdl(edl, dnaConfig);
 
         // Snap segment cuts to nearest beat positions
         beatSnapSegments(edl, audioAnalysis);
@@ -1292,19 +1313,11 @@ public class EdlGeneratorService {
         }
     }
 
-    /**
-     * Backwards-compat wrapper (bez editDna).
-     */
-    private String buildGptPrompt(GenerationContext context,
-                                  AudioAnalysisResponse audioAnalysis,
-                                  List<ProjectAsset> projectAssets) {
-        return buildGptPrompt(context, audioAnalysis, projectAssets, null);
-    }
-
     private String buildGptPrompt(GenerationContext context,
                                   AudioAnalysisResponse audioAnalysis,
                                   List<ProjectAsset> projectAssets,
-                                  EditDna editDna) {
+                                  EditDna editDna,
+                                  DnaPresetConfig dnaConfig) {
 
         StringBuilder sb = new StringBuilder();
 
@@ -1369,6 +1382,9 @@ public class EdlGeneratorService {
 
         // Style
         sb.append("STYLE: ").append(context.getStyle() != null ? context.getStyle().name() : "DEFAULT").append("\n\n");
+
+        // DNA PRESET — injected before user intent so GPT knows the structure
+        appendDnaSection(sb, dnaConfig, context);
 
         // User's original prompt — this is the creative intent that drives everything
         if (context.getPrompt() != null && !context.getPrompt().isBlank()) {
@@ -1791,5 +1807,120 @@ public class EdlGeneratorService {
                 """);
 
         return sb.toString();
+    }
+
+    // =========================================================================
+    // DNA PRESET — resolve, apply, prompt injection
+    // =========================================================================
+
+    private DnaPresetConfig resolveDnaConfig(GenerationContext context) {
+        if (!dnaPresetsEnabled || context.getDnaPreset() == null) return null;
+        try {
+            return dnaPresetService.resolve(context.getDnaPreset(), context.getUserDnaInput());
+        } catch (Exception e) {
+            log.warn("[EdlGenerator] DNA preset resolution failed, continuing without DNA: {}", e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Post-processes an already-built EDL by injecting DNA preset values:
+     *   - dna_preset + dna_version + color_grade into metadata
+     *   - subtitle_config from DNA preset
+     *   - volume_by_beat + music_style onto the music audio track
+     *
+     * Safe to call with dnaConfig=null — does nothing.
+     * DNA color grade takes precedence over EditDna color grade when both are present.
+     */
+    private void applyDnaToEdl(EdlDto edl, DnaPresetConfig dnaConfig) {
+        if (dnaConfig == null) return;
+
+        if (edl.getMetadata() != null) {
+            edl.getMetadata().setDnaPreset(dnaConfig.getId());
+            edl.getMetadata().setDnaVersion("1.0");
+            if (dnaConfig.getColorGrade() != null) {
+                edl.getMetadata().setColorGrade(dnaConfig.getColorGrade());
+            }
+            if (dnaConfig.getPacing() != null) {
+                edl.getMetadata().setPacing(dnaConfig.getPacing().toLowerCase());
+            }
+        }
+
+        if (dnaConfig.getSubtitleConfig() != null) {
+            edl.setSubtitleConfig(dnaConfig.getSubtitleConfig());
+        }
+
+        DnaPresetConfig.AudioConfig audioConf = dnaConfig.getAudioConfig();
+        if (audioConf != null && edl.getAudioTracks() != null) {
+            for (EdlAudioTrack track : edl.getAudioTracks()) {
+                if ("music".equals(track.getType())) {
+                    if (audioConf.getVolumeByBeat() != null) {
+                        track.setVolumeByBeat(audioConf.getVolumeByBeat());
+                    }
+                    if (audioConf.getMusicStyle() != null) {
+                        track.setMusicStyle(audioConf.getMusicStyle());
+                    }
+                    if (audioConf.getMusicFadeInMs() > 0) {
+                        track.setFadeInMs(audioConf.getMusicFadeInMs());
+                    }
+                    if (audioConf.getMusicFadeOutMs() > 0) {
+                        track.setFadeOutMs(audioConf.getMusicFadeOutMs());
+                    }
+                }
+                if ("voiceover".equals(track.getType()) && audioConf.getVoiceoverVolume() > 0) {
+                    track.setVolume(audioConf.getVoiceoverVolume());
+                }
+            }
+        }
+
+        log.info("[EdlGenerator] Applied DNA preset '{}' — pacing={}, color_grade={}",
+                dnaConfig.getId(), dnaConfig.getPacing(),
+                dnaConfig.getColorGrade() != null ? dnaConfig.getColorGrade().getPreset() : "none");
+    }
+
+    /**
+     * Appends the DNA preset section to the GPT prompt.
+     * Loads static instructions from classpath (resources/prompts/dna_<id>.txt)
+     * and appends dynamic beat timestamps scaled to the actual TTS duration.
+     */
+    private void appendDnaSection(StringBuilder sb, DnaPresetConfig dnaConfig, GenerationContext context) {
+        if (dnaConfig == null) return;
+
+        String template = loadDnaPromptTemplate(dnaConfig.getId());
+        if (template != null) {
+            sb.append(template).append("\n");
+        }
+
+        // Dynamic: beat timestamps scaled to actual TTS duration
+        int ttsDurationMs = 0;
+        if (context.getWordTimings() != null && !context.getWordTimings().isEmpty()) {
+            ttsDurationMs = context.getWordTimings().get(context.getWordTimings().size() - 1).endMs();
+        }
+        if (ttsDurationMs > 0 && dnaConfig.getBeats() != null) {
+            sb.append("=== DNA BEAT TIMESTAMPS (scaled to TTS duration: ").append(ttsDurationMs).append("ms) ===\n");
+            double scale = ttsDurationMs / 30000.0; // presets defined for 30s standard
+            dnaConfig.getBeats().forEach((letter, beat) -> {
+                int scaledStart = (int) (beat.getStartMs() * scale);
+                int scaledEnd   = (int) (beat.getEndMs()   * scale);
+                sb.append(String.format("  Beat %s (%s): %dms – %dms\n",
+                        letter, beat.getName(), scaledStart, scaledEnd));
+            });
+            sb.append("\n");
+        }
+    }
+
+    private String loadDnaPromptTemplate(String presetId) {
+        String path = "prompts/dna_" + presetId.toLowerCase() + ".txt";
+        try {
+            ClassPathResource resource = new ClassPathResource(path);
+            if (!resource.exists()) {
+                log.warn("[EdlGenerator] DNA prompt template not found: {}", path);
+                return null;
+            }
+            return resource.getContentAsString(StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            log.warn("[EdlGenerator] Failed to load DNA prompt template {}: {}", path, e.getMessage());
+            return null;
+        }
     }
 }

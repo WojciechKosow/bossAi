@@ -10,6 +10,8 @@ import com.BossAi.bossAi.service.director.JustifiedCut;
 import com.BossAi.bossAi.service.director.NarrationAnalysis;
 import com.BossAi.bossAi.service.director.SpeechTimingAnalysis;
 import com.BossAi.bossAi.service.director.UserEditIntent;
+import com.BossAi.bossAi.service.dna.DnaPreset;
+import com.BossAi.bossAi.service.dna.UserDnaInput;
 import com.BossAi.bossAi.service.generation.context.SceneAsset;
 import com.BossAi.bossAi.service.generation.context.ScriptResult;
 import com.BossAi.bossAi.service.music.MusicAnalysisResult;
@@ -323,6 +325,22 @@ public class GenerationContext {
      * Null jeśli UserIntentParser nie został uruchomiony.
      */
     private UserEditIntent userEditIntent;
+
+    // -------------------------------------------------------------------------
+    // DNA PRESET (Toucan)
+    // -------------------------------------------------------------------------
+
+    /**
+     * Active DNA preset for this generation.
+     * Null = no preset (legacy flow). Set from TikTokAdRequest.dnaPreset.
+     */
+    private DnaPreset dnaPreset;
+
+    /**
+     * User-supplied DNA overrides (color grade, font, pacing, text placeholders, BPM).
+     * Null = use all preset defaults.
+     */
+    private UserDnaInput userDnaInput;
 
     // -------------------------------------------------------------------------
     // METODY POMOCNICZE
