@@ -78,6 +78,9 @@ public class EdlTextOverlay {
         @JsonProperty("background_padding")
         @Builder.Default
         private int backgroundPadding = 0;
+
+        @JsonProperty("border_radius")
+        private Integer borderRadius;
     }
 
     @Data
