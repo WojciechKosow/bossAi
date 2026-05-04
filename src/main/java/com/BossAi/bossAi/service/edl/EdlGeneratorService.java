@@ -10,6 +10,7 @@ import com.BossAi.bossAi.service.director.EffectType;
 import com.BossAi.bossAi.service.director.JustifiedCut;
 import com.BossAi.bossAi.service.director.NarrationAnalysis;
 import com.BossAi.bossAi.service.director.UserEditIntent;
+import com.BossAi.bossAi.service.dna.AssetClassifierService;
 import com.BossAi.bossAi.service.dna.DnaPresetConfig;
 import com.BossAi.bossAi.service.dna.DnaPresetService;
 import com.BossAi.bossAi.service.generation.GenerationContext;
@@ -60,6 +61,7 @@ public class EdlGeneratorService {
     private final EdlValidator edlValidator;
     private final RemotionRendererProperties remotionProperties;
     private final DnaPresetService dnaPresetService;
+    private final AssetClassifierService assetClassifierService;
 
     @Value("${dna.presets.enabled:false}")
     private boolean dnaPresetsEnabled;
@@ -1384,7 +1386,7 @@ public class EdlGeneratorService {
         sb.append("STYLE: ").append(context.getStyle() != null ? context.getStyle().name() : "DEFAULT").append("\n\n");
 
         // DNA PRESET — injected before user intent so GPT knows the structure
-        appendDnaSection(sb, dnaConfig, context);
+        appendDnaSection(sb, dnaConfig, context, projectAssets);
 
         // User's original prompt — this is the creative intent that drives everything
         if (context.getPrompt() != null && !context.getPrompt().isBlank()) {
@@ -1883,7 +1885,8 @@ public class EdlGeneratorService {
      * Loads static instructions from classpath (resources/prompts/dna_<id>.txt)
      * and appends dynamic beat timestamps scaled to the actual TTS duration.
      */
-    private void appendDnaSection(StringBuilder sb, DnaPresetConfig dnaConfig, GenerationContext context) {
+    private void appendDnaSection(StringBuilder sb, DnaPresetConfig dnaConfig,
+                                   GenerationContext context, List<ProjectAsset> projectAssets) {
         if (dnaConfig == null) return;
 
         String template = loadDnaPromptTemplate(dnaConfig.getId());
@@ -1907,6 +1910,34 @@ public class EdlGeneratorService {
             });
             sb.append("\n");
         }
+
+        // Heuristic beat classification — hints GPT on which beat each asset belongs to
+        appendAssetClassificationHints(sb, context, projectAssets);
+    }
+
+    private void appendAssetClassificationHints(StringBuilder sb,
+                                                 GenerationContext context,
+                                                 List<ProjectAsset> projectAssets) {
+        List<ProjectAsset> visualAssets = projectAssets == null ? List.of() :
+                projectAssets.stream()
+                        .filter(a -> "VIDEO".equals(a.getType().name()) || "IMAGE".equals(a.getType().name()))
+                        .toList();
+        if (visualAssets.isEmpty()) return;
+
+        Map<UUID, String> beatHints = assetClassifierService.classify(
+                visualAssets,
+                context.getAssetProfiles(),
+                context.getPrompt()
+        );
+
+        if (beatHints.isEmpty()) return;
+
+        sb.append("=== HEURISTIC BEAT CLASSIFICATION (hints — you may override) ===\n");
+        for (ProjectAsset asset : visualAssets) {
+            String beat = beatHints.getOrDefault(asset.getId(), "C");
+            sb.append(String.format("  asset_id=%s  suggested_beat=%s\n", asset.getId(), beat));
+        }
+        sb.append("These are heuristic suggestions. Override if the visual content better fits another beat.\n\n");
     }
 
     private String loadDnaPromptTemplate(String presetId) {
