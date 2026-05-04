@@ -8,6 +8,7 @@ import com.BossAi.bossAi.request.GenerateImageRequest;
 import com.BossAi.bossAi.request.GenerateVideoRequest;
 import com.BossAi.bossAi.request.TikTokAdRequest;
 import com.BossAi.bossAi.response.GenerationResponse;
+import com.BossAi.bossAi.service.dna.DnaPreset;
 import com.BossAi.bossAi.service.generation.GenerationContext;
 import com.BossAi.bossAi.service.style.StyleConfig;
 import com.BossAi.bossAi.service.style.StyleService;
@@ -491,6 +492,7 @@ public class GenerationServiceImpl implements GenerationService {
                 .forceReuseForTesting(forceReuse)
                 .styleConfig(styleConfig)
                 .style(request.getStyle())
+                .dnaPreset(parseDnaPreset(request.getDnaPreset()))
                 .build();
     }
 
@@ -599,4 +601,14 @@ public class GenerationServiceImpl implements GenerationService {
         return java.util.Arrays.asList(slots);
     }
 
+    /** Parses dnaPreset string from request to enum. Returns null for unknown/blank values. */
+    private DnaPreset parseDnaPreset(String value) {
+        if (value == null || value.isBlank()) return null;
+        try {
+            return DnaPreset.valueOf(value.toUpperCase().trim());
+        } catch (IllegalArgumentException e) {
+            log.warn("[GenerationService] Unknown dnaPreset value '{}' — ignoring", value);
+            return null;
+        }
+    }
 }
