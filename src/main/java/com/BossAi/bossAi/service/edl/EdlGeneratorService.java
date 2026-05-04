@@ -11,6 +11,7 @@ import com.BossAi.bossAi.service.director.JustifiedCut;
 import com.BossAi.bossAi.service.director.NarrationAnalysis;
 import com.BossAi.bossAi.service.director.UserEditIntent;
 import com.BossAi.bossAi.service.dna.AssetClassifierService;
+import com.BossAi.bossAi.service.dna.ColorGradeInterpolator;
 import com.BossAi.bossAi.service.dna.DnaPresetConfig;
 import com.BossAi.bossAi.service.dna.DnaPresetService;
 import com.BossAi.bossAi.service.dna.TextOverlayGeneratorService;
@@ -62,6 +63,7 @@ public class EdlGeneratorService {
     private final DnaPresetService dnaPresetService;
     private final AssetClassifierService assetClassifierService;
     private final TextOverlayGeneratorService textOverlayGeneratorService;
+    private final ColorGradeInterpolator colorGradeInterpolator;
 
     @Value("${dna.presets.enabled:false}")
     private boolean dnaPresetsEnabled;
@@ -1874,6 +1876,9 @@ public class EdlGeneratorService {
                 }
             }
         }
+
+        // Apply per-segment color grade based on beat assignment or timeline position
+        colorGradeInterpolator.interpolate(edl, dnaConfig);
 
         // Build DNA text overlays (HOOK, RESULT, CTA) and replace existing ones.
         // Existing subtitle-type overlays (whisper words) are preserved separately —
