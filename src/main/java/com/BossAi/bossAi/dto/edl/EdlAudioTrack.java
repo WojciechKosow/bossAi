@@ -7,6 +7,8 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.util.Map;
+
 /**
  * Sciezka audio na timeline — voiceover, muzyka, SFX.
  */
@@ -55,4 +57,10 @@ public class EdlAudioTrack {
 
     @JsonProperty("trim_out_ms")
     private Integer trimOutMs;
+
+    @JsonProperty("volume_by_beat")
+    private Map<String, Double> volumeByBeat;
+
+    @JsonProperty("music_style")
+    private String musicStyle;
 }

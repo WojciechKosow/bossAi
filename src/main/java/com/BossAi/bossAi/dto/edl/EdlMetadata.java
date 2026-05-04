@@ -43,4 +43,10 @@ public class EdlMetadata {
 
     @JsonProperty("color_grade")
     private EdlColorGrade colorGrade;
+
+    @JsonProperty("dna_preset")
+    private String dnaPreset;
+
+    @JsonProperty("dna_version")
+    private String dnaVersion;
 }

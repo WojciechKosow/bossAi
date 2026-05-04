@@ -56,6 +56,12 @@ public class EdlSegment {
     @JsonProperty("transition")
     private EdlTransition transition;
 
+    @JsonProperty("beat")
+    private String beat;
+
+    @JsonProperty("color_grade_override")
+    private EdlColorGrade colorGradeOverride;
+
     public int getDurationMs() {
         return endMs - startMs;
     }
