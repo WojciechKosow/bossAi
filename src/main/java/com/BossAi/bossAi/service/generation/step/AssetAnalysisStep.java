@@ -98,8 +98,57 @@ public class AssetAnalysisStep implements GenerationStep {
             log.warn("[AssetAnalysisStep] Intent parsing FAILED — kontynuuję bez intent: {}", e.getMessage());
         }
 
+        // If user gave no prompt, enrich the synthetic prompt with vision findings
+        enrichSyntheticPromptIfNeeded(context, profiles);
+
         log.info("[AssetAnalysisStep] DONE — profile: {}, intent: {}",
                 context.getAssetProfiles() != null ? context.getAssetProfiles().size() : 0,
                 context.getUserEditIntent() != null ? "OK" : "null");
+    }
+
+    /**
+     * Wzbogaca syntetyczny prompt (wygenerowany przez buildContext gdy user nie podał promptu)
+     * o rzeczywiste opisy wizualne z AssetProfiler.
+     *
+     * Efekt: ScriptStep dostaje coś jak:
+     *   "Problem → Payoff TikTok ad.
+     *    Assets: woman looking frustrated at dry skin (hook/pain),
+     *            close-up of serum bottle with glowing effect (product demo),
+     *            woman smiling with glowing skin (result/transformation)"
+     *
+     * To daje GPT kontekst bez prompt usera.
+     */
+    private void enrichSyntheticPromptIfNeeded(GenerationContext context, List<AssetProfile> profiles) {
+        String currentPrompt = context.getPrompt();
+        // Only enrich synthetic prompts (no real user prompt)
+        if (currentPrompt != null && currentPrompt.length() > 60
+                && !currentPrompt.startsWith("Problem → Payoff")) {
+            return; // real user prompt — don't overwrite
+        }
+        if (profiles == null || profiles.isEmpty()) return;
+
+        StringBuilder enriched = new StringBuilder();
+        if (currentPrompt != null && !currentPrompt.isBlank()) {
+            enriched.append(currentPrompt).append("\n\n");
+        }
+        enriched.append("Assets provided by user (in order):\n");
+        for (int i = 0; i < profiles.size(); i++) {
+            AssetProfile p = profiles.get(i);
+            enriched.append("  ").append(i).append(". ");
+            if (p.getVisualDescription() != null && !p.getVisualDescription().isBlank()) {
+                enriched.append(p.getVisualDescription());
+            }
+            if (p.getSuggestedRole() != null) {
+                enriched.append(" [role: ").append(p.getSuggestedRole()).append("]");
+            }
+            if (p.getMood() != null) {
+                enriched.append(" [mood: ").append(p.getMood()).append("]");
+            }
+            enriched.append("\n");
+        }
+
+        context.setPrompt(enriched.toString().trim());
+        log.info("[AssetAnalysisStep] Synthetic prompt enriched with vision data ({} chars)",
+                context.getPrompt().length());
     }
 }

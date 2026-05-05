@@ -475,10 +475,25 @@ public class GenerationServiceImpl implements GenerationService {
                     customTtsAssets.size());
         }
 
+        // Auto-DNA: when user uploads assets without a prompt → Problem→Payoff by default
+        boolean promptBlank = request.getPrompt() == null || request.getPrompt().isBlank();
+        boolean hasDnaOverride = request.getDnaPreset() != null && !request.getDnaPreset().isBlank();
+        DnaPreset resolvedDnaPreset = parseDnaPreset(request.getDnaPreset());
+
+        String resolvedPrompt = request.getPrompt();
+        if (!customMediaAssets.isEmpty() && promptBlank) {
+            if (!hasDnaOverride) {
+                resolvedDnaPreset = DnaPreset.PROBLEM_PAYOFF;
+                log.info("[GenerationService] No prompt + custom assets → auto-applying PROBLEM_PAYOFF DNA");
+            }
+            // Synthetic prompt — ScriptStep enriches this with vision profiles + DNA template
+            resolvedPrompt = "Problem → Payoff TikTok ad for ecommerce / beauty / health product";
+        }
+
         return GenerationContext.builder()
                 .generationId(generation.getId())
                 .userId(user.getId())
-                .prompt(request.getPrompt())
+                .prompt(resolvedPrompt)
                 .planType(userPlan.getPlanType())
                 .watermarkEnabled(planDefinition.isWatermark())
                 .userInputAssets(userAssets)
@@ -492,7 +507,7 @@ public class GenerationServiceImpl implements GenerationService {
                 .forceReuseForTesting(forceReuse)
                 .styleConfig(styleConfig)
                 .style(request.getStyle())
-                .dnaPreset(parseDnaPreset(request.getDnaPreset()))
+                .dnaPreset(resolvedDnaPreset)
                 .build();
     }
 

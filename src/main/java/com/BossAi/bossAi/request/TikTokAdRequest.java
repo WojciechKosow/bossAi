@@ -4,7 +4,6 @@ import com.BossAi.bossAi.entity.VideoStyle;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
-import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 import lombok.AllArgsConstructor;
 import lombok.Data;
@@ -19,8 +18,12 @@ import java.util.UUID;
 @AllArgsConstructor
 public class TikTokAdRequest {
 
-    @NotBlank(message = "Prompt cannot be blank")
-    @Size(min = 10, max = 2000, message = "Prompt has to be from 10 to 2000 chars long")
+    /**
+     * Optional — when null/blank and customMediaAssetIds are provided,
+     * the pipeline auto-applies PROBLEM_PAYOFF DNA and generates narration
+     * from vision analysis of the uploaded assets.
+     */
+    @Size(max = 2000, message = "Prompt max 2000 chars")
     private String prompt;
 
     private List<UUID> assetIds;
