@@ -98,14 +98,30 @@ public class ScriptStep implements GenerationStep {
         context.setScript(script);
 
         // Buduj SceneAsset z każdej sceny
+        // Backfill imagePrompt for custom IMAGE assets when GPT left it blank
+        List<Asset> customMedia = context.getCustomMediaAssets();
+        List<AssetProfile> profiles = context.getAssetProfiles();
+        boolean hasCustomMedia = context.hasCustomMedia();
+
         List<SceneAsset> scenes = script.scenes().stream()
-                .map(scene -> SceneAsset.builder()
-                        .index(scene.index())
-                        .imagePrompt(scene.imagePrompt())
-                        .motionPrompt(scene.motionPrompt())
-                        .durationMs(scene.durationMs())
-                        .subtitleText(scene.subtitleText())
-                        .build())
+                .map(scene -> {
+                    String imagePrompt = scene.imagePrompt();
+                    if ((imagePrompt == null || imagePrompt.isBlank()) && hasCustomMedia
+                            && scene.index() < customMedia.size()) {
+                        imagePrompt = buildFallbackImagePrompt(
+                                customMedia.get(scene.index()),
+                                profiles != null && scene.index() < profiles.size()
+                                        ? profiles.get(scene.index()) : null);
+                        log.warn("[ScriptStep] Scena {} — GPT nie podał imagePrompt, backfill: {}", scene.index(), imagePrompt);
+                    }
+                    return SceneAsset.builder()
+                            .index(scene.index())
+                            .imagePrompt(imagePrompt)
+                            .motionPrompt(scene.motionPrompt())
+                            .durationMs(scene.durationMs())
+                            .subtitleText(scene.subtitleText())
+                            .build();
+                })
                 .collect(Collectors.toList());
 
         context.setScenes(scenes);
@@ -144,6 +160,8 @@ public class ScriptStep implements GenerationStep {
             sb.append(".");
 
             sb.append("\nYou MUST generate EXACTLY ").append(media.size()).append(" scenes to match the number of user assets.");
+            sb.append("\nCRITICAL: imagePrompt is ALWAYS REQUIRED for every scene — even for custom IMAGE assets.");
+            sb.append("\nFor custom IMAGE scenes, set imagePrompt to a visual description of the uploaded image content (e.g. 'woman holding product, warm lighting, 9:16 vertical format, photorealistic'). NEVER leave imagePrompt blank.");
 
             if (context.isUseGptOrdering()) {
                 sb.append("\nYou decide the OPTIMAL ORDER of scenes for maximum impact.");
@@ -247,5 +265,21 @@ public class ScriptStep implements GenerationStep {
         }
 
         return sb.toString();
+    }
+
+    private String buildFallbackImagePrompt(Asset asset, AssetProfile profile) {
+        if (profile != null && profile.getVisualDescription() != null && !profile.getVisualDescription().isBlank()) {
+            return profile.getVisualDescription() + ", 9:16 vertical format, photorealistic";
+        }
+        if (asset.getPrompt() != null && !asset.getPrompt().isBlank()) {
+            return asset.getPrompt() + ", 9:16 vertical format, photorealistic";
+        }
+        String filename = asset.getOriginalFilename();
+        if (filename != null && !filename.isBlank()) {
+            // Strip extension and use as hint
+            String name = filename.replaceAll("\\.[^.]+$", "").replace("_", " ").replace("-", " ");
+            return "Custom uploaded image: " + name + ", 9:16 vertical format, photorealistic";
+        }
+        return "Custom uploaded image, 9:16 vertical format, photorealistic";
     }
 }
