@@ -604,9 +604,9 @@ public class OpenAiService {
         if (result.scenes() == null || result.scenes().isEmpty()) {
             throw new RuntimeException("ScriptResult: brak scen");
         }
-        if (result.scenes().size() > 12) {
+        if (result.scenes().size() > 30) {
             throw new RuntimeException("ScriptResult: za duzo scen ("
-                    + result.scenes().size() + ") \u2014 max 12");
+                    + result.scenes().size() + ") \u2014 max 30");
         }
         for (ScriptResult.SceneScript scene : result.scenes()) {
             if (scene.imagePrompt() == null || scene.imagePrompt().isBlank()) {
