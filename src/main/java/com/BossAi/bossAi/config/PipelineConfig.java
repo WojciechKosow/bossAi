@@ -48,6 +48,7 @@ public class PipelineConfig {
     private final RenderStep renderStep;
     private final DirectorStep directorStep;
     private final AssetReuseStep assetReuseStep;
+    private final AssetAnalysisStep assetAnalysisStep;
 
     @Value("${pipeline.stub:false}")
     private boolean stubMode;
@@ -62,7 +63,7 @@ public class PipelineConfig {
             return new StubTikTokAdPipeline(renderStep, aiExecutor, tempDir);
         }
         return new RealTikTokAdPipeline(
-                scriptStep, directorStep, assetReuseStep, imageStep, voiceStep,
+                assetAnalysisStep, scriptStep, directorStep, assetReuseStep, imageStep, voiceStep,
                 videoStep, musicStep, renderStep, aiExecutor
         );
     }
@@ -95,6 +96,7 @@ public class PipelineConfig {
     @Slf4j
     public static class RealTikTokAdPipeline extends TikTokAdPipeline {
 
+        private final AssetAnalysisStep assetAnalysisStep;
         private final ScriptStep scriptStep;
         private final DirectorStep directorStep;
         private final AssetReuseStep assetReuseStep;
@@ -106,8 +108,9 @@ public class PipelineConfig {
         private final Executor   executor;
 
         public RealTikTokAdPipeline(
-                ScriptStep s, DirectorStep d, AssetReuseStep ar, ImageStep i, VoiceStep vo,
-                VideoStep vi, MusicStep m, RenderStep r, Executor e) {
+                AssetAnalysisStep aa, ScriptStep s, DirectorStep d, AssetReuseStep ar, ImageStep i,
+                VoiceStep vo, VideoStep vi, MusicStep m, RenderStep r, Executor e) {
+            this.assetAnalysisStep = aa;
             this.scriptStep = s; this.directorStep = d; this.assetReuseStep = ar;
             this.imageStep = i; this.voiceStep  = vo; this.videoStep = vi;
             this.musicStep  = m; this.renderStep = r;
@@ -116,6 +119,11 @@ public class PipelineConfig {
 
         @Override
         public void execute(GenerationContext context, StepCallback callback) throws Exception {
+
+            // 0 — ASSET ANALYSIS (przed ScriptStep — daje GPT "oczy" na assety)
+            log.info("[Pipeline {}] → ASSET ANALYSIS", context.getGenerationId());
+            callback.onStep(GenerationStepName.SCRIPT);
+            assetAnalysisStep.execute(context);
 
             // 1 — SCRIPT
             log.info("[Pipeline {}] → SCRIPT", context.getGenerationId());

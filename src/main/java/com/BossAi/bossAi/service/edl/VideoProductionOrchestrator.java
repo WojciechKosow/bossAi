@@ -168,20 +168,31 @@ public class VideoProductionOrchestrator {
      *   - NarrationAnalyzer, EditDnaGenerator, CutEngine, EdlGenerator
      */
     private void analyzeAssetsAndIntent(GenerationContext context) {
-        // Krok 1: Analiza assetów (tylko jeśli user dostarczył custom media)
-        List<AssetProfile> profiles = List.of();
-        if (context.hasCustomMedia()) {
+        // AssetAnalysisStep (pipeline krok 0) już to wykonał przed ScriptStep.
+        // Orchestrator re-analizuje tylko jeśli profile są puste (np. brak custom media
+        // w pipeline lub błąd w AssetAnalysisStep).
+        List<AssetProfile> profiles = context.getAssetProfiles() != null
+                ? context.getAssetProfiles() : List.of();
+
+        if (profiles.isEmpty() && context.hasCustomMedia()) {
             try {
                 profiles = assetAnalyzer.analyzeAssets(
                         context.getCustomMediaAssets(), context.getPrompt());
                 context.setAssetProfiles(profiles);
-                log.info("[Orchestrator] Asset analysis complete — {} profiles", profiles.size());
+                log.info("[Orchestrator] Asset analysis (late fallback) — {} profili", profiles.size());
             } catch (Exception e) {
                 log.warn("[Orchestrator] Asset analysis failed — continuing without profiles: {}", e.getMessage());
             }
+        } else {
+            log.info("[Orchestrator] Asset profiles already set ({}) — skipping re-analysis", profiles.size());
         }
 
-        // Krok 2: Parsowanie intencji usera
+        // Intent parsing: skip if already done by AssetAnalysisStep
+        if (context.getUserEditIntent() != null) {
+            log.info("[Orchestrator] UserEditIntent already parsed — skipping");
+            return;
+        }
+
         try {
             UserEditIntent editIntent = userIntentParser.parseIntent(
                     context.getPrompt(),
