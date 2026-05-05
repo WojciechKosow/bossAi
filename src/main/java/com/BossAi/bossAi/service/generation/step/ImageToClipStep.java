@@ -98,6 +98,34 @@ public class ImageToClipStep {
         return outputPath.toString();
     }
 
+    /**
+     * Konwertuje lokalny plik obrazu do klipu MP4 — bez pobierania przez HTTP.
+     * Używane dla user-uploaded custom image assets (nie mają imageUrl, są w storage).
+     *
+     * @param localImagePath ścieżka do pliku obrazu na dysku
+     * @param durationMs     czas trwania klipu
+     * @param sceneIndex     indeks sceny (do nazwy pliku wyjściowego)
+     * @param workDir        katalog roboczy FFmpeg
+     * @return ścieżka do wygenerowanego MP4
+     */
+    public String convertLocalImageToClip(Path localImagePath, int durationMs,
+                                           int sceneIndex, Path workDir) throws Exception {
+        log.info("[ImageToClipStep] Scena {} — local image: {}, durationMs: {}",
+                sceneIndex, localImagePath, durationMs);
+
+        String outputFilename = String.format("scene_%02d_image_clip.mp4", sceneIndex);
+        Path outputPath = workDir.resolve(outputFilename);
+
+        if (kenBurnsEnabled) {
+            runKenBurnsConvert(localImagePath, durationMs, outputPath);
+        } else {
+            runStaticConvert(localImagePath, durationMs, outputPath);
+        }
+
+        log.info("[ImageToClipStep] Scena {} DONE → {}", sceneIndex, outputPath);
+        return outputPath.toString();
+    }
+
     // =========================================================================
     // FFMPEG CONVERSIONS
     // =========================================================================
