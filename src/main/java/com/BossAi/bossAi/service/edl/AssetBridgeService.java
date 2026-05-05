@@ -376,16 +376,8 @@ public class AssetBridgeService {
     }
 
     private AssetType resolveSceneAssetType(SceneAsset scene) {
-        String path = scene.getVideoLocalPath();
-        if (path != null && path.contains("_image_clip")) {
-            return AssetType.IMAGE;
-        }
-        if (scene.getVideoUrl() != null) {
-            return AssetType.VIDEO;
-        }
-        if (path != null && (path.endsWith(".mp4") || path.endsWith(".mov") || path.endsWith(".webm"))) {
-            return AssetType.VIDEO;
-        }
+        // All VideoStep outputs are MP4 — always VIDEO for Remotion renderer.
+        // image_clip files are Ken Burns loops (MP4), not static images.
         return AssetType.VIDEO;
     }
 
