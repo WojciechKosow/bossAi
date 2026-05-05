@@ -1877,6 +1877,14 @@ public class EdlGeneratorService {
             }
         }
 
+        // Assign beat letters to segments that GPT left untagged (by proportional position)
+        if (totalDurationMs > 0) {
+            assignBeatsToSegments(edl, dnaConfig, totalDurationMs);
+        }
+
+        // Apply DNA effects/transitions from beat configs to segments that have none
+        applyBeatEffectsToSegments(edl, dnaConfig);
+
         // Apply per-segment color grade based on beat assignment or timeline position
         colorGradeInterpolator.interpolate(edl, dnaConfig);
 
@@ -1914,20 +1922,29 @@ public class EdlGeneratorService {
             sb.append(template).append("\n");
         }
 
-        // Dynamic: beat timestamps scaled to actual TTS duration
+        // Dynamic: beat timestamps scaled to actual video duration
+        // Priority: word timings (most accurate) → scene sum (fallback)
         int ttsDurationMs = 0;
         if (context.getWordTimings() != null && !context.getWordTimings().isEmpty()) {
             ttsDurationMs = context.getWordTimings().get(context.getWordTimings().size() - 1).endMs();
         }
+        if (ttsDurationMs <= 0 && context.getScenes() != null && !context.getScenes().isEmpty()) {
+            ttsDurationMs = context.getScenes().stream().mapToInt(SceneAsset::getDurationMs).sum();
+        }
         if (ttsDurationMs > 0 && dnaConfig.getBeats() != null) {
-            sb.append("=== DNA BEAT TIMESTAMPS (scaled to TTS duration: ").append(ttsDurationMs).append("ms) ===\n");
+            sb.append("=== DNA BEAT TIMESTAMPS (scaled to video duration: ").append(ttsDurationMs).append("ms) ===\n");
             double scale = ttsDurationMs / 30000.0; // presets defined for 30s standard
-            dnaConfig.getBeats().forEach((letter, beat) -> {
-                int scaledStart = (int) (beat.getStartMs() * scale);
-                int scaledEnd   = (int) (beat.getEndMs()   * scale);
-                sb.append(String.format("  Beat %s (%s): %dms – %dms\n",
-                        letter, beat.getName(), scaledStart, scaledEnd));
-            });
+            // Sort beats A→E for readability
+            dnaConfig.getBeats().entrySet().stream()
+                    .sorted(java.util.Map.Entry.comparingByKey())
+                    .forEach(entry -> {
+                        String letter = entry.getKey();
+                        DnaPresetConfig.BeatConfig beat = entry.getValue();
+                        int scaledStart = (int) (beat.getStartMs() * scale);
+                        int scaledEnd   = (int) (beat.getEndMs()   * scale);
+                        sb.append(String.format("  Beat %s (%s): %dms – %dms\n",
+                                letter, beat.getName(), scaledStart, scaledEnd));
+                    });
             sb.append("\n");
         }
 
@@ -1958,6 +1975,84 @@ public class EdlGeneratorService {
             sb.append(String.format("  asset_id=%s  suggested_beat=%s\n", asset.getId(), beat));
         }
         sb.append("These are heuristic suggestions. Override if the visual content better fits another beat.\n\n");
+    }
+
+    /**
+     * Assigns beat letter (A–E) to layer-0 segments that GPT left untagged.
+     * Uses proportional position: segment.startMs / totalDurationMs mapped onto
+     * the beat's 30s-baseline range (startMs/30000 … endMs/30000).
+     * Segments already tagged by GPT are left unchanged.
+     */
+    private void assignBeatsToSegments(EdlDto edl, DnaPresetConfig dnaConfig, int totalDurationMs) {
+        if (edl.getSegments() == null || dnaConfig.getBeats() == null) return;
+
+        for (EdlSegment seg : edl.getSegments()) {
+            if (seg.getLayer() > 0) continue;
+            if (seg.getBeat() != null && !seg.getBeat().isBlank()) continue; // GPT already tagged
+
+            double progress = (double) seg.getStartMs() / totalDurationMs; // 0.0 – 1.0
+            String beat = findBeatForProgress(dnaConfig.getBeats(), progress);
+            seg.setBeat(beat);
+        }
+    }
+
+    /** Maps a 0–1 progress value onto the beat whose 30s-baseline range contains it. */
+    private String findBeatForProgress(Map<String, DnaPresetConfig.BeatConfig> beats, double progress) {
+        String fallback = "C";
+        for (Map.Entry<String, DnaPresetConfig.BeatConfig> entry : beats.entrySet()) {
+            double start = entry.getValue().getStartMs() / 30_000.0;
+            double end   = entry.getValue().getEndMs()   / 30_000.0;
+            if (progress >= start && progress < end) return entry.getKey();
+        }
+        // progress == 1.0 edge case (last segment) → last beat
+        return beats.containsKey("E") ? "E" : fallback;
+    }
+
+    /**
+     * Applies effects and transitions from DNA BeatConfig.scenePatterns to segments.
+     * Only fills gaps — never overrides effects/transitions already set by GPT or CutEngine.
+     * Rotates through available scene patterns per beat to add visual variety.
+     */
+    private void applyBeatEffectsToSegments(EdlDto edl, DnaPresetConfig dnaConfig) {
+        if (edl.getSegments() == null || dnaConfig.getBeats() == null) return;
+
+        // Count how many times each beat has been used (for pattern rotation)
+        Map<String, Integer> beatUsageCount = new java.util.HashMap<>();
+
+        List<EdlSegment> primarySegments = edl.getSegments().stream()
+                .filter(s -> s.getLayer() == 0)
+                .collect(java.util.stream.Collectors.toList());
+
+        for (EdlSegment seg : primarySegments) {
+            String beatKey = seg.getBeat();
+            if (beatKey == null) continue;
+
+            DnaPresetConfig.BeatConfig beatConfig = dnaConfig.getBeats().get(beatKey);
+            if (beatConfig == null || beatConfig.getScenePatterns() == null
+                    || beatConfig.getScenePatterns().isEmpty()) continue;
+
+            // Rotate patterns: pick pattern[usage % patterns.size()]
+            int usage = beatUsageCount.getOrDefault(beatKey, 0);
+            DnaPresetConfig.ScenePattern pattern =
+                    beatConfig.getScenePatterns().get(usage % beatConfig.getScenePatterns().size());
+            beatUsageCount.put(beatKey, usage + 1);
+
+            // Apply effect only if segment has none
+            if ((seg.getEffects() == null || seg.getEffects().isEmpty())
+                    && pattern.getEffect() != null) {
+                seg.setEffects(List.of(pattern.getEffect()));
+            }
+
+            // Apply transition only if segment has none
+            if (seg.getTransition() == null && pattern.getTransition() != null) {
+                seg.setTransition(pattern.getTransition());
+            }
+        }
+
+        long effectsApplied = primarySegments.stream()
+                .filter(s -> s.getEffects() != null && !s.getEffects().isEmpty()).count();
+        log.info("[EdlGenerator] DNA effects applied — {}/{} primary segments have effects",
+                effectsApplied, primarySegments.size());
     }
 
     private String loadDnaPromptTemplate(String presetId) {
