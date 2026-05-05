@@ -166,7 +166,7 @@ public class VideoStep implements GenerationStep {
                 Asset customAsset = customMedia.get(i);
                 log.warn("[VideoStep] TEST MODE — scene {} CUSTOM IMAGE from storage → FFmpeg Ken Burns", scene.getIndex());
                 byte[] imageBytes = storageService.load(customAsset.getStorageKey());
-                String ext = detectImageExtension(customAsset.getMimeType(), customAsset.getFilename());
+                String ext = detectImageExtension(customAsset.getOriginalFilename());
                 Path imagePath = workDir.resolve(String.format("scene_%02d_custom%s", scene.getIndex(), ext));
                 Files.write(imagePath, imageBytes);
                 String clipPath = imageToClipStep.convertLocalImageToClip(
@@ -252,7 +252,7 @@ public class VideoStep implements GenerationStep {
                 if (customAsset.getType() == AssetType.IMAGE) {
                     log.info("[VideoStep] Scena {} CUSTOM IMAGE → FFmpeg Ken Burns (from storage)", scene.getIndex());
                     byte[] imageBytes = storageService.load(customAsset.getStorageKey());
-                    String ext = detectImageExtension(customAsset.getMimeType(), customAsset.getFilename());
+                    String ext = detectImageExtension(customAsset.getOriginalFilename());
                     Path imagePath = workDir.resolve(String.format("scene_%02d_custom%s", scene.getIndex(), ext));
                     Files.write(imagePath, imageBytes);
                     String clipPath = imageToClipStep.convertLocalImageToClip(
@@ -478,19 +478,12 @@ public class VideoStep implements GenerationStep {
     }
 
     /**
-     * Detects the file extension for an image asset from its MIME type or filename.
-     * Returns ".jpg" as fallback if neither provides a clear answer.
+     * Detects the file extension for an image asset from its original filename.
+     * Returns ".jpg" as fallback when the extension is not recognizable.
      */
-    private String detectImageExtension(String mimeType, String filename) {
-        if (mimeType != null) {
-            String lower = mimeType.toLowerCase(Locale.ROOT);
-            if (lower.contains("png"))  return ".png";
-            if (lower.contains("webp")) return ".webp";
-            if (lower.contains("gif"))  return ".gif";
-            if (lower.contains("jpeg") || lower.contains("jpg")) return ".jpg";
-        }
-        if (filename != null) {
-            String lower = filename.toLowerCase(Locale.ROOT);
+    private String detectImageExtension(String originalFilename) {
+        if (originalFilename != null) {
+            String lower = originalFilename.toLowerCase(Locale.ROOT);
             if (lower.endsWith(".png"))  return ".png";
             if (lower.endsWith(".webp")) return ".webp";
             if (lower.endsWith(".gif"))  return ".gif";

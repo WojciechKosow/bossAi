@@ -610,7 +610,8 @@ public class OpenAiService {
         }
         for (ScriptResult.SceneScript scene : result.scenes()) {
             if (scene.imagePrompt() == null || scene.imagePrompt().isBlank()) {
-                throw new RuntimeException("ScriptResult: scena " + scene.index() + " bez imagePrompt");
+                // Custom image assets legitimately have no imagePrompt — ScriptStep backfills
+                log.warn("[OpenAiService] ScriptResult: scena {} bez imagePrompt (zostanie uzupelniona przez ScriptStep)", scene.index());
             }
             if (scene.durationMs() < 1000) {
                 throw new RuntimeException("ScriptResult: scena " + scene.index()
