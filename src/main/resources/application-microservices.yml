@@ -9,7 +9,7 @@ audio-analysis:
 
 dna:
   presets:
-    enabled: false   # set true to activate Toucan DNA preset flow
+    enabled: true
 
 remotion-renderer:
   base-url: ${REMOTION_RENDERER_URL:http://localhost:3000}

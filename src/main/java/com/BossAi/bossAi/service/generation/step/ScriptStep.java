@@ -73,10 +73,14 @@ public class ScriptStep implements GenerationStep {
                 GenerationStepName.SCRIPT.getDisplayMessage()
         );
 
-        log.info("[ScriptStep] START — generationId: {}, style: {}, prompt: {}...",
+        String promptPreview = context.getPrompt() != null
+                ? context.getPrompt().substring(0, Math.min(80, context.getPrompt().length()))
+                : "(no prompt — DNA auto-mode)";
+        log.info("[ScriptStep] START — generationId: {}, style: {}, dnaPreset: {}, prompt: {}...",
                 context.getGenerationId(),
                 context.getStyle(),
-                context.getPrompt().substring(0, Math.min(80, context.getPrompt().length())));
+                context.getDnaPreset(),
+                promptPreview);
 
         String enrichedPrompt = buildEnrichedPrompt(context);
         String contentType    = mapStyleToContentType(context.getStyle());
@@ -138,7 +142,8 @@ public class ScriptStep implements GenerationStep {
      * Dodaje style-specific hints do promptu — GPT dostaje więcej kontekstu.
      */
     private String buildEnrichedPrompt(GenerationContext context) {
-        StringBuilder sb = new StringBuilder(context.getPrompt());
+        StringBuilder sb = new StringBuilder(
+                context.getPrompt() != null ? context.getPrompt() : "");
 
         // Instrukcje ze StyleConfig (pacing, energy, opis stylu)
         if (context.getStyleConfig() != null) {
