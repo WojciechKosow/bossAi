@@ -1877,6 +1877,11 @@ public class EdlGeneratorService {
             }
         }
 
+        // Build DNA text overlays (HOOK, RESULT, CTA) and replace existing ones.
+        // Existing subtitle-type overlays (whisper words) are preserved separately —
+        // text_overlays only holds non-subtitle overlays at this stage.
+        int totalDurationMs = edl.getMetadata() != null ? edl.getMetadata().getTotalDurationMs() : 0;
+
         // Assign beat letters to segments that GPT left untagged (by proportional position)
         if (totalDurationMs > 0) {
             assignBeatsToSegments(edl, dnaConfig, totalDurationMs);
@@ -1888,10 +1893,6 @@ public class EdlGeneratorService {
         // Apply per-segment color grade based on beat assignment or timeline position
         colorGradeInterpolator.interpolate(edl, dnaConfig);
 
-        // Build DNA text overlays (HOOK, RESULT, CTA) and replace existing ones.
-        // Existing subtitle-type overlays (whisper words) are preserved separately —
-        // text_overlays only holds non-subtitle overlays at this stage.
-        int totalDurationMs = edl.getMetadata() != null ? edl.getMetadata().getTotalDurationMs() : 0;
         Map<String, String> textOverrides = context.getUserDnaInput() != null
                 ? context.getUserDnaInput().getTextPlaceholderOverrides() : null;
 
