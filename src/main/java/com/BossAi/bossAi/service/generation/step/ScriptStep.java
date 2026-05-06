@@ -269,6 +269,19 @@ public class ScriptStep implements GenerationStep {
             sb.append("\n\nUser provided background music — align scene energy to music tempo.");
         }
 
+        // Hard scene-count constraint — placed last so GPT treats it as highest priority.
+        // The MANDATORY STRUCTURE template in the system prompt specifies a fixed number of scenes
+        // which conflicts with user-provided custom media count. This override wins.
+        if (context.hasCustomMedia()) {
+            int assetCount = context.getCustomMediaAssets().size();
+            sb.append("\n\n");
+            sb.append("FINAL CONSTRAINT — overrides ALL structure templates above:\n");
+            sb.append("Generate EXACTLY ").append(assetCount).append(" scenes (one per user-provided asset).\n");
+            sb.append("Do NOT generate ").append(assetCount - 1).append(" scenes. ");
+            sb.append("Do NOT generate ").append(assetCount + 1).append(" scenes. ");
+            sb.append("Generate EXACTLY ").append(assetCount).append(" scenes.");
+        }
+
         return sb.toString();
     }
 
