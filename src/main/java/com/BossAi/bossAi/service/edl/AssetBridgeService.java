@@ -275,28 +275,29 @@ public class AssetBridgeService {
                 voiceCursorMs = clipEndMs;
                 if (voiceCursorMs >= totalMs) break;
             }
-        } else if (voiceAssets.size() == 1 && sceneCount > 1) {
-            // Single MP3 covering whole narration — split into per-scene slots
-            // so editor gets independently movable blocks (all point to same asset).
+        } else if (voiceAssets.size() == 1) {
+            // Single MP3 covering whole narration — one track, actual file duration.
+            // Scene-duration estimates from GPT are unreliable (often longer than real TTS),
+            // so we derive the real duration from word timings (most accurate) or asset metadata.
             ProjectAsset voice = voiceAssets.get(0);
-            int voiceCursorMs = 0;
-            for (int i = 0; i < sceneCount; i++) {
-                SceneAsset scene = context.getScenes().get(i);
-                int duration = Math.max(500, scene.getDurationMs());
-                int sliceEnd = voiceCursorMs + duration;
-                audioTracks.add(EdlAudioTrack.builder()
-                        .id(UUID.randomUUID().toString())
-                        .assetId(voice.getId().toString())
-                        .assetUrl(voice.getStorageUrl())
-                        .type("voiceover")
-                        .startMs(voiceCursorMs)
-                        .endMs(sliceEnd)
-                        .trimInMs(voiceCursorMs)
-                        .trimOutMs(sliceEnd)
-                        .volume(1.0)
-                        .build());
-                voiceCursorMs = sliceEnd;
-            }
+            int actualVoiceDurationMs = resolveVoiceDurationMs(context, voice, totalMs);
+            audioTracks.add(EdlAudioTrack.builder()
+                    .id(UUID.randomUUID().toString())
+                    .assetId(voice.getId().toString())
+                    .assetUrl(voice.getStorageUrl())
+                    .type("voiceover")
+                    .startMs(0)
+                    .endMs(actualVoiceDurationMs)
+                    .trimInMs(0)
+                    .trimOutMs(actualVoiceDurationMs)
+                    .volume(1.0)
+                    .build());
+            log.info("[AssetBridge] Voice track: single block {}ms (wordTimings={}, assetMeta={}s, scenesSum={}ms)",
+                    actualVoiceDurationMs,
+                    context.getWordTimings() != null && !context.getWordTimings().isEmpty()
+                            ? context.getWordTimings().get(context.getWordTimings().size() - 1).endMs() : "none",
+                    voice.getDurationSeconds(),
+                    totalMs);
         } else if (!voiceAssets.isEmpty()) {
             int voiceCursorMs = 0;
             for (int i = 0; i < voiceAssets.size(); i++) {
@@ -379,6 +380,26 @@ public class AssetBridgeService {
         // All VideoStep outputs are MP4 — always VIDEO for Remotion renderer.
         // image_clip files are Ken Burns loops (MP4), not static images.
         return AssetType.VIDEO;
+    }
+
+    /**
+     * Resolves actual voice MP3 duration in priority order:
+     *   1. Word timings (last word endMs — most accurate, comes from TTS/WhisperX)
+     *   2. ProjectAsset.durationSeconds (populated when Remotion fetches metadata)
+     *   3. Fallback: sum of scene durations (GPT estimate — least reliable)
+     */
+    private int resolveVoiceDurationMs(GenerationContext context, ProjectAsset voiceAsset, int sceneSumMs) {
+        // 1. Word timings
+        if (context.getWordTimings() != null && !context.getWordTimings().isEmpty()) {
+            int wtDuration = context.getWordTimings().get(context.getWordTimings().size() - 1).endMs();
+            if (wtDuration > 0) return wtDuration;
+        }
+        // 2. Asset metadata
+        if (voiceAsset.getDurationSeconds() != null && voiceAsset.getDurationSeconds() > 0) {
+            return (int) Math.round(voiceAsset.getDurationSeconds() * 1000.0);
+        }
+        // 3. Scene sum fallback
+        return sceneSumMs;
     }
 
     /** Estimates TTS clip duration from file size (roughly 128kbps MP3 = 16 bytes/ms). */
