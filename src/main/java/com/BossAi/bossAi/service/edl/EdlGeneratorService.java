@@ -121,6 +121,9 @@ public class EdlGeneratorService {
             // Apply DNA preset (overrides EditDna color grade when both present)
             applyDnaToEdl(edl, dnaConfig, context);
 
+            // Strip effects unknown to Remotion before validation — prevents 400 errors
+            stripUnknownEffects(edl);
+
             EdlValidator.ValidationResult result = edlValidator.validate(edl);
             if (result.valid()) {
                 log.info("[EdlGenerator] CutEngine EDL valid — {} segments, {} audio tracks, {} whisper words",
@@ -157,6 +160,9 @@ public class EdlGeneratorService {
 
         // Multi-layer composition (same as deterministic path)
         appendLayerSegments(edl, context, projectAssets);
+
+        // Strip effects unknown to Remotion before validation — prevents 400 errors
+        stripUnknownEffects(edl);
 
         EdlValidator.ValidationResult result = edlValidator.validate(edl);
         if (!result.valid()) {
@@ -453,6 +459,26 @@ public class EdlGeneratorService {
      * Nie rusza pierwszego segmentu start (0ms) ani ostatniego segmentu end (total_duration).
      * Zapewnia ciaglosc timeline'u (end[i] == start[i+1]).
      */
+
+    /**
+     * Removes effects whose type is not recognized by Remotion.
+     * Called before sending EDL to the renderer to prevent 400 errors.
+     * The EffectRegistry is the single source of truth for valid effect names.
+     */
+    private void stripUnknownEffects(EdlDto edl) {
+        if (edl.getSegments() == null) return;
+        int stripped = 0;
+        for (EdlSegment seg : edl.getSegments()) {
+            if (seg.getEffects() == null || seg.getEffects().isEmpty()) continue;
+            int before = seg.getEffects().size();
+            seg.getEffects().removeIf(e -> e.getType() == null || !effectRegistry.isValidEffect(e.getType()));
+            stripped += before - seg.getEffects().size();
+        }
+        if (stripped > 0) {
+            log.warn("[EdlGenerator] Stripped {} unknown effect(s) before render — check preset configs", stripped);
+        }
+    }
+
     private void beatSnapSegments(EdlDto edl, AudioAnalysisResponse audioAnalysis) {
         if (audioAnalysis == null || audioAnalysis.beats() == null || audioAnalysis.beats().isEmpty()) {
             return;

@@ -127,7 +127,7 @@
         },
         {
           "effect": {
-            "type": "slow_zoom_in",
+            "type": "zoom_in",
             "intensity": 0.4,
             "params": { "scale_from": 1.0, "scale_to": 1.1 }
           },
@@ -193,7 +193,7 @@
       "scene_patterns": [
         {
           "effect": {
-            "type": "slow_zoom_in",
+            "type": "zoom_in",
             "intensity": 0.2,
             "params": { "scale_from": 1.0, "scale_to": 1.05 }
           },

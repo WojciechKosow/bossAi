@@ -6,9 +6,9 @@ Color arc: desaturated/cold at start (beat A) → warm/saturated at end (beat E)
 --- BEAT DEFINITIONS ---
 Beat A (HOOK/PAIN):     problem/frustration visuals. Effect: fast_zoom (intensity 0.9) or shake (intensity 0.4). Transition: cut (0ms).
 Beat B (ESCALATION):    problem deepens, stats. Effect: drift (diagonal). Transition: cut.
-Beat C (PRODUCT/DEMO):  product in use. Effect: ken_burns or slow_zoom_in. Transition: fade (200ms).
-Beat D (TRANSFORMATION): result, before/after. Effect: fade_in or reveal. Transition: wipe_right (400ms).
-Beat E (CTA):           clean, simple. Effect: slow_zoom_in (subtle). Transition: fade_out (500ms).
+Beat C (PRODUCT/DEMO):  product in use. Effect: ken_burns or zoom_in (low intensity). Transition: fade (200ms).
+Beat D (TRANSFORMATION): result, before/after. Effect: zoom_in or drift. Transition: wipe_right (400ms).
+Beat E (CTA):           clean, simple. Effect: zoom_in (subtle, intensity 0.2). Transition: fade (500ms).
 
 --- ASSET CLASSIFICATION ---
 Classify each segment by visual content:
