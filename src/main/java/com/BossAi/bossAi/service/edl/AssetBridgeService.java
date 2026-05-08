@@ -4,7 +4,10 @@ import com.BossAi.bossAi.dto.edl.EdlAudioTrack;
 import com.BossAi.bossAi.dto.edl.EdlDto;
 import com.BossAi.bossAi.dto.edl.EdlMetadata;
 import com.BossAi.bossAi.dto.edl.EdlSegment;
+import com.BossAi.bossAi.dto.edl.EdlSubtitleConfig;
 import com.BossAi.bossAi.dto.edl.EdlTextOverlay;
+import com.BossAi.bossAi.dto.edl.EdlWhisperWord;
+import com.BossAi.bossAi.service.SubtitleService;
 import com.BossAi.bossAi.entity.*;
 import com.BossAi.bossAi.service.EdlService;
 import com.BossAi.bossAi.service.ProjectAssetService;
@@ -353,6 +356,9 @@ public class AssetBridgeService {
                 ? context.getPrompt().substring(0, Math.min(context.getPrompt().length(), 80))
                 : "Video";
 
+        List<EdlWhisperWord> whisperWords = buildWhisperWords(context);
+        EdlSubtitleConfig subtitleConfig = EdlSubtitleConfig.builder().enabled(!whisperWords.isEmpty()).build();
+
         return EdlDto.builder()
                 .version(EdlDto.CURRENT_VERSION)
                 .metadata(EdlMetadata.builder()
@@ -366,7 +372,39 @@ public class AssetBridgeService {
                 .segments(segments)
                 .audioTracks(audioTracks.isEmpty() ? null : audioTracks)
                 .textOverlays(textOverlays.isEmpty() ? null : textOverlays)
+                .whisperWords(whisperWords.isEmpty() ? null : whisperWords)
+                .subtitleConfig(subtitleConfig)
                 .build();
+    }
+
+    private List<EdlWhisperWord> buildWhisperWords(GenerationContext context) {
+        if (context.getWordTimings() == null || context.getWordTimings().isEmpty()) {
+            return List.of();
+        }
+        List<SubtitleService.WordTiming> words = context.getWordTimings();
+        List<EdlWhisperWord> result = new ArrayList<>(words.size());
+        int sentenceIndex = 0;
+        int wordsInGroup = 0;
+        for (int i = 0; i < words.size(); i++) {
+            SubtitleService.WordTiming wt = words.get(i);
+            result.add(EdlWhisperWord.builder()
+                    .word(wt.word())
+                    .startMs(wt.startMs())
+                    .endMs(wt.endMs())
+                    .sentenceIndex(sentenceIndex)
+                    .build());
+            wordsInGroup++;
+            if (i < words.size() - 1) {
+                char last = wt.word().isEmpty() ? ' ' : wt.word().charAt(wt.word().length() - 1);
+                int gap = words.get(i + 1).startMs() - wt.endMs();
+                if (".!?".indexOf(last) >= 0 || gap > 400 || wordsInGroup >= 5) {
+                    sentenceIndex++;
+                    wordsInGroup = 0;
+                }
+            }
+        }
+        log.info("[AssetBridge] Built {} whisper words for basic EDL", result.size());
+        return result;
     }
 
     /**
