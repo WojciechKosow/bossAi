@@ -1127,11 +1127,45 @@ public class EdlGeneratorService {
 
         String callbackBase = remotionProperties.getCallbackBaseUrl();
 
-        // Voice track — full volume
-        ProjectAsset voiceAsset = projectAssets.stream()
+        List<ProjectAsset> voiceAssets = projectAssets.stream()
                 .filter(a -> "VOICE".equals(a.getType().name()))
-                .findFirst().orElse(null);
-        if (voiceAsset != null) {
+                .toList();
+
+        if (context.hasCustomTts() && voiceAssets.size() > 1) {
+            // Multiple custom TTS clips — place back-to-back using probed durations.
+            // whisper_words timestamps come from the concatenated audio so their offsets
+            // match these positions exactly (no gaps).
+            List<Integer> probedDurations = context.getCustomTtsClipDurationsMs();
+            boolean hasProbed = probedDurations != null && probedDurations.size() >= voiceAssets.size();
+            int voiceCursorMs = 0;
+            for (int i = 0; i < voiceAssets.size(); i++) {
+                ProjectAsset v = voiceAssets.get(i);
+                int clipMs;
+                if (hasProbed && probedDurations.get(i) > 0) {
+                    clipMs = probedDurations.get(i);
+                } else if (v.getDurationSeconds() != null) {
+                    clipMs = Math.max(1, (int) Math.round(v.getDurationSeconds() * 1000.0));
+                } else {
+                    clipMs = 3000;
+                }
+                audioTracks.add(EdlAudioTrack.builder()
+                        .id(UUID.randomUUID().toString())
+                        .assetId(v.getId().toString())
+                        .assetUrl(buildAssetUrl(callbackBase, v.getId().toString(), v.getStorageUrl()))
+                        .type("voiceover")
+                        .startMs(voiceCursorMs)
+                        .endMs(voiceCursorMs + clipMs)
+                        .trimInMs(0)
+                        .trimOutMs(clipMs)
+                        .volume(1.0)
+                        .build());
+                voiceCursorMs += clipMs;
+            }
+            log.info("[EdlGenerator] Custom TTS audio tracks: {} clips, total {}ms",
+                    voiceAssets.size(), voiceCursorMs);
+        } else if (!voiceAssets.isEmpty()) {
+            // Single voice asset (AI TTS, user voice, or single TTS clip)
+            ProjectAsset voiceAsset = voiceAssets.get(0);
             audioTracks.add(EdlAudioTrack.builder()
                     .id(UUID.randomUUID().toString())
                     .assetId(voiceAsset.getId().toString())
