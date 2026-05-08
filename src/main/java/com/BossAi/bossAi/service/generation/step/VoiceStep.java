@@ -295,11 +295,16 @@ public class VoiceStep implements GenerationStep {
             String filename = "voice_" + context.getGenerationId() + ".mp3";
             Path outputPath = workDir.resolve(filename);
             Files.write(outputPath, audioBytes);
-            log.info("[VoiceStep] Single custom TTS copied — {} bytes → {}", audioBytes.length, outputPath);
+
+            int probedMs = ffprobeDurationMs(outputPath);
+            context.getCustomTtsClipDurationsMs().add(Math.max(0, probedMs));
+
+            log.info("[VoiceStep] Single custom TTS copied — {} bytes, {}ms → {}",
+                    audioBytes.length, probedMs, outputPath);
             return outputPath.toString();
         }
 
-        // Multiple TTS clips — write each to temp, then FFmpeg concat
+        // Multiple TTS clips — write each to temp, probe duration, then FFmpeg concat
         List<Path> clipPaths = new ArrayList<>();
         for (int i = 0; i < ttsAssets.size(); i++) {
             Asset ttsAsset = ttsAssets.get(i);
@@ -307,7 +312,11 @@ public class VoiceStep implements GenerationStep {
             Path clipPath = workDir.resolve(String.format("tts_clip_%02d.mp3", i));
             Files.write(clipPath, clipBytes);
             clipPaths.add(clipPath);
-            log.info("[VoiceStep] TTS clip {} — {} bytes → {}", i, clipBytes.length, clipPath);
+
+            int probedMs = ffprobeDurationMs(clipPath);
+            context.getCustomTtsClipDurationsMs().add(Math.max(0, probedMs));
+
+            log.info("[VoiceStep] TTS clip {} — {} bytes, {}ms → {}", i, clipBytes.length, probedMs, clipPath);
         }
 
         // Build FFmpeg concat list file
@@ -346,6 +355,39 @@ public class VoiceStep implements GenerationStep {
                 ttsAssets.size(), outputPath, outputSize);
 
         return outputPath.toString();
+    }
+
+    /**
+     * Probes exact audio duration using ffprobe (sibling of ffmpeg binary).
+     * Returns duration in milliseconds, or -1 on failure.
+     */
+    private int ffprobeDurationMs(Path audioFile) {
+        try {
+            String ffprobePath = ffmpegBinaryPath.replace("ffmpeg", "ffprobe");
+            ProcessBuilder pb = new ProcessBuilder(
+                    ffprobePath,
+                    "-v", "error",
+                    "-show_entries", "format=duration",
+                    "-of", "csv=p=0",
+                    audioFile.toAbsolutePath().toString()
+            );
+            pb.redirectErrorStream(true);
+            Process process = pb.start();
+            String output = new String(process.getInputStream().readAllBytes()).trim();
+            int exitCode = process.waitFor();
+
+            if (exitCode == 0 && !output.isEmpty()) {
+                double seconds = Double.parseDouble(output);
+                int ms = (int) Math.round(seconds * 1000.0);
+                log.debug("[VoiceStep] ffprobe {} → {}ms", audioFile.getFileName(), ms);
+                return ms;
+            }
+
+            log.warn("[VoiceStep] ffprobe failed (exit {}) for {}: {}", exitCode, audioFile.getFileName(), output);
+        } catch (Exception e) {
+            log.warn("[VoiceStep] ffprobe error for {}: {}", audioFile.getFileName(), e.getMessage());
+        }
+        return -1;
     }
 
     private Path getWorkingDir(GenerationContext context) {
