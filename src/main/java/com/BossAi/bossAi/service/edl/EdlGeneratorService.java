@@ -2,6 +2,7 @@ package com.BossAi.bossAi.service.edl;
 
 import com.BossAi.bossAi.config.properties.RemotionRendererProperties;
 import com.BossAi.bossAi.dto.edl.*;
+import com.BossAi.bossAi.entity.Asset;
 import com.BossAi.bossAi.entity.ProjectAsset;
 import com.BossAi.bossAi.service.OpenAiService;
 import com.BossAi.bossAi.service.audio.AudioAnalysisResponse;
@@ -1127,53 +1128,57 @@ public class EdlGeneratorService {
 
         String callbackBase = remotionProperties.getCallbackBaseUrl();
 
-        List<ProjectAsset> voiceAssets = projectAssets.stream()
+        // Build storageKey → ProjectAsset lookup for voice clips.
+        // storageUrl on ProjectAsset equals the storageKey of the original Asset
+        // (set by bridgeToVideoProject → markReady(storageKey)).
+        Map<String, ProjectAsset> voiceByStorageKey = projectAssets.stream()
                 .filter(a -> "VOICE".equals(a.getType().name()))
-                .toList();
+                .collect(Collectors.toMap(
+                        pa -> pa.getStorageUrl() != null ? pa.getStorageUrl() : "",
+                        pa -> pa,
+                        (a, b) -> a
+                ));
 
-        if (context.hasCustomTts() && voiceAssets.size() > 1) {
-            // Multiple custom TTS clips — place back-to-back using probed durations.
-            // whisper_words timestamps come from the concatenated audio so their offsets
-            // match these positions exactly (no gaps).
+        if (context.hasCustomTts() && !context.getCustomTtsAssets().isEmpty()) {
+            // Iterate customTtsAssets in orderIndex order — same order as the concatenated
+            // audio fed to WhisperX, so whisper_words timestamps align 1:1 with clip positions.
             List<Integer> probedDurations = context.getCustomTtsClipDurationsMs();
-            boolean hasProbed = probedDurations != null && probedDurations.size() >= voiceAssets.size();
             int voiceCursorMs = 0;
-            for (int i = 0; i < voiceAssets.size(); i++) {
-                ProjectAsset v = voiceAssets.get(i);
-                int clipMs;
-                if (hasProbed && probedDurations.get(i) > 0) {
-                    clipMs = probedDurations.get(i);
-                } else if (v.getDurationSeconds() != null) {
-                    clipMs = Math.max(1, (int) Math.round(v.getDurationSeconds() * 1000.0));
+            for (int i = 0; i < context.getCustomTtsAssets().size(); i++) {
+                Asset ttsAsset = context.getCustomTtsAssets().get(i);
+                ProjectAsset v = voiceByStorageKey.get(ttsAsset.getStorageKey());
+                int clipMs = resolveClipMs(i, ttsAsset, v, probedDurations);
+                if (v != null) {
+                    audioTracks.add(EdlAudioTrack.builder()
+                            .id(UUID.randomUUID().toString())
+                            .assetId(v.getId().toString())
+                            .assetUrl(buildAssetUrl(callbackBase, v.getId().toString(), v.getStorageUrl()))
+                            .type("voiceover")
+                            .startMs(voiceCursorMs)
+                            .endMs(voiceCursorMs + clipMs)
+                            .trimInMs(0)
+                            .trimOutMs(clipMs)
+                            .volume(1.0)
+                            .build());
                 } else {
-                    clipMs = 3000;
+                    log.warn("[EdlGenerator] No ProjectAsset for TTS clip {} (key={})", i, ttsAsset.getStorageKey());
                 }
-                audioTracks.add(EdlAudioTrack.builder()
-                        .id(UUID.randomUUID().toString())
-                        .assetId(v.getId().toString())
-                        .assetUrl(buildAssetUrl(callbackBase, v.getId().toString(), v.getStorageUrl()))
-                        .type("voiceover")
-                        .startMs(voiceCursorMs)
-                        .endMs(voiceCursorMs + clipMs)
-                        .trimInMs(0)
-                        .trimOutMs(clipMs)
-                        .volume(1.0)
-                        .build());
                 voiceCursorMs += clipMs;
             }
             log.info("[EdlGenerator] Custom TTS audio tracks: {} clips, total {}ms",
-                    voiceAssets.size(), voiceCursorMs);
-        } else if (!voiceAssets.isEmpty()) {
-            // Single voice asset (AI TTS, user voice, or single TTS clip)
-            ProjectAsset voiceAsset = voiceAssets.get(0);
-            audioTracks.add(EdlAudioTrack.builder()
-                    .id(UUID.randomUUID().toString())
-                    .assetId(voiceAsset.getId().toString())
-                    .assetUrl(buildAssetUrl(callbackBase, voiceAsset.getId().toString(), voiceAsset.getStorageUrl()))
-                    .type("voiceover")
-                    .startMs(0)
-                    .volume(1.0)
-                    .build());
+                    context.getCustomTtsAssets().size(), voiceCursorMs);
+        } else {
+            // Single voice asset (AI TTS or user voice)
+            voiceByStorageKey.values().stream().findFirst().ifPresent(voiceAsset ->
+                audioTracks.add(EdlAudioTrack.builder()
+                        .id(UUID.randomUUID().toString())
+                        .assetId(voiceAsset.getId().toString())
+                        .assetUrl(buildAssetUrl(callbackBase, voiceAsset.getId().toString(), voiceAsset.getStorageUrl()))
+                        .type("voiceover")
+                        .startMs(0)
+                        .volume(1.0)
+                        .build())
+            );
         }
 
         // Music track — with ducking based on voice activity
@@ -1205,9 +1210,20 @@ public class EdlGeneratorService {
      */
     private double calculateMusicDuckVolume(GenerationContext context) {
         boolean hasVoiceover = context.getWordTimings() != null && !context.getWordTimings().isEmpty();
-        // With voiceover: keep music low so voice is clear
-        // Without voiceover: music is the primary audio
         return hasVoiceover ? 0.15 : 0.45;
+    }
+
+    private int resolveClipMs(int index, Asset ttsAsset, ProjectAsset projectAsset, List<Integer> probedDurations) {
+        if (probedDurations != null && index < probedDurations.size() && probedDurations.get(index) > 0) {
+            return probedDurations.get(index);
+        }
+        if (projectAsset != null && projectAsset.getDurationSeconds() != null) {
+            return Math.max(1, (int) Math.round(projectAsset.getDurationSeconds() * 1000.0));
+        }
+        if (ttsAsset.getDurationSeconds() != null) {
+            return Math.max(1, (int) Math.round(ttsAsset.getDurationSeconds() * 1000.0));
+        }
+        return 3000;
     }
 
     // =========================================================================
