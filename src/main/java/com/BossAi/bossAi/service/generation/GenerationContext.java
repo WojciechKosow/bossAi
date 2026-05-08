@@ -207,6 +207,15 @@ public class GenerationContext {
     @Builder.Default
     private List<SubtitleService.WordTiming> wordTimings = new ArrayList<>();
 
+    /**
+     * Exact durations (ms) of each custom TTS clip, probed via FFprobe.
+     * Index i corresponds to customTtsAssets.get(i).
+     * Used by AssetBridgeService to place voice tracks without gaps.
+     * Empty when no custom TTS or probing failed.
+     */
+    @Builder.Default
+    private List<Integer> customTtsClipDurationsMs = new ArrayList<>();
+
     // -------------------------------------------------------------------------
     // WYNIKI MUSICSTEP
     // -------------------------------------------------------------------------
