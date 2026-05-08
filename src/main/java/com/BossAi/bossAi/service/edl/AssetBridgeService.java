@@ -24,8 +24,10 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 /**
  * Most miedzy starym pipeline (GenerationContext) a nowym
@@ -239,85 +241,96 @@ public class AssetBridgeService {
         int totalMs = cursorMs;
 
         // Audio tracks
-        List<EdlAudioTrack> audioTracks = new ArrayList<>();
-        List<ProjectAsset> voiceAssets = projectAssets.stream()
+        // storageUrl on ProjectAsset equals storageKey of the original Asset
+        // (set by bridgeToVideoProject → markReady(storageKey)).
+        Map<String, ProjectAsset> voiceByStorageKey = projectAssets.stream()
                 .filter(a -> a.getType() == AssetType.VOICE)
-                .toList();
+                .collect(Collectors.toMap(
+                        pa -> pa.getStorageUrl() != null ? pa.getStorageUrl() : "",
+                        pa -> pa,
+                        (a, b) -> a
+                ));
+        List<EdlAudioTrack> audioTracks = new ArrayList<>();
 
-        if (context.hasCustomTts() && voiceAssets.size() > 1) {
-            log.info("[AssetBridge] Custom TTS path: {} voice assets, {} probed durations",
-                    voiceAssets.size(), context.getCustomTtsClipDurationsMs().size());
-
+        if (context.hasCustomTts() && !context.getCustomTtsAssets().isEmpty()) {
+            // Iterate customTtsAssets in orderIndex order — same order as the concatenated
+            // audio fed to WhisperX so whisper_words timestamps align 1:1 with clip positions.
             List<Integer> probedDurations = context.getCustomTtsClipDurationsMs();
-            boolean hasProbedDurations = !probedDurations.isEmpty()
-                    && probedDurations.size() >= voiceAssets.size();
+            boolean hasProbedDurations = !probedDurations.isEmpty();
+
+            log.info("[AssetBridge] Custom TTS path: {} clips, {} probed durations",
+                    context.getCustomTtsAssets().size(), probedDurations.size());
 
             int voiceCursorMs = 0;
-            for (int i = 0; i < voiceAssets.size(); i++) {
-                ProjectAsset v = voiceAssets.get(i);
-                int clipDurationMs = resolveClipDurationMs(i, v, context, hasProbedDurations,
-                        probedDurations, totalMs, voiceAssets.size());
+            for (int i = 0; i < context.getCustomTtsAssets().size(); i++) {
+                Asset ttsAsset = context.getCustomTtsAssets().get(i);
+                ProjectAsset v = voiceByStorageKey.get(ttsAsset.getStorageKey());
+                int clipDurationMs = hasProbedDurations
+                        ? resolveClipDurationMs(i, v != null ? v : null, context, hasProbedDurations, probedDurations, totalMs, context.getCustomTtsAssets().size())
+                        : (v != null && v.getDurationSeconds() != null
+                                ? Math.max(1, (int) Math.round(v.getDurationSeconds() * 1000.0))
+                                : Math.max(1, totalMs / context.getCustomTtsAssets().size()));
 
-                audioTracks.add(EdlAudioTrack.builder()
-                        .id(UUID.randomUUID().toString())
-                        .assetId(v.getId().toString())
-                        .assetUrl(v.getStorageUrl())
-                        .type("voiceover")
-                        .startMs(voiceCursorMs)
-                        .endMs(voiceCursorMs + clipDurationMs)
-                        .trimInMs(0)
-                        .trimOutMs(clipDurationMs)
-                        .volume(1.0)
-                        .build());
+                if (v != null) {
+                    audioTracks.add(EdlAudioTrack.builder()
+                            .id(UUID.randomUUID().toString())
+                            .assetId(v.getId().toString())
+                            .assetUrl(v.getStorageUrl())
+                            .type("voiceover")
+                            .startMs(voiceCursorMs)
+                            .endMs(voiceCursorMs + clipDurationMs)
+                            .trimInMs(0)
+                            .trimOutMs(clipDurationMs)
+                            .volume(1.0)
+                            .build());
+                } else {
+                    log.warn("[AssetBridge] No ProjectAsset for TTS clip {} (key={})", i, ttsAsset.getStorageKey());
+                }
 
                 log.debug("[AssetBridge] Voice clip {} — {}ms–{}ms (duration={}ms)",
                         i, voiceCursorMs, voiceCursorMs + clipDurationMs, clipDurationMs);
                 voiceCursorMs += clipDurationMs;
             }
-        } else if (voiceAssets.size() == 1) {
-            ProjectAsset voice = voiceAssets.get(0);
-            int actualVoiceDurationMs = resolveVoiceDurationMs(context, voice, totalMs);
-            audioTracks.add(EdlAudioTrack.builder()
-                    .id(UUID.randomUUID().toString())
-                    .assetId(voice.getId().toString())
-                    .assetUrl(voice.getStorageUrl())
-                    .type("voiceover")
-                    .startMs(0)
-                    .endMs(actualVoiceDurationMs)
-                    .trimInMs(0)
-                    .trimOutMs(actualVoiceDurationMs)
-                    .volume(1.0)
-                    .build());
-            log.info("[AssetBridge] Voice track: single block {}ms (wordTimings={}, assetMeta={}s, scenesSum={}ms)",
-                    actualVoiceDurationMs,
-                    context.getWordTimings() != null && !context.getWordTimings().isEmpty()
-                            ? context.getWordTimings().get(context.getWordTimings().size() - 1).endMs() : "none",
-                    voice.getDurationSeconds(),
-                    totalMs);
-        } else if (!voiceAssets.isEmpty()) {
-            int voiceCursorMs = 0;
-            for (int i = 0; i < voiceAssets.size(); i++) {
-                ProjectAsset v = voiceAssets.get(i);
-                int clipDurationMs = v.getDurationSeconds() != null
-                        ? Math.max(1, (int) Math.round(v.getDurationSeconds() * 1000.0))
-                        : Math.max(1, totalMs - voiceCursorMs);
-
-                int clipEndMs = (i == voiceAssets.size() - 1)
-                        ? totalMs
-                        : Math.min(totalMs, voiceCursorMs + clipDurationMs);
-
+        } else if (!voiceByStorageKey.isEmpty()) {
+            // Single voice asset or non-custom-TTS multi-voice: place sequentially by map order
+            List<ProjectAsset> remainingVoice = new ArrayList<>(voiceByStorageKey.values());
+            if (remainingVoice.size() == 1) {
+                ProjectAsset voice = remainingVoice.get(0);
+                int actualVoiceDurationMs = resolveVoiceDurationMs(context, voice, totalMs);
                 audioTracks.add(EdlAudioTrack.builder()
                         .id(UUID.randomUUID().toString())
-                        .assetId(v.getId().toString())
-                        .assetUrl(v.getStorageUrl())
+                        .assetId(voice.getId().toString())
+                        .assetUrl(voice.getStorageUrl())
                         .type("voiceover")
-                        .startMs(Math.max(0, voiceCursorMs))
-                        .endMs(Math.max(voiceCursorMs + 1, clipEndMs))
+                        .startMs(0)
+                        .endMs(actualVoiceDurationMs)
+                        .trimInMs(0)
+                        .trimOutMs(actualVoiceDurationMs)
                         .volume(1.0)
                         .build());
-
-                voiceCursorMs = clipEndMs;
-                if (voiceCursorMs >= totalMs) break;
+                log.info("[AssetBridge] Voice track: single block {}ms", actualVoiceDurationMs);
+            } else {
+                int voiceCursorMs = 0;
+                for (int i = 0; i < remainingVoice.size(); i++) {
+                    ProjectAsset v = remainingVoice.get(i);
+                    int clipDurationMs = v.getDurationSeconds() != null
+                            ? Math.max(1, (int) Math.round(v.getDurationSeconds() * 1000.0))
+                            : Math.max(1, totalMs - voiceCursorMs);
+                    int clipEndMs = (i == remainingVoice.size() - 1)
+                            ? totalMs
+                            : Math.min(totalMs, voiceCursorMs + clipDurationMs);
+                    audioTracks.add(EdlAudioTrack.builder()
+                            .id(UUID.randomUUID().toString())
+                            .assetId(v.getId().toString())
+                            .assetUrl(v.getStorageUrl())
+                            .type("voiceover")
+                            .startMs(Math.max(0, voiceCursorMs))
+                            .endMs(Math.max(voiceCursorMs + 1, clipEndMs))
+                            .volume(1.0)
+                            .build());
+                    voiceCursorMs = clipEndMs;
+                    if (voiceCursorMs >= totalMs) break;
+                }
             }
         }
 
