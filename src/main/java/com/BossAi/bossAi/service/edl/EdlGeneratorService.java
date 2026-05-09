@@ -471,9 +471,11 @@ public class EdlGeneratorService {
         int stripped = 0;
         for (EdlSegment seg : edl.getSegments()) {
             if (seg.getEffects() == null || seg.getEffects().isEmpty()) continue;
-            int before = seg.getEffects().size();
-            seg.getEffects().removeIf(e -> e.getType() == null || !effectRegistry.isValidEffect(e.getType()));
-            stripped += before - seg.getEffects().size();
+            List<EdlEffect> mutableEffects = new ArrayList<>(seg.getEffects());
+            int before = mutableEffects.size();
+            mutableEffects.removeIf(e -> e.getType() == null || !effectRegistry.isValidEffect(e.getType()));
+            seg.setEffects(mutableEffects);
+            stripped += before - mutableEffects.size();
         }
         if (stripped > 0) {
             log.warn("[EdlGenerator] Stripped {} unknown effect(s) before render — check preset configs", stripped);
