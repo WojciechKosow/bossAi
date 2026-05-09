@@ -589,7 +589,13 @@ public class EdlGeneratorService {
                 .filter(a -> "VIDEO".equals(a.getType().name()) || "IMAGE".equals(a.getType().name()))
                 .collect(Collectors.toList());
 
-        List<Integer> probedDurations = context.getCustomTtsClipDurationsMs();
+        List<ProjectAsset> voiceAssets = projectAssets.stream()
+                .filter(a -> "VOICE".equals(a.getType().name()))
+                .collect(Collectors.toList());
+
+        // Use the same normalised durations as buildAudioTracks so segments and
+        // audio tracks always span identical time ranges (no A/V offset).
+        List<Integer> clipDurations = resolveNormalizedClipDurations(context, voiceAssets);
         int clipCount = context.getCustomTtsAssets().size();
         String callbackBase = remotionProperties.getCallbackBaseUrl();
 
@@ -602,14 +608,7 @@ public class EdlGeneratorService {
                     ? visualAssets.get(i)
                     : visualAssets.get(visualAssets.size() - 1);
 
-            int durationMs;
-            if (probedDurations != null && i < probedDurations.size() && probedDurations.get(i) > 0) {
-                durationMs = probedDurations.get(i);
-            } else if (i < context.getScenes().size()) {
-                durationMs = context.getScenes().get(i).getDurationMs();
-            } else {
-                durationMs = 3000;
-            }
+            int durationMs = clipDurations.get(i);
 
             List<EdlEffect> effects = buildEffectsForScene(context, audioAnalysis, i);
 
@@ -1221,26 +1220,23 @@ public class EdlGeneratorService {
 
         String callbackBase = remotionProperties.getCallbackBaseUrl();
 
-        // Build storageKey → ProjectAsset lookup for voice clips.
-        // storageUrl on ProjectAsset equals the storageKey of the original Asset
-        // (set by bridgeToVideoProject → markReady(storageKey)).
-        Map<String, ProjectAsset> voiceByStorageKey = projectAssets.stream()
+        // Collect VOICE ProjectAssets in creation order (DB query returns createdAt ASC).
+        // Creation order matches customTtsAssets order from bridgeToVideoProject — positional match.
+        List<ProjectAsset> voiceProjectAssets = projectAssets.stream()
                 .filter(a -> "VOICE".equals(a.getType().name()))
-                .collect(Collectors.toMap(
-                        pa -> pa.getStorageUrl() != null ? pa.getStorageUrl() : "",
-                        pa -> pa,
-                        (a, b) -> a
-                ));
+                .collect(Collectors.toList());
 
         if (context.hasCustomTts() && !context.getCustomTtsAssets().isEmpty()) {
-            // Iterate customTtsAssets in orderIndex order — same order as the concatenated
-            // audio fed to WhisperX, so whisper_words timestamps align 1:1 with clip positions.
-            List<Integer> probedDurations = context.getCustomTtsClipDurationsMs();
+            // Resolve all clip durations at once — normalised to whisper total so
+            // audio tracks sum to exactly the same duration as the whisper_words span.
+            // This eliminates desync caused by the 3 000 ms fixed fallback.
+            List<Integer> clipDurations = resolveNormalizedClipDurations(context, voiceProjectAssets);
             int voiceCursorMs = 0;
             for (int i = 0; i < context.getCustomTtsAssets().size(); i++) {
-                Asset ttsAsset = context.getCustomTtsAssets().get(i);
-                ProjectAsset v = voiceByStorageKey.get(ttsAsset.getStorageKey());
-                int clipMs = resolveClipMs(i, ttsAsset, v, probedDurations);
+                int clipMs = clipDurations.get(i);
+                // Positional match: i-th VOICE ProjectAsset = i-th custom TTS clip
+                // (bridgeToVideoProject creates them in the same loop order).
+                ProjectAsset v = i < voiceProjectAssets.size() ? voiceProjectAssets.get(i) : null;
                 if (v != null) {
                     audioTracks.add(EdlAudioTrack.builder()
                             .id(UUID.randomUUID().toString())
@@ -1254,7 +1250,7 @@ public class EdlGeneratorService {
                             .volume(1.0)
                             .build());
                 } else {
-                    log.warn("[EdlGenerator] No ProjectAsset for TTS clip {} (key={})", i, ttsAsset.getStorageKey());
+                    log.warn("[EdlGenerator] No ProjectAsset for TTS clip {} — audio gap in timeline", i);
                 }
                 voiceCursorMs += clipMs;
             }
@@ -1262,7 +1258,7 @@ public class EdlGeneratorService {
                     context.getCustomTtsAssets().size(), voiceCursorMs);
         } else {
             // Single voice asset (AI TTS or user voice)
-            voiceByStorageKey.values().stream().findFirst().ifPresent(voiceAsset ->
+            voiceProjectAssets.stream().findFirst().ifPresent(voiceAsset ->
                 audioTracks.add(EdlAudioTrack.builder()
                         .id(UUID.randomUUID().toString())
                         .assetId(voiceAsset.getId().toString())
@@ -1306,17 +1302,90 @@ public class EdlGeneratorService {
         return hasVoiceover ? 0.15 : 0.45;
     }
 
-    private int resolveClipMs(int index, Asset ttsAsset, ProjectAsset projectAsset, List<Integer> probedDurations) {
-        if (probedDurations != null && index < probedDurations.size() && probedDurations.get(index) > 0) {
-            return probedDurations.get(index);
+    /**
+     * Resolves durations for ALL N custom TTS clips in a single pass.
+     *
+     * Priority:
+     *   1. Probed durations (all non-zero) — exact ffprobe result.
+     *   2. Mix of probed + file-size estimates, normalised so their sum equals
+     *      the total whisper word duration (the only ground truth we have).
+     *   3. Equal division of whisper total when no size data is available.
+     *   4. Raw estimates (no normalisation) when whisper total is 0.
+     *
+     * The normalisation step is key: it ensures audio_tracks and whisper_words
+     * span the same total duration, which is required for subtitle alignment.
+     */
+    private List<Integer> resolveNormalizedClipDurations(GenerationContext context,
+                                                          List<ProjectAsset> voiceProjectAssets) {
+        List<Asset> ttsAssets = context.getCustomTtsAssets();
+        List<Integer> probed = context.getCustomTtsClipDurationsMs();
+        int n = ttsAssets.size();
+
+        // Fast path: every probed duration is valid → use directly
+        boolean allProbedValid = probed != null && probed.size() == n
+                && probed.stream().allMatch(d -> d > 0);
+        if (allProbedValid) {
+            log.info("[EdlGenerator] All probed clip durations valid — using directly: {}", probed);
+            return new ArrayList<>(probed);
         }
-        if (projectAsset != null && projectAsset.getDurationSeconds() != null) {
-            return Math.max(1, (int) Math.round(projectAsset.getDurationSeconds() * 1000.0));
+
+        // Ground truth: total span of whisper words from concatenated audio
+        int whisperTotalMs = 0;
+        if (context.getWordTimings() != null && !context.getWordTimings().isEmpty()) {
+            whisperTotalMs = context.getWordTimings()
+                    .get(context.getWordTimings().size() - 1).endMs();
         }
-        if (ttsAsset.getDurationSeconds() != null) {
-            return Math.max(1, (int) Math.round(ttsAsset.getDurationSeconds() * 1000.0));
+
+        // Raw estimate per clip (probed when available, otherwise file-size based)
+        // 128 kbps MP3 = 128 000 / 8 / 1 000 = 16 bytes per ms
+        List<Long> rawEstimates = new ArrayList<>(n);
+        for (int i = 0; i < n; i++) {
+            long estimate = 0;
+            if (probed != null && i < probed.size() && probed.get(i) > 0) {
+                estimate = probed.get(i);
+            }
+            if (estimate == 0) {
+                Asset asset = ttsAssets.get(i);
+                if (asset.getSizeBytes() > 0) {
+                    estimate = Math.max(100L, asset.getSizeBytes() / 16L);
+                }
+            }
+            if (estimate == 0 && i < voiceProjectAssets.size() && voiceProjectAssets.get(i) != null) {
+                Double dur = voiceProjectAssets.get(i).getDurationSeconds();
+                if (dur != null && dur > 0) estimate = (long) (dur * 1000);
+            }
+            if (estimate == 0) {
+                estimate = whisperTotalMs > 0 ? Math.max(100L, whisperTotalMs / n) : 3000L;
+            }
+            rawEstimates.add(estimate);
         }
-        return 3000;
+
+        long rawTotal = rawEstimates.stream().mapToLong(Long::longValue).sum();
+
+        // Normalise to whisper total (ensures subtitle timestamps align with audio positions)
+        List<Integer> result = new ArrayList<>(n);
+        if (whisperTotalMs > 0 && rawTotal > 0) {
+            int allocated = 0;
+            for (int i = 0; i < n; i++) {
+                int duration;
+                if (i == n - 1) {
+                    duration = Math.max(100, whisperTotalMs - allocated);
+                } else {
+                    duration = (int) Math.round((double) rawEstimates.get(i) / rawTotal * whisperTotalMs);
+                    duration = Math.max(100, duration);
+                }
+                result.add(duration);
+                allocated += duration;
+            }
+            log.info("[EdlGenerator] Clip durations normalised to whisperTotal={}ms: {}", whisperTotalMs, result);
+        } else {
+            // No normalisation possible — raw estimates
+            for (long est : rawEstimates) {
+                result.add((int) Math.max(100, est));
+            }
+            log.warn("[EdlGenerator] No whisper total — using raw duration estimates: {}", result);
+        }
+        return result;
     }
 
     // =========================================================================
