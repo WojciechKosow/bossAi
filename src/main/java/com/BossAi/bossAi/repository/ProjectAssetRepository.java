@@ -12,6 +12,8 @@ public interface ProjectAssetRepository extends JpaRepository<ProjectAsset, UUID
 
     List<ProjectAsset> findByProjectIdOrderByCreatedAtAsc(UUID projectId);
 
+    List<ProjectAsset> findByProjectIdOrderByDisplayOrderAscCreatedAtAsc(UUID projectId);
+
     List<ProjectAsset> findByProjectIdAndType(UUID projectId, AssetType type);
 
     List<ProjectAsset> findByProjectIdAndStatus(UUID projectId, AssetStatus status);
