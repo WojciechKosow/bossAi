@@ -34,6 +34,21 @@ public class EffectRegistry {
     public static final String DRIFT = "drift";
     public static final String ZOOM_IN_OFFSET = "zoom_in_offset";
 
+    // ─── Efekty TikTok-native (nowe) ─────────────────────────────────
+
+    /** Snap zoom ekstremalny — stop-scroll w <100ms, używany wyłącznie na hooku */
+    public static final String SMASH_ZOOM = "smash_zoom";
+    /** Gaussian blur na końcu segmentu przed cięciem — płynność między klipami */
+    public static final String BLUR_TRANSITION = "blur_transition";
+    /** Skok jasności +0.4 przez ~120ms — punch na bicie lub reveal */
+    public static final String BRIGHTNESS_BURST = "brightness_burst";
+    /** Ekstremalny pan 40-60% z motion blur — sygnatura przejścia sceny */
+    public static final String WHIP_PAN = "whip_pan";
+    /** Skok saturacji +0.3 — reveal produktu, CTA */
+    public static final String COLOR_POP = "color_pop";
+    /** Szybkie wzmocnienie vignette na dropie */
+    public static final String VIGNETTE_PULSE = "vignette_pulse";
+
     // ─── Przejscia ────────────────────────────────────────────────────
 
     public static final String TRANSITION_CUT = "cut";
@@ -58,33 +73,41 @@ public class EffectRegistry {
     private static final Map<String, Map<String, Object>> EFFECT_DEFAULTS = Map.ofEntries(
             Map.entry(ZOOM_IN, Map.of("scale_from", 1.0, "scale_to", 1.3, "easing", "easeInOut")),
             Map.entry(ZOOM_OUT, Map.of("scale_from", 1.3, "scale_to", 1.0, "easing", "easeInOut")),
-            Map.entry(FAST_ZOOM, Map.of("scale_from", 1.0, "scale_to", 1.5, "easing", "easeIn", "duration_ms", 200)),
-            Map.entry(PAN_LEFT, Map.of("direction", "left", "distance_percent", 15, "easing", "linear")),
-            Map.entry(PAN_RIGHT, Map.of("direction", "right", "distance_percent", 15, "easing", "linear")),
+            // easeOut = szybki start, wolny koniec → snap/punch feel zamiast opóźnionego easeIn
+            Map.entry(FAST_ZOOM, Map.of("scale_from", 1.0, "scale_to", 1.6, "easing", "easeOut", "duration_ms", 150)),
+            Map.entry(PAN_LEFT, Map.of("direction", "left", "distance_percent", 13, "easing", "linear")),
+            Map.entry(PAN_RIGHT, Map.of("direction", "right", "distance_percent", 13, "easing", "linear")),
             Map.entry(PAN_UP, Map.of("direction", "up", "distance_percent", 10, "easing", "linear")),
             Map.entry(PAN_DOWN, Map.of("direction", "down", "distance_percent", 10, "easing", "linear")),
-            Map.entry(SHAKE, Map.of("amplitude", 5, "frequency", 15)),
+            Map.entry(SHAKE, Map.of("amplitude", 10, "frequency", 20)),
             Map.entry(SLOW_MOTION, Map.of("speed", 0.5)),
             Map.entry(SPEED_RAMP, Map.of("speed_from", 1.0, "speed_to", 2.0, "easing", "easeInOut")),
-            Map.entry(ZOOM_PULSE, Map.of("scale", 1.05, "frequency_bpm", 120)),
-            Map.entry(KEN_BURNS, Map.of("scale_from", 1.0, "scale_to", 1.2, "pan_direction", "left")),
+            Map.entry(ZOOM_PULSE, Map.of("scale", 1.08, "frequency_bpm", 120)),
+            Map.entry(KEN_BURNS, Map.of("scale_from", 1.0, "scale_to", 1.25, "pan_direction", "left")),
             Map.entry(GLITCH, Map.of("intensity", 0.5, "frequency", 3)),
-            Map.entry(FLASH, Map.of("opacity", 0.8, "duration_ms", 100)),
-            Map.entry(BOUNCE, Map.of("scale_peak", 1.12, "easing", "spring")),
-            Map.entry(DRIFT, Map.of("direction", "diagonal", "distance_percent", 10, "easing", "linear")),
-            Map.entry(ZOOM_IN_OFFSET, Map.of("scale_from", 1.0, "scale_to", 1.2, "offset_x", 0.3, "offset_y", 0.4, "easing", "easeInOut"))
+            Map.entry(FLASH, Map.of("opacity", 0.85, "duration_ms", 80)),
+            Map.entry(BOUNCE, Map.of("scale_peak", 1.15, "easing", "easeOut")),
+            Map.entry(DRIFT, Map.of("direction", "diagonal", "distance_percent", 13, "easing", "linear")),
+            Map.entry(ZOOM_IN_OFFSET, Map.of("scale_from", 1.0, "scale_to", 1.3, "offset_x", 0.3, "offset_y", 0.4, "easing", "easeOut")),
+            // ─── TikTok-native effects ─────────────────────────────────────
+            Map.entry(SMASH_ZOOM, Map.of("scale_from", 1.0, "scale_to", 2.2, "easing", "easeOut", "duration_ms", 90)),
+            Map.entry(BLUR_TRANSITION, Map.of("blur_amount", 18, "duration_ms", 200, "phase", "outro")),
+            Map.entry(BRIGHTNESS_BURST, Map.of("brightness_delta", 0.45, "duration_ms", 120, "easing", "easeOut")),
+            Map.entry(WHIP_PAN, Map.of("direction", "right", "distance_percent", 55, "blur_amount", 22, "duration_ms", 140)),
+            Map.entry(COLOR_POP, Map.of("saturation_boost", 0.35, "duration_ms", 200, "easing", "easeOut")),
+            Map.entry(VIGNETTE_PULSE, Map.of("vignette_delta", 0.4, "duration_ms", 150, "easing", "easeOut"))
     );
 
     private static final Map<String, Map<String, Object>> TRANSITION_DEFAULTS = Map.of(
             TRANSITION_CUT, Map.of(),
-            TRANSITION_FADE, Map.of("duration_ms", 300),
-            TRANSITION_FADE_WHITE, Map.of("duration_ms", 300),
-            TRANSITION_FADE_BLACK, Map.of("duration_ms", 400),
-            TRANSITION_DISSOLVE, Map.of("duration_ms", 500),
-            TRANSITION_WIPE_LEFT, Map.of("duration_ms", 400),
-            TRANSITION_WIPE_RIGHT, Map.of("duration_ms", 400),
-            TRANSITION_SLIDE_LEFT, Map.of("duration_ms", 350),
-            TRANSITION_SLIDE_RIGHT, Map.of("duration_ms", 350)
+            TRANSITION_FADE, Map.of("duration_ms", 180),
+            TRANSITION_FADE_WHITE, Map.of("duration_ms", 120),
+            TRANSITION_FADE_BLACK, Map.of("duration_ms", 200),
+            TRANSITION_DISSOLVE, Map.of("duration_ms", 250),
+            TRANSITION_WIPE_LEFT, Map.of("duration_ms", 200),
+            TRANSITION_WIPE_RIGHT, Map.of("duration_ms", 200),
+            TRANSITION_SLIDE_LEFT, Map.of("duration_ms", 180),
+            TRANSITION_SLIDE_RIGHT, Map.of("duration_ms", 180)
     );
 
     /**

@@ -29,27 +29,30 @@ public class EffectAssigner {
 
     /** Agresywne efekty na dropy / peak / high energy */
     private static final List<EffectType> POOL_AGGRESSIVE = List.of(
-            EffectType.FAST_ZOOM, EffectType.SHAKE, EffectType.BOUNCE,
-            EffectType.ZOOM_IN_OFFSET, EffectType.ZOOM_IN
+            EffectType.SMASH_ZOOM, EffectType.FAST_ZOOM, EffectType.SHAKE,
+            EffectType.BOUNCE, EffectType.ZOOM_IN_OFFSET, EffectType.WHIP_PAN,
+            EffectType.VIGNETTE_PULSE
     );
 
     /** Narastające efekty na build-up / medium energy */
     private static final List<EffectType> POOL_BUILDING = List.of(
             EffectType.ZOOM_IN, EffectType.ZOOM_IN_OFFSET, EffectType.PAN_LEFT,
-            EffectType.PAN_RIGHT, EffectType.PAN_UP, EffectType.BOUNCE
+            EffectType.PAN_RIGHT, EffectType.PAN_UP, EffectType.BOUNCE,
+            EffectType.BLUR_TRANSITION
     );
 
     /** Spokojne efekty na quiet / intro / outro / low energy */
     private static final List<EffectType> POOL_CALM = List.of(
             EffectType.PAN_LEFT, EffectType.PAN_RIGHT, EffectType.PAN_UP,
-            EffectType.PAN_DOWN, EffectType.DRIFT, EffectType.ZOOM_OUT
+            EffectType.PAN_DOWN, EffectType.DRIFT, EffectType.ZOOM_OUT,
+            EffectType.BLUR_TRANSITION
     );
 
     /** Filmowe efekty (cinematic / luxury) */
     private static final List<EffectType> POOL_CINEMATIC = List.of(
             EffectType.PAN_LEFT, EffectType.PAN_RIGHT, EffectType.PAN_UP,
             EffectType.PAN_DOWN, EffectType.ZOOM_IN, EffectType.ZOOM_OUT,
-            EffectType.DRIFT
+            EffectType.DRIFT, EffectType.KEN_BURNS
     );
 
     /** Edukacyjne — minimalne ruchy, czytelność */
@@ -63,12 +66,11 @@ public class EffectAssigner {
     // =========================================================================
 
     private static final List<String> TRANSITIONS_AGGRESSIVE = List.of(
-            "fadewhite", "wipeleft", "wiperight", "wipeup", "wipedown",
-            "slideleft", "slideright", "slideup", "slidedown"
+            "fade_white", "wipe_left", "wipe_right", "slide_left", "slide_right"
     );
 
     private static final List<String> TRANSITIONS_SMOOTH = List.of(
-            "fade", "dissolve", "fadeblack", "smoothleft", "smoothright"
+            "fade", "dissolve", "fade_black"
     );
 
     private static final List<String> TRANSITIONS_MINIMAL = List.of(

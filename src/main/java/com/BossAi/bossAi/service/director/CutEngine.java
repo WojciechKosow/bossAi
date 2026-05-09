@@ -1404,13 +1404,16 @@ public class CutEngine {
     private String suggestEffect(CutCandidate c) {
         if (c.narrationSegmentType != null) {
             return switch (c.narrationSegmentType.toLowerCase()) {
-                case "hook"                   -> "fast_zoom";
+                // smash_zoom na hooku — stop-scroll zanim padnie pierwsze słowo
+                case "hook"                   -> "smash_zoom";
                 case "setup"                  -> "zoom_in";
                 case "point"                  -> c.narrationSegmentIndex % 2 == 0
                                                   ? "pan_right" : "pan_left";
                 case "emphasis"               -> "zoom_in_offset";
-                case "climax"                 -> "fast_zoom";
-                case "transition", "cooldown" -> "drift";
+                // brightness_burst na climax — punch w kulminacyjnym momencie
+                case "climax"                 -> "brightness_burst";
+                // blur_transition na przejściach — TikTok-native flow
+                case "transition", "cooldown" -> "blur_transition";
                 case "cta"                    -> "ken_burns";
                 default                       -> suggestEffectFromClassification(c);
             };
@@ -1421,14 +1424,14 @@ public class CutEngine {
     private String suggestEffectFromClassification(CutCandidate c) {
         return switch (c.classification) {
             case HARD -> switch (c.primaryReason) {
-                case TOPIC_CHANGE, HOOK_START -> "fast_zoom";
+                case TOPIC_CHANGE, HOOK_START -> "smash_zoom";
                 case MUSIC_DROP               -> "shake";
-                case HIGH_IMPORTANCE,
-                     CTA_TRANSITION           -> "zoom_in";
-                default                       -> "zoom_in";
+                case HIGH_IMPORTANCE          -> "zoom_in_offset";
+                case CTA_TRANSITION           -> "zoom_in";
+                default                       -> "fast_zoom";
             };
             case SOFT -> switch (c.primaryReason) {
-                case SENTENCE_END_PAUSE -> "drift";
+                case SENTENCE_END_PAUSE -> "blur_transition";
                 case ENERGY_DROP        -> "zoom_out";
                 case DRAMATIC_PAUSE     -> "pan_left";
                 default                 -> "drift";
@@ -1441,16 +1444,18 @@ public class CutEngine {
      * Selects the transition TYPE between the outgoing and incoming segment.
      * Story/Hook arc:
      *   hook/setup/point/emphasis — hard CUT: no breathing room, urgency maintained
-     *   climax                    — hard CUT: peak impact needs instant visual swap
-     *   transition/cooldown       — fade: gentle turn, emotional exhale
+     *   climax                    — fade_white: bright punch do następnej sceny
+     *   transition/cooldown       — fade: łagodne przejście, emotional exhale
      *   cta                       — fade: clean professional close
      */
     private String suggestTransition(CutCandidate c) {
         if (c.narrationSegmentType != null) {
             return switch (c.narrationSegmentType.toLowerCase()) {
-                case "hook", "setup", "point", "emphasis", "climax" -> "cut";
-                case "transition", "cooldown", "cta"                -> "fade";
-                default                                             -> suggestTransitionFromClassification(c);
+                case "hook", "setup", "point", "emphasis" -> "cut";
+                // fade_white na climax — jasne uderzenie zamiast twardego cięcia
+                case "climax"                             -> "fade_white";
+                case "transition", "cooldown", "cta"     -> "fade";
+                default                                  -> suggestTransitionFromClassification(c);
             };
         }
         return suggestTransitionFromClassification(c);

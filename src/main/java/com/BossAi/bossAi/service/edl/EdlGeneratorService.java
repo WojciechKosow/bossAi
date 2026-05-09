@@ -1232,14 +1232,14 @@ public class EdlGeneratorService {
      */
     private String mapNarrationTypeToEffect(String segType, int sceneIndex) {
         return switch (segType.toLowerCase()) {
-            case "hook"                   -> EffectRegistry.FAST_ZOOM;
+            case "hook"                   -> EffectRegistry.SMASH_ZOOM;
             case "setup"                  -> EffectRegistry.ZOOM_IN;
             case "point"                  -> sceneIndex % 2 == 0
                                              ? EffectRegistry.PAN_RIGHT
                                              : EffectRegistry.PAN_LEFT;
             case "emphasis"               -> EffectRegistry.ZOOM_IN_OFFSET;
-            case "climax"                 -> EffectRegistry.FAST_ZOOM;
-            case "transition", "cooldown" -> EffectRegistry.DRIFT;
+            case "climax"                 -> EffectRegistry.BRIGHTNESS_BURST;
+            case "transition", "cooldown" -> EffectRegistry.BLUR_TRANSITION;
             case "cta"                    -> EffectRegistry.KEN_BURNS;
             default                       -> EffectRegistry.ZOOM_IN;
         };
@@ -1341,6 +1341,13 @@ public class EdlGeneratorService {
             case BOUNCE -> EffectRegistry.BOUNCE;
             case DRIFT -> EffectRegistry.DRIFT;
             case ZOOM_IN_OFFSET -> EffectRegistry.ZOOM_IN_OFFSET;
+            case KEN_BURNS -> EffectRegistry.KEN_BURNS;
+            case SMASH_ZOOM -> EffectRegistry.SMASH_ZOOM;
+            case BLUR_TRANSITION -> EffectRegistry.BLUR_TRANSITION;
+            case BRIGHTNESS_BURST -> EffectRegistry.BRIGHTNESS_BURST;
+            case WHIP_PAN -> EffectRegistry.WHIP_PAN;
+            case COLOR_POP -> EffectRegistry.COLOR_POP;
+            case VIGNETTE_PULSE -> EffectRegistry.VIGNETTE_PULSE;
             case NONE -> null;
         };
     }
