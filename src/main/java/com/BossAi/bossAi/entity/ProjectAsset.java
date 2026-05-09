@@ -77,6 +77,16 @@ public class ProjectAsset {
     @Column(columnDefinition = "TEXT")
     private String metadata;
 
+    /**
+     * Explicit display order for deterministic sorting.
+     * Set to the scene index for scene assets so ORDER BY displayOrder gives the
+     * user's original upload sequence even when all rows share the same createdAt
+     * (single-transaction batch insert).  Non-scene assets (VOICE, MUSIC) get
+     * displayOrder = Integer.MAX_VALUE so they sort after all visual assets.
+     */
+    @Column(name = "display_order")
+    private Integer displayOrder;
+
     private LocalDateTime createdAt;
 
     @PrePersist

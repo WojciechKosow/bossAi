@@ -81,6 +81,8 @@ public class AssetBridgeService {
         videoProjectService.linkGeneration(projectId, generation);
 
         // 3. Rejestruj assety scen (IMAGE / VIDEO)
+        // displayOrder = scene.getIndex() preserves the user's original upload order
+        // even when all rows are saved within a single transaction (same createdAt).
         for (SceneAsset scene : context.getScenes()) {
             if (scene.getVideoLocalPath() != null) {
                 AssetType sceneType = resolveSceneAssetType(scene);
@@ -89,7 +91,8 @@ public class AssetBridgeService {
                         sceneType,
                         AssetSource.AI_GENERATED,
                         "scene_" + String.format("%02d", scene.getIndex()) + ".mp4",
-                        "video/mp4"
+                        "video/mp4",
+                        scene.getIndex()
                 );
                 projectAssetService.markReady(
                         asset.getId(),

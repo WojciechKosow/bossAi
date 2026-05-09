@@ -38,6 +38,18 @@ public class ProjectAssetService {
             String filename,
             String mimeType
     ) {
+        return createAsset(projectId, type, source, filename, mimeType, Integer.MAX_VALUE);
+    }
+
+    @Transactional
+    public ProjectAsset createAsset(
+            UUID projectId,
+            AssetType type,
+            AssetSource source,
+            String filename,
+            String mimeType,
+            int displayOrder
+    ) {
         VideoProject project = projectRepository.findById(projectId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Project not found"));
 
@@ -48,11 +60,12 @@ public class ProjectAssetService {
                 .status(AssetStatus.GENERATING)
                 .filename(filename)
                 .mimeType(mimeType)
+                .displayOrder(displayOrder)
                 .build();
 
         asset = assetRepository.save(asset);
-        log.info("[ProjectAssetService] Created asset {} (type={}, status=GENERATING) for project {}",
-                asset.getId(), type, projectId);
+        log.info("[ProjectAssetService] Created asset {} (type={}, displayOrder={}, status=GENERATING) for project {}",
+                asset.getId(), type, displayOrder, projectId);
         return asset;
     }
 
@@ -114,7 +127,7 @@ public class ProjectAssetService {
 
     @Transactional(readOnly = true)
     public List<ProjectAsset> getProjectAssetEntities(UUID projectId) {
-        return assetRepository.findByProjectIdOrderByCreatedAtAsc(projectId);
+        return assetRepository.findByProjectIdOrderByDisplayOrderAscCreatedAtAsc(projectId);
     }
 
     @Transactional(readOnly = true)
