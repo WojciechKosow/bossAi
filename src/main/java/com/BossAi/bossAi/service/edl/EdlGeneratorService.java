@@ -247,10 +247,15 @@ public class EdlGeneratorService {
         }
 
         List<EdlSegment> segments = new ArrayList<>();
-
-        // === NOWA ŚCIEŻKA: buduj segmenty z justified cuts ===
         List<JustifiedCut> justifiedCuts = context.getJustifiedCuts();
-        if (justifiedCuts != null && !justifiedCuts.isEmpty()) {
+
+        // === CUSTOM TTS: segmenty 1:1 z klipami głosowymi (probed durations) ===
+        // Gdy user dostarcza własne klipy TTS, każda scena musi trwać dokładnie tyle
+        // co odpowiadający klip — inaczej audio_tracks i segmenty są rozjechane.
+        if (context.hasCustomTts() && !context.getCustomTtsAssets().isEmpty()) {
+            segments = buildCustomTtsSegments(context, audioAnalysis, projectAssets);
+        } else if (justifiedCuts != null && !justifiedCuts.isEmpty()) {
+            // === NOWA ŚCIEŻKA: buduj segmenty z justified cuts ===
             segments = buildSegmentsFromJustifiedCuts(justifiedCuts, context, audioAnalysis,
                     projectAssets);
         } else {
@@ -550,6 +555,72 @@ public class EdlGeneratorService {
      *
      * Cel: user mówi "las jako intro, pustynia 2-4" → dokładnie tak wyjdzie, od początku do końca.
      */
+    /**
+     * Buduje segmenty EDL 1:1 z klipami TTS — scena i trwa dokładnie tyle co klip i.
+     * Używane gdy user dostarcza własne nagrania TTS, żeby audio_tracks i segmenty
+     * były idealnie zsynchronizowane z whisper_words z concatenated audio.
+     */
+    private List<EdlSegment> buildCustomTtsSegments(
+            GenerationContext context,
+            AudioAnalysisResponse audioAnalysis,
+            List<ProjectAsset> projectAssets) {
+
+        List<ProjectAsset> visualAssets = projectAssets.stream()
+                .filter(a -> "VIDEO".equals(a.getType().name()) || "IMAGE".equals(a.getType().name()))
+                .collect(Collectors.toList());
+
+        List<Integer> probedDurations = context.getCustomTtsClipDurationsMs();
+        int clipCount = context.getCustomTtsAssets().size();
+        String callbackBase = remotionProperties.getCallbackBaseUrl();
+
+        List<EdlSegment> segments = new ArrayList<>();
+        int cursorMs = 0;
+
+        for (int i = 0; i < clipCount; i++) {
+            if (visualAssets.isEmpty()) break;
+            ProjectAsset asset = i < visualAssets.size()
+                    ? visualAssets.get(i)
+                    : visualAssets.get(visualAssets.size() - 1);
+
+            int durationMs;
+            if (probedDurations != null && i < probedDurations.size() && probedDurations.get(i) > 0) {
+                durationMs = probedDurations.get(i);
+            } else if (i < context.getScenes().size()) {
+                durationMs = context.getScenes().get(i).getDurationMs();
+            } else {
+                durationMs = 3000;
+            }
+
+            List<EdlEffect> effects = buildEffectsForScene(context, audioAnalysis, i);
+
+            EdlTransition transition = null;
+            if (i < clipCount - 1) {
+                String transType = resolveTransitionForScene(context, i);
+                int transDur = resolveTransitionDuration(transType);
+                transition = EdlTransition.builder()
+                        .type(transType)
+                        .durationMs(transDur)
+                        .build();
+            }
+
+            segments.add(EdlSegment.builder()
+                    .id(UUID.randomUUID().toString())
+                    .assetId(asset.getId().toString())
+                    .assetUrl(buildAssetUrl(callbackBase, asset.getId().toString(), asset.getStorageUrl()))
+                    .assetType(asset.getType().name())
+                    .startMs(cursorMs)
+                    .endMs(cursorMs + durationMs)
+                    .effects(effects)
+                    .transition(transition)
+                    .build());
+
+            cursorMs += durationMs;
+        }
+
+        log.info("[EdlGenerator] Custom TTS segments: {} segments, total {}ms", segments.size(), cursorMs);
+        return segments;
+    }
+
     private List<EdlSegment> buildSegmentsFromJustifiedCuts(
             List<JustifiedCut> cuts,
             GenerationContext context,
