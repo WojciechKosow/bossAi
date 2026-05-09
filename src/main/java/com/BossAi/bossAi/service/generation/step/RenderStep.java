@@ -235,7 +235,7 @@ public class RenderStep implements GenerationStep {
             if (i < sceneDirections.size()) {
                 String t = sceneDirections.get(i).getTransitionToNext();
                 if (t != null && !t.equals("cut") && !t.isEmpty()) {
-                    transition = t;
+                    transition = mapToXfadeName(t);
                 }
             }
 
@@ -918,6 +918,25 @@ public class RenderStep implements GenerationStep {
         runCommand(cmd, "cut");
     }
 
+    /**
+     * Mapuje nazwy przejść z EffectRegistry (format z podkreślnikami) na nazwy
+     * obsługiwane przez FFmpeg xfade filter (brak podkreślników).
+     * Nieznane wartości → "fade" jako bezpieczny fallback.
+     */
+    private String mapToXfadeName(String registryName) {
+        return switch (registryName.toLowerCase()) {
+            case "fade"                    -> "fade";
+            case "fade_white", "fadewhite" -> "fadewhite";
+            case "fade_black", "fadeblack" -> "fadeblack";
+            case "dissolve"                -> "dissolve";
+            case "wipe_left",  "wipeleft"  -> "wipeleft";
+            case "wipe_right", "wiperight" -> "wiperight";
+            case "slide_left", "slideleft" -> "slideleft";
+            case "slide_right","slideright"-> "slideright";
+            default                        -> "fade";
+        };
+    }
+
     private String buildEffectFilter(EffectType effect, double duration) {
         if (effect == null) return null;
         String dur = f(duration);
@@ -941,7 +960,7 @@ public class RenderStep implements GenerationStep {
                     "zoompan=z='1+0.3*on/%d':d=%d:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=1080x1920:fps=30",
                     totalFrames, totalFrames);
             // Ken Burns: pan from left to right with slight zoom
-            case PAN_LEFT -> String.format(Locale.US,
+            case PAN_LEFT, KEN_BURNS -> String.format(Locale.US,
                     "zoompan=z='1.15':d=%d:x='(iw-iw/zoom)*on/%d':y='(ih-ih/zoom)/2':s=1080x1920:fps=30",
                     totalFrames, totalFrames);
             // Ken Burns: pan from right to left with slight zoom
@@ -974,6 +993,31 @@ public class RenderStep implements GenerationStep {
                     totalFrames, totalFrames, totalFrames);
             // Slow motion — 1.5x stretch
             case SLOW_MOTION -> "setpts=1.5*PTS";
+            // ─── Nowe efekty TikTok-native ─────────────────────────────────────────
+            // SMASH_ZOOM: ekstremalny snap zoom w pierwszych klatkach (stop-scroll)
+            case SMASH_ZOOM -> String.format(Locale.US,
+                    "zoompan=z='min(2.0,1+0.7*min(on,8)/%d)':d=%d:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=1080x1920:fps=30",
+                    Math.max(1, totalFrames), totalFrames);
+            // BLUR_TRANSITION: delikatny blur + minimalny zoom (przybliżenie TikTok flow)
+            case BLUR_TRANSITION -> String.format(Locale.US,
+                    "zoompan=z='1.05':d=%d:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=1080x1920:fps=30,avgblur=sizeX=3:sizeY=3",
+                    totalFrames);
+            // BRIGHTNESS_BURST: skok jasności przez pierwsze klatki (punch na bicie)
+            case BRIGHTNESS_BURST -> String.format(Locale.US,
+                    "zoompan=z='1.02':d=%d:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=1080x1920:fps=30,eq=brightness=0.15:saturation=1.1",
+                    totalFrames);
+            // WHIP_PAN: agresywne pan w prawo (sygnatura przejścia sceny)
+            case WHIP_PAN -> String.format(Locale.US,
+                    "zoompan=z='1.2':d=%d:x='(iw-iw/zoom)*on/%d':y='(ih-ih/zoom)/2':s=1080x1920:fps=30",
+                    totalFrames, totalFrames);
+            // COLOR_POP: skok saturacji na reveal/CTA
+            case COLOR_POP -> String.format(Locale.US,
+                    "zoompan=z='1.05':d=%d:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=1080x1920:fps=30,eq=saturation=1.5:contrast=1.05",
+                    totalFrames);
+            // VIGNETTE_PULSE: wzmocnienie vignette na dropie
+            case VIGNETTE_PULSE -> String.format(Locale.US,
+                    "zoompan=z='1.05':d=%d:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=1080x1920:fps=30,vignette=angle=PI/3:mode=forward",
+                    totalFrames);
             case NONE -> null;
         };
     }
