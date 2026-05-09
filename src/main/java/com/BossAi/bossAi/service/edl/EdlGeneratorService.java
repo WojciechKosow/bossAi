@@ -764,6 +764,26 @@ public class EdlGeneratorService {
         UserEditIntent editIntent = context.getUserEditIntent();
         Map<Integer, String> assetRoles = buildAssetRoleMap(editIntent, visualAssets.size());
 
+        // === STORY/HOOK: Narrative-optimal asset ordering ===
+        // When narration has hook/cta phases and asset profiles are available,
+        // reorder which asset maps to which scene so that:
+        //   - hook phase → most engaging/energetic asset
+        //   - cta phase → most professional/product-shot asset
+        //   - content phases → remaining assets in original order
+        // Only activates when user has NOT explicitly controlled asset order.
+        boolean userControlsOrder = editIntent != null && editIntent.isUserControlsOrder();
+        if (!userControlsOrder) {
+            NarrationAnalysis narrationAnalysis = context.getNarrationAnalysis();
+            List<AssetProfile> assetProfiles = context.getAssetProfiles();
+            if (narrationAnalysis != null && assetProfiles != null && !assetProfiles.isEmpty()) {
+                Map<Integer, ProjectAsset> narrativeMap = buildNarrativeOptimalAssetMap(
+                        narrationAnalysis, visualAssets, assetProfiles);
+                if (!narrativeMap.equals(assetBySceneIndex)) {
+                    assetBySceneIndex = narrativeMap;
+                }
+            }
+        }
+
         // Dla każdego cuta → przypisz asset w kolejności priorytetów
         for (int i = 0; i < cuts.size(); i++) {
             JustifiedCut cut = cuts.get(i);
@@ -2365,6 +2385,123 @@ public class EdlGeneratorService {
                 .filter(s -> s.getEffects() != null && !s.getEffects().isEmpty()).count();
         log.info("[EdlGenerator] DNA effects applied — {}/{} primary segments have effects",
                 effectsApplied, primarySegments.size());
+    }
+
+    // =========================================================================
+    // NARRATIVE-OPTIMAL ASSET MAPPING — Story/Hook TikTok format
+    // =========================================================================
+
+    /**
+     * Builds a story/hook-optimised scene→asset mapping.
+     *
+     * For TikTok story/hook format the visual should match the narration phase:
+     *   hook segment  → most engaging / high-energy asset
+     *   cta segment   → most professional / product-shot asset
+     *   content       → remaining assets in original upload order
+     *
+     * Returns the default 1:1 map unchanged when:
+     *   - fewer than 2 visual assets
+     *   - no narration phases detected
+     *   - no asset profiles available
+     *   - resulting order equals the default
+     */
+    private Map<Integer, ProjectAsset> buildNarrativeOptimalAssetMap(
+            NarrationAnalysis narration,
+            List<ProjectAsset> visualAssets,
+            List<AssetProfile> profiles) {
+
+        int n = visualAssets.size();
+        Map<Integer, ProjectAsset> defaultMap = new LinkedHashMap<>();
+        for (int i = 0; i < n; i++) defaultMap.put(i, visualAssets.get(i));
+
+        if (n <= 1 || profiles.isEmpty()) return defaultMap;
+        if (narration.getSegments() == null || narration.getSegments().isEmpty()) return defaultMap;
+
+        boolean hasHook = narration.getSegments().stream().anyMatch(s -> "hook".equals(s.getType()));
+        boolean hasCta  = narration.getSegments().stream().anyMatch(s -> "cta".equals(s.getType()));
+        if (!hasHook && !hasCta) return defaultMap;
+
+        int pc = Math.min(n, profiles.size());
+
+        // Best hook asset
+        int hookIdx = 0;
+        if (hasHook) {
+            double best = Double.NEGATIVE_INFINITY;
+            for (int i = 0; i < pc; i++) {
+                double s = scoreForHook(profiles.get(i), i, n);
+                if (s > best) { best = s; hookIdx = i; }
+            }
+        }
+
+        // Best CTA asset (must differ from hook when n > 1)
+        int ctaIdx = n - 1;
+        if (hasCta) {
+            double best = Double.NEGATIVE_INFINITY;
+            for (int i = 0; i < pc; i++) {
+                if (n > 1 && i == hookIdx) continue;
+                double s = scoreForCta(profiles.get(i), i, n);
+                if (s > best) { best = s; ctaIdx = i; }
+            }
+        }
+
+        // No reordering needed when scores match the default positions
+        if ((!hasHook || hookIdx == 0) && (!hasCta || ctaIdx == n - 1)) return defaultMap;
+
+        // Build ordered index list: hookAsset → middle assets (original order) → ctaAsset
+        List<Integer> order = new ArrayList<>();
+        if (hasHook) order.add(hookIdx);
+        for (int i = 0; i < n; i++) {
+            if (i == hookIdx && hasHook) continue;
+            if (i == ctaIdx  && hasCta)  continue;
+            order.add(i);
+        }
+        if (hasCta) order.add(ctaIdx);
+
+        if (order.size() < n) return defaultMap; // safety
+
+        Map<Integer, ProjectAsset> result = new LinkedHashMap<>();
+        for (int si = 0; si < n; si++) {
+            result.put(si, visualAssets.get(order.get(si)));
+        }
+
+        log.info("[EdlGenerator] Story/hook asset reorder — hookAsset=idx{}, ctaAsset=idx{}, order={}",
+                hookIdx, ctaIdx, order);
+        return result;
+    }
+
+    /** Scores an asset profile for the hook/intro position. */
+    private double scoreForHook(AssetProfile p, int idx, int n) {
+        double s = 0;
+        String role = p.getSuggestedRole() != null ? p.getSuggestedRole() : "";
+        switch (role) {
+            case "hook", "intro"         -> s += 3.0;
+            case "content", "b-roll"     -> s += 1.0;
+            case "cta", "outro"          -> s -= 2.0;
+        }
+        String mood = p.getMood() != null ? p.getMood() : "";
+        if ("energetic".equals(mood) || "dynamic".equals(mood)) s += 1.5;
+        else if ("calm".equals(mood))                            s -= 0.5;
+        // Slight preference for earlier assets (user often puts most-engaging first)
+        s += (1.0 - (double) idx / Math.max(1, n - 1)) * 0.5;
+        return s;
+    }
+
+    /** Scores an asset profile for the CTA/outro position. */
+    private double scoreForCta(AssetProfile p, int idx, int n) {
+        double s = 0;
+        String role = p.getSuggestedRole() != null ? p.getSuggestedRole() : "";
+        switch (role) {
+            case "cta", "outro"      -> s += 3.0;
+            case "product-shot"      -> s += 2.5;
+            case "testimonial"       -> s += 1.5;
+            case "content"           -> s += 0.5;
+            case "hook", "intro"     -> s -= 1.0;
+        }
+        String mood = p.getMood() != null ? p.getMood() : "";
+        if ("professional".equals(mood)) s += 1.0;
+        // Slight preference for later assets (user often puts CTA last)
+        s += ((double) idx / Math.max(1, n - 1)) * 0.5;
+        return s;
     }
 
     private String loadDnaPromptTemplate(String presetId) {
