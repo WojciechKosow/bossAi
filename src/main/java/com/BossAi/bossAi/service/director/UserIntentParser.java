@@ -12,22 +12,22 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Parsuje prompt usera na strukturalne intencje montażowe.
+ * Parses the user's prompt into structured editing intentions.
  *
- * Zamiast traktować prompt jako "tekst do wygenerowania scenariusza",
- * UserIntentParser wyciąga z niego DECYZJE MONTAŻOWE:
- *   - "daj ten filmik na początku" → AssetPlacement(0, role=intro, timing=beginning)
- *   - "zrób szybki montaż" → pacingPreference=fast
- *   - "zakończ CTA" → structureHints=["end with CTA"]
+ * Instead of treating the prompt as "text to generate a script from",
+ * UserIntentParser extracts EDITING DECISIONS:
+ *   - "put this clip first" → AssetPlacement(0, role=intro, timing=beginning)
+ *   - "fast edit" → pacingPreference=fast
+ *   - "end with CTA" → structureHints=["end with CTA"]
  *
- * Jeden GPT call. Wynik feedowany do:
+ * Single GPT call. Result fed to:
  *   - CutEngine (addUserIntentCandidates)
  *   - ScriptStep (scene count, order)
  *   - EdlGeneratorService (asset-role mapping)
  *   - NarrationAnalyzer (editing intent override)
  *
- * Jeśli user nie podał żadnych wskazówek montażowych,
- * wynik ma hasExplicitInstructions()=false i system działa w trybie auto.
+ * When the user provides no editing instructions,
+ * hasExplicitInstructions()=false and the system runs in auto mode.
  */
 @Slf4j
 @Service
@@ -168,11 +168,11 @@ public class UserIntentParser {
                   - scene_description: What the user wants to SEE in this scene (visual direction)
                   - mood: The emotional tone for this scene (calm, energetic, dramatic, mysterious, etc.)
                 Examples:
-                  - "scena z Marokiem powinna być spokojna z wolnym zoomem" →
+                  - "the Morocco scene should be calm with a slow zoom" →
                     scene_description="Morocco with slow zoom", mood="calm"
-                  - "Paryż nocą, dynamicznie, szybkie cięcia" →
+                  - "Paris at night, dynamic, fast cuts" →
                     scene_description="Paris at night, dynamic fast cuts", mood="energetic"
-                  - "zakończ CTA z produktem" →
+                  - "end with a CTA showing the product" →
                     scene_description="CTA with product shot", mood="professional", role="cta"
                   - If user describes a scene without specifying which asset →
                     match by context (Morocco description → asset showing Morocco)
@@ -202,17 +202,16 @@ public class UserIntentParser {
                     scene_directives as an empty list. Do not invent layers.
 
                 DETECTION RULES:
-                - "daj to na początku" / "put this first" / "start with this" → timing=beginning
-                - "jako intro" / "as an intro" → role=intro
-                - "na końcu" / "at the end" / "finish with" → timing=end, role=outro
-                - "szybki montaż" / "fast edit" / "dynamic" → pacing_preference=fast
-                - "spokojny" / "calm" / "slow" → pacing_preference=slow
-                - "scena X powinna..." / "scene X should..." → scene_description for that asset
-                - "nastrojowo" / "moody" / "dramatic" → mood for that scene
-                - "w tle..." / "in the background..." / "background:" → layered scene with
+                - "put this first" / "start with this" / "this goes first" → timing=beginning
+                - "as an intro" / "use this as intro" → role=intro
+                - "at the end" / "finish with" / "end on this" → timing=end, role=outro
+                - "fast edit" / "dynamic" / "quick cuts" → pacing_preference=fast
+                - "calm" / "slow" / "relaxed" → pacing_preference=slow
+                - "scene X should..." → scene_description for that asset
+                - "moody" / "dramatic" / "energetic" → mood for that scene
+                - "in the background..." / "background:" → layered scene with
                   background generated layer + primary provided layer
-                - "na środku..." / "na pierwszym planie..." / "foreground..." → primary layer
-                - "overlay..." / "nakładka..." → overlay layer (layer 2)
+                - "foreground..." / "overlay..." / "on top..." → overlay layer (layer 2)
                 - If user lists assets in specific order with instructions → user_controls_order=true
                 - If user says "30 seconds" or "45s" → target_duration_ms = that value in ms
                 - If no editing instructions at all → all roles="auto", pacing="auto"
@@ -222,7 +221,7 @@ public class UserIntentParser {
                 - If user describes scenes, fill scene_description and mood for each
                 - If user doesn't describe a specific scene, leave scene_description=null, mood=null
                 - Don't over-interpret — only extract what the user ACTUALLY said
-                - The user's language may be Polish, English, or mixed — understand all
+                - The user's prompt is in English
 
                 Return ONLY valid JSON:
                 {
@@ -374,32 +373,31 @@ public class UserIntentParser {
 
         // Pacing detection
         String pacing = "auto";
-        if (lower.contains("szybk") || lower.contains("fast") || lower.contains("dynamic")
-                || lower.contains("energi")) {
+        if (lower.contains("fast") || lower.contains("dynamic") || lower.contains("quick")
+                || lower.contains("energetic") || lower.contains("rapid")) {
             pacing = "fast";
-        } else if (lower.contains("spokojn") || lower.contains("slow") || lower.contains("calm")
-                || lower.contains("chill")) {
+        } else if (lower.contains("slow") || lower.contains("calm") || lower.contains("chill")
+                || lower.contains("relaxed") || lower.contains("smooth")) {
             pacing = "slow";
         }
 
         // Structure hints
         List<String> hints = new ArrayList<>();
-        if (lower.contains("intro") || lower.contains("na początku") || lower.contains("start with")) {
+        if (lower.contains("intro") || lower.contains("start with") || lower.contains("first")) {
             hints.add("intro first");
         }
-        if (lower.contains("outro") || lower.contains("na końcu") || lower.contains("end with")
-                || lower.contains("zakończ")) {
+        if (lower.contains("outro") || lower.contains("end with") || lower.contains("finish with")) {
             hints.add("end with outro");
         }
-        if (lower.contains("cta") || lower.contains("call to action")) {
+        if (lower.contains("cta") || lower.contains("call to action") || lower.contains("call-to-action")) {
             hints.add("include CTA");
         }
 
         // Style detection
         String style = null;
-        if (lower.contains("cinematic") || lower.contains("filmow")) style = "cinematic";
-        else if (lower.contains("professional") || lower.contains("profesjonaln")) style = "professional";
-        else if (lower.contains("viral") || lower.contains("trend")) style = "viral";
+        if (lower.contains("cinematic"))                                   style = "cinematic";
+        else if (lower.contains("professional") || lower.contains("corporate")) style = "professional";
+        else if (lower.contains("viral") || lower.contains("trend"))      style = "viral";
 
         // Basic placements from order
         List<UserEditIntent.AssetPlacement> placements = new ArrayList<>();
