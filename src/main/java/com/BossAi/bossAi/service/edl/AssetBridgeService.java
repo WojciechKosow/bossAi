@@ -215,9 +215,15 @@ public class AssetBridgeService {
 
         int sceneCount = Math.min(context.getScenes().size(), sceneAssets.size());
 
+        // VOICE ProjectAssets ordered by createdAt (DB query order) — must be computed
+        // before resolveSceneDurations so both segments and audio tracks use the same durations.
+        List<ProjectAsset> voiceProjectAssets = projectAssets.stream()
+                .filter(a -> a.getType() == AssetType.VOICE)
+                .collect(Collectors.toList());
+
         // Resolve per-scene durations: voice-clip-driven when available, GPT fallback otherwise.
-        // This eliminates "voice...silence...voice...silence" gaps.
-        List<Integer> sceneDurations = resolveSceneDurations(context, sceneCount);
+        // Uses same normalised durations as audio tracks — no A/V offset.
+        List<Integer> sceneDurations = resolveSceneDurations(context, sceneCount, voiceProjectAssets);
 
         List<EdlSegment> segments = new ArrayList<>();
         int cursorMs = 0;
@@ -241,35 +247,21 @@ public class AssetBridgeService {
         int totalMs = cursorMs;
 
         // Audio tracks
-        // storageUrl on ProjectAsset equals storageKey of the original Asset
-        // (set by bridgeToVideoProject → markReady(storageKey)).
-        Map<String, ProjectAsset> voiceByStorageKey = projectAssets.stream()
-                .filter(a -> a.getType() == AssetType.VOICE)
-                .collect(Collectors.toMap(
-                        pa -> pa.getStorageUrl() != null ? pa.getStorageUrl() : "",
-                        pa -> pa,
-                        (a, b) -> a
-                ));
         List<EdlAudioTrack> audioTracks = new ArrayList<>();
 
         if (context.hasCustomTts() && !context.getCustomTtsAssets().isEmpty()) {
-            // Iterate customTtsAssets in orderIndex order — same order as the concatenated
-            // audio fed to WhisperX so whisper_words timestamps align 1:1 with clip positions.
-            List<Integer> probedDurations = context.getCustomTtsClipDurationsMs();
-            boolean hasProbedDurations = !probedDurations.isEmpty();
+            // Normalised clip durations — same logic as EdlGeneratorService so basic
+            // EDL and Remotion EDL are consistent.
+            List<Integer> clipDurations = resolveNormalizedClipDurations(context, voiceProjectAssets);
 
-            log.info("[AssetBridge] Custom TTS path: {} clips, {} probed durations",
-                    context.getCustomTtsAssets().size(), probedDurations.size());
+            log.info("[AssetBridge] Custom TTS path: {} clips, normalised durations: {}",
+                    context.getCustomTtsAssets().size(), clipDurations);
 
             int voiceCursorMs = 0;
             for (int i = 0; i < context.getCustomTtsAssets().size(); i++) {
-                Asset ttsAsset = context.getCustomTtsAssets().get(i);
-                ProjectAsset v = voiceByStorageKey.get(ttsAsset.getStorageKey());
-                int clipDurationMs = hasProbedDurations
-                        ? resolveClipDurationMs(i, v != null ? v : null, context, hasProbedDurations, probedDurations, totalMs, context.getCustomTtsAssets().size())
-                        : (v != null && v.getDurationSeconds() != null
-                                ? Math.max(1, (int) Math.round(v.getDurationSeconds() * 1000.0))
-                                : Math.max(1, totalMs / context.getCustomTtsAssets().size()));
+                int clipDurationMs = clipDurations.get(i);
+                // Positional match: i-th VOICE = i-th TTS clip (creation order guaranteed)
+                ProjectAsset v = i < voiceProjectAssets.size() ? voiceProjectAssets.get(i) : null;
 
                 if (v != null) {
                     audioTracks.add(EdlAudioTrack.builder()
@@ -284,18 +276,17 @@ public class AssetBridgeService {
                             .volume(1.0)
                             .build());
                 } else {
-                    log.warn("[AssetBridge] No ProjectAsset for TTS clip {} (key={})", i, ttsAsset.getStorageKey());
+                    log.warn("[AssetBridge] No ProjectAsset for TTS clip {} — audio gap in timeline", i);
                 }
 
                 log.debug("[AssetBridge] Voice clip {} — {}ms–{}ms (duration={}ms)",
                         i, voiceCursorMs, voiceCursorMs + clipDurationMs, clipDurationMs);
                 voiceCursorMs += clipDurationMs;
             }
-        } else if (!voiceByStorageKey.isEmpty()) {
-            // Single voice asset or non-custom-TTS multi-voice: place sequentially by map order
-            List<ProjectAsset> remainingVoice = new ArrayList<>(voiceByStorageKey.values());
-            if (remainingVoice.size() == 1) {
-                ProjectAsset voice = remainingVoice.get(0);
+        } else if (!voiceProjectAssets.isEmpty()) {
+            // Single voice asset or non-custom-TTS voice: place as one block
+            if (voiceProjectAssets.size() == 1) {
+                ProjectAsset voice = voiceProjectAssets.get(0);
                 int actualVoiceDurationMs = resolveVoiceDurationMs(context, voice, totalMs);
                 audioTracks.add(EdlAudioTrack.builder()
                         .id(UUID.randomUUID().toString())
@@ -311,12 +302,12 @@ public class AssetBridgeService {
                 log.info("[AssetBridge] Voice track: single block {}ms", actualVoiceDurationMs);
             } else {
                 int voiceCursorMs = 0;
-                for (int i = 0; i < remainingVoice.size(); i++) {
-                    ProjectAsset v = remainingVoice.get(i);
+                for (int i = 0; i < voiceProjectAssets.size(); i++) {
+                    ProjectAsset v = voiceProjectAssets.get(i);
                     int clipDurationMs = v.getDurationSeconds() != null
                             ? Math.max(1, (int) Math.round(v.getDurationSeconds() * 1000.0))
                             : Math.max(1, totalMs - voiceCursorMs);
-                    int clipEndMs = (i == remainingVoice.size() - 1)
+                    int clipEndMs = (i == voiceProjectAssets.size() - 1)
                             ? totalMs
                             : Math.min(totalMs, voiceCursorMs + clipDurationMs);
                     audioTracks.add(EdlAudioTrack.builder()
@@ -421,59 +412,112 @@ public class AssetBridgeService {
     }
 
     /**
-     * Resolves per-scene durations. When custom TTS clips have probed durations,
-     * each scene lasts exactly as long as its voice clip — eliminating silence gaps.
-     * Falls back to GPT-estimated scene durations when probed data is unavailable.
+     * Resolves per-scene durations. For custom TTS, uses the same normalised
+     * clip durations as the audio tracks — ensures visual segments and audio
+     * tracks span identical time ranges (no offset between video and voice).
+     * Falls back to GPT-estimated scene durations when no TTS is present.
      */
-    private List<Integer> resolveSceneDurations(GenerationContext context, int sceneCount) {
-        List<Integer> durations = new ArrayList<>(sceneCount);
-        List<Integer> probedClipMs = context.getCustomTtsClipDurationsMs();
-        boolean useClipDurations = context.hasCustomTts()
-                && probedClipMs != null
-                && !probedClipMs.isEmpty();
-
-        for (int i = 0; i < sceneCount; i++) {
-            int duration;
-            if (useClipDurations && i < probedClipMs.size() && probedClipMs.get(i) > 0) {
-                duration = probedClipMs.get(i);
-            } else {
-                duration = context.getScenes().get(i).getDurationMs();
+    private List<Integer> resolveSceneDurations(GenerationContext context, int sceneCount,
+                                                 List<ProjectAsset> voiceProjectAssets) {
+        if (context.hasCustomTts() && !context.getCustomTtsAssets().isEmpty()) {
+            List<Integer> normalized = resolveNormalizedClipDurations(context, voiceProjectAssets);
+            List<Integer> durations = new ArrayList<>(sceneCount);
+            int clipSum = 0;
+            for (int i = 0; i < sceneCount; i++) {
+                int dur = i < normalized.size() ? normalized.get(i) : 1000;
+                durations.add(Math.max(100, dur));
+                clipSum += dur;
             }
-            durations.add(Math.max(500, duration));
-        }
-
-        if (useClipDurations) {
-            int clipSum = durations.stream().mapToInt(Integer::intValue).sum();
             int gptSum = context.getScenes().stream()
                     .limit(sceneCount)
                     .mapToInt(SceneAsset::getDurationMs)
                     .sum();
             log.info("[AssetBridge] Scene durations: voice-driven={}ms vs GPT={}ms (delta={}ms)",
                     clipSum, gptSum, clipSum - gptSum);
+            return durations;
         }
 
+        // Non-custom-TTS: use GPT-estimated scene durations
+        List<Integer> durations = new ArrayList<>(sceneCount);
+        for (int i = 0; i < sceneCount; i++) {
+            durations.add(Math.max(500, context.getScenes().get(i).getDurationMs()));
+        }
         return durations;
     }
 
     /**
-     * Resolves clip duration with priority:
-     *   1. FFprobe-probed duration (exact, sub-ms precision)
-     *   2. ProjectAsset.durationSeconds (may come from upload metadata)
-     *   3. File-size estimate (last resort)
+     * Resolves durations for ALL N custom TTS clips (mirrors EdlGeneratorService logic).
+     *
+     * Priority:
+     *   1. Probed durations (all non-zero) — exact ffprobe result.
+     *   2. Mix of probed + file-size estimates, normalised to total whisper duration.
+     *   3. Equal division of whisper total when no size data is available.
+     *   4. Raw estimates when whisper total is 0.
      */
-    private int resolveClipDurationMs(int index, ProjectAsset v, GenerationContext context,
-                                       boolean hasProbedDurations, List<Integer> probedDurations,
-                                       int totalMs, int clipCount) {
-        if (hasProbedDurations && index < probedDurations.size() && probedDurations.get(index) > 0) {
-            return probedDurations.get(index);
+    private List<Integer> resolveNormalizedClipDurations(GenerationContext context,
+                                                          List<ProjectAsset> voiceProjectAssets) {
+        List<Asset> ttsAssets = context.getCustomTtsAssets();
+        List<Integer> probed = context.getCustomTtsClipDurationsMs();
+        int n = ttsAssets.size();
+
+        boolean allProbedValid = probed != null && probed.size() == n
+                && probed.stream().allMatch(d -> d > 0);
+        if (allProbedValid) {
+            return new ArrayList<>(probed);
         }
-        if (v.getDurationSeconds() != null) {
-            return Math.max(1, (int) Math.round(v.getDurationSeconds() * 1000.0));
+
+        int whisperTotalMs = 0;
+        if (context.getWordTimings() != null && !context.getWordTimings().isEmpty()) {
+            whisperTotalMs = context.getWordTimings()
+                    .get(context.getWordTimings().size() - 1).endMs();
         }
-        if (index < context.getCustomTtsAssets().size()) {
-            return estimateTtsDuration(context.getCustomTtsAssets().get(index));
+
+        List<Long> rawEstimates = new ArrayList<>(n);
+        for (int i = 0; i < n; i++) {
+            long estimate = 0;
+            if (probed != null && i < probed.size() && probed.get(i) > 0) {
+                estimate = probed.get(i);
+            }
+            if (estimate == 0) {
+                Asset asset = ttsAssets.get(i);
+                if (asset.getSizeBytes() > 0) {
+                    estimate = Math.max(100L, asset.getSizeBytes() / 16L);
+                }
+            }
+            if (estimate == 0 && i < voiceProjectAssets.size() && voiceProjectAssets.get(i) != null) {
+                Double dur = voiceProjectAssets.get(i).getDurationSeconds();
+                if (dur != null && dur > 0) estimate = (long) (dur * 1000);
+            }
+            if (estimate == 0) {
+                estimate = whisperTotalMs > 0 ? Math.max(100L, whisperTotalMs / n) : 3000L;
+            }
+            rawEstimates.add(estimate);
         }
-        return Math.max(1, totalMs / clipCount);
+
+        long rawTotal = rawEstimates.stream().mapToLong(Long::longValue).sum();
+        List<Integer> result = new ArrayList<>(n);
+
+        if (whisperTotalMs > 0 && rawTotal > 0) {
+            int allocated = 0;
+            for (int i = 0; i < n; i++) {
+                int duration;
+                if (i == n - 1) {
+                    duration = Math.max(100, whisperTotalMs - allocated);
+                } else {
+                    duration = (int) Math.round((double) rawEstimates.get(i) / rawTotal * whisperTotalMs);
+                    duration = Math.max(100, duration);
+                }
+                result.add(duration);
+                allocated += duration;
+            }
+            log.info("[AssetBridge] Clip durations normalised to whisperTotal={}ms: {}", whisperTotalMs, result);
+        } else {
+            for (long est : rawEstimates) {
+                result.add((int) Math.max(100, est));
+            }
+            log.warn("[AssetBridge] No whisper total — raw duration estimates: {}", result);
+        }
+        return result;
     }
 
     private AssetType resolveSceneAssetType(SceneAsset scene) {
@@ -506,11 +550,4 @@ public class AssetBridgeService {
         return sceneSumMs;
     }
 
-    /** Estimates TTS clip duration from file size (roughly 128kbps MP3 = 16 bytes/ms). */
-    private int estimateTtsDuration(Asset asset) {
-        if (asset.getSizeBytes() != 0 && asset.getSizeBytes() > 0) {
-            return (int) Math.max(500, asset.getSizeBytes() / 16);
-        }
-        return 3000; // 3s default fallback
-    }
 }
