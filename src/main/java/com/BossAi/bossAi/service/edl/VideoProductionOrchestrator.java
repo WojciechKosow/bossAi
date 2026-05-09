@@ -123,12 +123,17 @@ public class VideoProductionOrchestrator {
                 return;
             }
 
-            // 9. Serializuj i zapisz EDL
+            // 9. Serializuj i zapisz EDL (individual clips — for timeline editor)
             String edlJson = objectMapper.writeValueAsString(edl);
             EditDecisionListEntity edlEntity = edlService.saveNewVersion(projectId, edlJson, EdlSource.AI_GENERATED);
 
-            // 10. Renderuj przez Remotion
-            renderViaRemotion(projectId, edlEntity, edl);
+            // 10. Build render EDL: for custom TTS, swap individual voice clips with
+            //     the single concatenated track so whisper_words align 1:1 with audio.
+            //     The timeline EDL (saved above) keeps individual clips for editing.
+            EdlDto renderEdl = edlGeneratorService.buildRenderEdl(edl, projectAssets);
+
+            // 11. Renderuj przez Remotion
+            renderViaRemotion(projectId, edlEntity, renderEdl);
 
         } catch (Exception e) {
             log.error("[Orchestrator] Video production failed for project {}", projectId, e);

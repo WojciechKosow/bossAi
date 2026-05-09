@@ -126,6 +126,25 @@ public class AssetBridgeService {
                         null
                 );
             }
+
+            // Also register the concatenated voice (AI_GENERATED) — Remotion render uses this
+            // single file so whisper_words timestamps align 1:1 with the audio.
+            // Individual clips (USER_UPLOAD above) stay in the DB for the timeline editor.
+            if (context.getVoiceLocalPath() != null) {
+                ProjectAsset concatAsset = projectAssetService.createAsset(
+                        projectId,
+                        AssetType.VOICE,
+                        AssetSource.AI_GENERATED,
+                        "voice_concat.mp3",
+                        "audio/mpeg"
+                );
+                projectAssetService.markReady(
+                        concatAsset.getId(),
+                        context.getVoiceLocalPath(),
+                        null, null, null, null
+                );
+                log.info("[AssetBridge] Registered concatenated voice as AI_GENERATED → id={}", concatAsset.getId());
+            }
         } else if (context.getVoiceLocalPath() != null) {
             // Legacy single voice asset (AI TTS or user-recorded voice)
             ProjectAsset voiceAsset = projectAssetService.createAsset(
