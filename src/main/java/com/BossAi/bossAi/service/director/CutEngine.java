@@ -387,9 +387,11 @@ public class CutEngine {
             if (topicChange) secondary.add(JustifiedCut.CutReason.TOPIC_CHANGE);
             if (highImportance) secondary.add(JustifiedCut.CutReason.HIGH_IMPORTANCE);
 
-            candidates.add(new CutCandidate(
+            CutCandidate c = new CutCandidate(
                     boundaryMs, classification, primaryReason, secondary,
-                    score, i, "narration"));
+                    score, i, "narration");
+            c.narrationSegmentType = currSeg.getType(); // incoming phase drives effect
+            candidates.add(c);
         }
     }
 
@@ -1387,28 +1389,77 @@ public class CutEngine {
     // SUGGESTIONS — co wizualnie zrobić na danym cięciu
     // =========================================================================
 
+    /**
+     * Selects the visual effect for the INCOMING segment (the clip that starts at this cut).
+     * Narration phase takes priority — it aligns the effect with the Story/Hook arc:
+     *   hook      → fast_zoom   (snap attention before the first word)
+     *   setup     → zoom_in     (move toward viewer, building engagement)
+     *   point     → alternates pan_right/pan_left (energy without aggression)
+     *   emphasis  → zoom_in_offset  (off-center focus = urgency)
+     *   climax    → fast_zoom   (peak moment deserves peak energy)
+     *   transition/cooldown → drift  (smooth flow, give eyes a rest)
+     *   cta       → ken_burns   (cinematic, professional close)
+     * Falls back to cut-classification-based selection when no narration type is set.
+     */
     private String suggestEffect(CutCandidate c) {
+        if (c.narrationSegmentType != null) {
+            return switch (c.narrationSegmentType.toLowerCase()) {
+                case "hook"                   -> "fast_zoom";
+                case "setup"                  -> "zoom_in";
+                case "point"                  -> c.narrationSegmentIndex % 2 == 0
+                                                  ? "pan_right" : "pan_left";
+                case "emphasis"               -> "zoom_in_offset";
+                case "climax"                 -> "fast_zoom";
+                case "transition", "cooldown" -> "drift";
+                case "cta"                    -> "ken_burns";
+                default                       -> suggestEffectFromClassification(c);
+            };
+        }
+        return suggestEffectFromClassification(c);
+    }
+
+    private String suggestEffectFromClassification(CutCandidate c) {
         return switch (c.classification) {
             case HARD -> switch (c.primaryReason) {
                 case TOPIC_CHANGE, HOOK_START -> "fast_zoom";
-                case MUSIC_DROP -> "shake";
-                case HIGH_IMPORTANCE, CTA_TRANSITION -> "zoom_in";
-                default -> "zoom_in";
+                case MUSIC_DROP               -> "shake";
+                case HIGH_IMPORTANCE,
+                     CTA_TRANSITION           -> "zoom_in";
+                default                       -> "zoom_in";
             };
             case SOFT -> switch (c.primaryReason) {
                 case SENTENCE_END_PAUSE -> "drift";
-                case ENERGY_DROP -> "zoom_out";
-                case DRAMATIC_PAUSE -> "pan_left";
-                default -> "drift";
+                case ENERGY_DROP        -> "zoom_out";
+                case DRAMATIC_PAUSE     -> "pan_left";
+                default                 -> "drift";
             };
             case MICRO -> "fast_zoom";
         };
     }
 
+    /**
+     * Selects the transition TYPE between the outgoing and incoming segment.
+     * Story/Hook arc:
+     *   hook/setup/point/emphasis — hard CUT: no breathing room, urgency maintained
+     *   climax                    — hard CUT: peak impact needs instant visual swap
+     *   transition/cooldown       — fade: gentle turn, emotional exhale
+     *   cta                       — fade: clean professional close
+     */
     private String suggestTransition(CutCandidate c) {
+        if (c.narrationSegmentType != null) {
+            return switch (c.narrationSegmentType.toLowerCase()) {
+                case "hook", "setup", "point", "emphasis", "climax" -> "cut";
+                case "transition", "cooldown", "cta"                -> "fade";
+                default                                             -> suggestTransitionFromClassification(c);
+            };
+        }
+        return suggestTransitionFromClassification(c);
+    }
+
+    private String suggestTransitionFromClassification(CutCandidate c) {
         return switch (c.classification) {
-            case HARD -> "cut";
-            case SOFT -> "fade";
+            case HARD  -> "cut";
+            case SOFT  -> "fade";
             case MICRO -> "cut";
         };
     }
@@ -1429,6 +1480,7 @@ public class CutEngine {
         int narrationSegmentIndex;
         String source; // "narration", "speech", "music_section", "tempo", "user_intent"
         String editingPhase;
+        String narrationSegmentType; // "hook", "setup", "point", "climax", "cta", etc.
         int assignedAssetIndex = -1; // -1 = auto, >= 0 = explicit user assignment
 
         CutCandidate(int timeMs, JustifiedCut.CutClassification classification,

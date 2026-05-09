@@ -194,29 +194,49 @@ public class EdlGeneratorService {
         var rhythm = editDna.getCutRhythm();
         if (palette == null) return;
 
+        Set<String> forbidden = (palette.getForbidden() != null)
+                ? new HashSet<>(palette.getForbidden()) : Set.of();
+        double baseIntensity = palette.getBaseIntensity() > 0 ? palette.getBaseIntensity() : 0.7;
+        String primaryEffect = (palette.getPrimary() != null
+                && effectRegistry.isValidEffect(palette.getPrimary()))
+                ? palette.getPrimary() : null;
+
         for (int i = 0; i < edl.getSegments().size(); i++) {
             EdlSegment seg = edl.getSegments().get(i);
-            if (seg.getEffects() == null || seg.getEffects().isEmpty()) continue;
 
-            for (EdlEffect effect : seg.getEffects()) {
-                // Apply base intensity from EditDna if segment doesn't have explicit intensity
-                if (effect.getIntensity() <= 0 && palette.getBaseIntensity() > 0) {
-                    effect.setIntensity(palette.getBaseIntensity());
+            if (seg.getEffects() == null || seg.getEffects().isEmpty()) {
+                // Inject primary palette effect for segments that have none
+                if (primaryEffect != null) {
+                    seg.setEffects(new ArrayList<>(List.of(
+                            effectRegistry.createEffect(primaryEffect, baseIntensity, null))));
+                }
+            } else {
+                for (EdlEffect effect : seg.getEffects()) {
+                    // Enforce forbidden list — replace with primary or safe default
+                    if (forbidden.contains(effect.getType())) {
+                        String replacement = primaryEffect != null
+                                ? primaryEffect : EffectRegistry.ZOOM_IN;
+                        effect.setType(replacement);
+                        Map<String, Object> newParams = effectRegistry.getEffectDefaults(replacement);
+                        if (newParams != null) effect.setParams(new java.util.HashMap<>(newParams));
+                        log.debug("[EdlGenerator] Replaced forbidden effect '{}' → '{}'",
+                                effect.getType(), replacement);
+                    }
+                    // Apply base intensity if not already set
+                    if (effect.getIntensity() <= 0) {
+                        effect.setIntensity(baseIntensity);
+                    }
                 }
             }
 
-            // Apply humanize offset to segment timing (subtle randomness)
+            // Subtle humanize offset — prevents robotic precision
             if (rhythm != null && rhythm.getHumanizeMs() > 0 && i > 0) {
                 int humanize = rhythm.getHumanizeMs();
-                // Small random offset to avoid robotic precision
                 int offset = (int) ((Math.random() - 0.5) * 2 * humanize);
                 seg.setStartMs(seg.getStartMs() + offset);
-                // Ensure no overlap with previous segment
-                if (i > 0) {
-                    EdlSegment prev = edl.getSegments().get(i - 1);
-                    if (seg.getStartMs() < prev.getEndMs()) {
-                        seg.setStartMs(prev.getEndMs());
-                    }
+                EdlSegment prev = edl.getSegments().get(i - 1);
+                if (seg.getStartMs() < prev.getEndMs()) {
+                    seg.setStartMs(prev.getEndMs());
                 }
             }
         }
@@ -1187,40 +1207,105 @@ public class EdlGeneratorService {
                                                   int sceneIndex) {
         List<EdlEffect> effects = new ArrayList<>();
 
-        String effectType = resolveEffectForScene(context, sceneIndex);
+        // Narration segment for this scene position drives the effect type.
+        NarrationAnalysis.NarrationSegment narSeg = findNarrationSegmentForScene(context, sceneIndex);
+
+        String effectType;
+        if (narSeg != null && narSeg.getType() != null) {
+            effectType = mapNarrationTypeToEffect(narSeg.getType(), sceneIndex);
+        } else {
+            effectType = resolveEffectForScene(context, sceneIndex);
+        }
+
         if (effectType != null && effectRegistry.isValidEffect(effectType)) {
-            // Intensity zalezy od sekcji muzycznej
-            double intensity = resolveIntensity(context, audioAnalysis, sceneIndex);
+            double intensity = resolveIntensity(context, audioAnalysis, sceneIndex, narSeg);
             effects.add(effectRegistry.createEffect(effectType, intensity, null));
         }
 
         return effects;
     }
 
+    /**
+     * Maps narration segment type to the most appropriate visual effect.
+     * Designed for Story/Hook format (hook → setup → point → climax → cta),
+     * but applies universally to any narration arc.
+     */
+    private String mapNarrationTypeToEffect(String segType, int sceneIndex) {
+        return switch (segType.toLowerCase()) {
+            case "hook"                   -> EffectRegistry.FAST_ZOOM;
+            case "setup"                  -> EffectRegistry.ZOOM_IN;
+            case "point"                  -> sceneIndex % 2 == 0
+                                             ? EffectRegistry.PAN_RIGHT
+                                             : EffectRegistry.PAN_LEFT;
+            case "emphasis"               -> EffectRegistry.ZOOM_IN_OFFSET;
+            case "climax"                 -> EffectRegistry.FAST_ZOOM;
+            case "transition", "cooldown" -> EffectRegistry.DRIFT;
+            case "cta"                    -> EffectRegistry.KEN_BURNS;
+            default                       -> EffectRegistry.ZOOM_IN;
+        };
+    }
+
+    /**
+     * Finds the narration segment that best corresponds to the given scene position.
+     * First tries a direct index match; falls back to proportional mapping when
+     * the number of narration segments differs from scene count.
+     */
+    private NarrationAnalysis.NarrationSegment findNarrationSegmentForScene(
+            GenerationContext context, int sceneIndex) {
+        NarrationAnalysis na = context.getNarrationAnalysis();
+        if (na == null || na.getSegments() == null || na.getSegments().isEmpty()) return null;
+
+        List<NarrationAnalysis.NarrationSegment> segs = na.getSegments();
+        if (sceneIndex < segs.size()) return segs.get(sceneIndex);
+
+        // Proportional mapping when counts differ
+        int totalScenes = Math.max(1, context.sceneCount());
+        int mappedIdx = (int) Math.round((double) sceneIndex / (totalScenes - 1) * (segs.size() - 1));
+        return segs.get(Math.min(segs.size() - 1, Math.max(0, mappedIdx)));
+    }
+
+    private double resolveIntensity(GenerationContext context,
+                                     AudioAnalysisResponse audioAnalysis,
+                                     int sceneIndex,
+                                     NarrationAnalysis.NarrationSegment narSeg) {
+        // Narration energy + importance as primary signals
+        double narIntensity = 0.7;
+        if (narSeg != null) {
+            // energy: 0.0-1.0, importance: 0.0-1.0 → blend into a target range [0.4, 1.0]
+            narIntensity = 0.4 + narSeg.getEnergy() * 0.4 + narSeg.getImportance() * 0.2;
+        }
+
+        // Audio section energy as secondary signal
+        double audioIntensity = 0.7;
+        if (audioAnalysis != null && audioAnalysis.sections() != null) {
+            int sceneStartMs = 0;
+            for (int i = 0; i < sceneIndex && i < context.getScenes().size(); i++) {
+                sceneStartMs += context.getScenes().get(i).getDurationMs();
+            }
+            double timeSec = sceneStartMs / 1000.0;
+            for (var section : audioAnalysis.sections()) {
+                if (timeSec >= section.start() && timeSec < section.end()) {
+                    audioIntensity = switch (section.energy() != null
+                            ? section.energy().toLowerCase() : "medium") {
+                        case "high"   -> 1.0;
+                        case "medium" -> 0.7;
+                        case "low"    -> 0.4;
+                        default       -> 0.7;
+                    };
+                    break;
+                }
+            }
+        }
+
+        // Blend: narration 60 %, audio 40 %
+        return Math.max(0.3, Math.min(1.0, narIntensity * 0.6 + audioIntensity * 0.4));
+    }
+
+    /** Legacy 2-arg overload used by callers that have no narration segment. */
     private double resolveIntensity(GenerationContext context,
                                      AudioAnalysisResponse audioAnalysis,
                                      int sceneIndex) {
-        if (audioAnalysis == null || audioAnalysis.sections() == null) return 1.0;
-
-        // Oblicz punkt czasowy sceny
-        int sceneStartMs = 0;
-        for (int i = 0; i < sceneIndex && i < context.getScenes().size(); i++) {
-            sceneStartMs += context.getScenes().get(i).getDurationMs();
-        }
-        double timeSec = sceneStartMs / 1000.0;
-
-        // Znajdz sekcje muzyczna
-        for (var section : audioAnalysis.sections()) {
-            if (timeSec >= section.start() && timeSec < section.end()) {
-                return switch (section.energy() != null ? section.energy().toLowerCase() : "medium") {
-                    case "high" -> 1.0;
-                    case "medium" -> 0.7;
-                    case "low" -> 0.4;
-                    default -> 0.7;
-                };
-            }
-        }
-        return 0.7;
+        return resolveIntensity(context, audioAnalysis, sceneIndex, null);
     }
 
     /**
