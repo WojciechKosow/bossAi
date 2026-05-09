@@ -124,6 +124,7 @@ public class EdlGeneratorService {
 
             // Strip effects unknown to Remotion before validation — prevents 400 errors
             stripUnknownEffects(edl);
+            sanitizeTransitions(edl);
 
             EdlValidator.ValidationResult result = edlValidator.validate(edl);
             if (result.valid()) {
@@ -162,8 +163,9 @@ public class EdlGeneratorService {
         // Multi-layer composition (same as deterministic path)
         appendLayerSegments(edl, context, projectAssets);
 
-        // Strip effects unknown to Remotion before validation — prevents 400 errors
+        // Strip effects and normalize transitions unknown to Remotion — prevents 400 errors
         stripUnknownEffects(edl);
+        sanitizeTransitions(edl);
 
         EdlValidator.ValidationResult result = edlValidator.validate(edl);
         if (!result.valid()) {
@@ -471,6 +473,24 @@ public class EdlGeneratorService {
      * Called before sending EDL to the renderer to prevent 400 errors.
      * The EffectRegistry is the single source of truth for valid effect names.
      */
+    private void sanitizeTransitions(EdlDto edl) {
+        if (edl.getSegments() == null) return;
+        int replaced = 0;
+        for (EdlSegment seg : edl.getSegments()) {
+            EdlTransition t = seg.getTransition();
+            if (t == null || t.getType() == null) continue;
+            if (!VALID_TRANSITIONS.contains(t.getType())) {
+                String fallback = t.getType().contains("fade") ? "fade" : "cut";
+                log.debug("[EdlGenerator] Unknown transition '{}' → '{}'", t.getType(), fallback);
+                t.setType(fallback);
+                replaced++;
+            }
+        }
+        if (replaced > 0) {
+            log.warn("[EdlGenerator] Sanitized {} unknown transition(s) before render", replaced);
+        }
+    }
+
     private void stripUnknownEffects(EdlDto edl) {
         if (edl.getSegments() == null) return;
         int stripped = 0;
