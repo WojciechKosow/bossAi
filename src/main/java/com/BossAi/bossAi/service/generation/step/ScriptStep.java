@@ -17,26 +17,16 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 /**
- * ScriptStep v2 — generuje scenariusz z content-type aware promptami.
+ * Generates a script for the video pipeline using content-type aware GPT prompts.
  *
- * FAZA 2 zmiany:
+ * VideoStyle maps to a content type string that selects the appropriate
+ * system prompt in OpenAiService:
+ *   HIGH_CONVERTING_AD → STORY_HOOK  (hook→problem→agitation→solution→CTA)
+ *   EDUCATIONAL        → EDUCATIONAL (top-N list, tips, facts)
+ *   STORY_MODE         → STORY       (narrative, rising action, climax)
+ *   VIRAL_EDIT         → VIRAL       (ultra-fast, trend-driven)
  *
- *   1. Content type mapping — VideoStyle → contentType string.
- *      Zamiast wysyłać jeden uniwersalny prompt, ScriptStep teraz mapuje
- *      VideoStyle na contentType (AD/EDUCATIONAL/STORY/VIRAL) i przekazuje
- *      do OpenAiService który użyje odpowiedniego systemu promptu.
- *
- *   2. Enriched prompt — dodaje content type hint do promptu usera jeśli
- *      VideoStyle nie jest ustawiony (content type wykrywany przez GPT).
- *
- *   3. Max scene validation — limit podniesiony do 12 (dla dłuższych filmów).
- *
- * Przykład dla "Top 5 AI tools" z VideoStyle=EDUCATIONAL:
- *   → contentType = "EDUCATIONAL"
- *   → OpenAiService używa EDUCATIONAL_STRUCTURE prompt
- *   → GPT generuje 7 scen (hook + 5 items + outro)
- *   → mediaAssignments: scena 0 VIDEO, sceny 1-5 IMAGE, scena 6 VIDEO
- *   → overlays: HOOK na scenie 0, LIST_ITEM + FACT na każdej scenie itemów, CTA na scenie 6
+ * All generated narration is in English regardless of the user's prompt language.
  */
 @Slf4j
 @Service
@@ -45,23 +35,18 @@ public class ScriptStep implements GenerationStep {
 
     private final OpenAiService openAiService;
 
-    /**
-     * Mapowanie VideoStyle → contentType dla OpenAiService.
-     * Musi być zsynchronizowane z VideoStyle enum.
-     */
     private static String mapStyleToContentType(com.BossAi.bossAi.entity.VideoStyle style) {
-        if (style == null) return null; // auto-detect przez OpenAiService
+        if (style == null) return null;
         return switch (style) {
-            case HIGH_CONVERTING_AD -> "AD";
+            case HIGH_CONVERTING_AD -> "STORY_HOOK";
+            case UGC_STYLE          -> "STORY_HOOK";
+            case PRODUCT_SHOWCASE   -> "STORY_HOOK";
+            case LUXURY_AD          -> "STORY_HOOK";
             case EDUCATIONAL        -> "EDUCATIONAL";
             case STORY_MODE         -> "STORY";
-            case VIRAL_EDIT         -> "VIRAL";
-            // Pozostałe style używają najbliższego content type
-            case UGC_STYLE          -> "AD";
-            case LUXURY_AD          -> "AD";
             case CINEMATIC          -> "STORY";
-            case PRODUCT_SHOWCASE   -> "AD";
-            case CUSTOM             -> null; // auto-detect
+            case VIRAL_EDIT         -> "VIRAL";
+            case CUSTOM             -> null;
         };
     }
 
@@ -90,19 +75,16 @@ public class ScriptStep implements GenerationStep {
         boolean hasCustomTts = context.hasCustomTts();
 
         if (contentType != null) {
-            // Wiemy jaki typ — bezpośrednio generuj z odpowiednim promptem
-            log.info("[ScriptStep] Generuję dla contentType: {}, hasCustomTts: {}", contentType, hasCustomTts);
+            log.info("[ScriptStep] Generating script — contentType: {}, hasCustomTts: {}", contentType, hasCustomTts);
             script = openAiService.generateScriptForContentType(enrichedPrompt, contentType, hasCustomTts);
         } else {
-            // Auto-detect content type przez OpenAiService (dodatkowy GPT call)
-            log.info("[ScriptStep] Auto-detect content type, hasCustomTts: {}", hasCustomTts);
+            log.info("[ScriptStep] Auto-detecting content type, hasCustomTts: {}", hasCustomTts);
             script = openAiService.generateScript(enrichedPrompt, hasCustomTts);
         }
 
         context.setScript(script);
 
-        // Buduj SceneAsset z każdej sceny
-        // Backfill imagePrompt for custom IMAGE assets when GPT left it blank
+        // Build SceneAssets — backfill imagePrompt when GPT left it blank for custom assets
         List<Asset> customMedia = context.getCustomMediaAssets();
         List<AssetProfile> profiles = context.getAssetProfiles();
         boolean hasCustomMedia = context.hasCustomMedia();
@@ -116,7 +98,7 @@ public class ScriptStep implements GenerationStep {
                                 customMedia.get(scene.index()),
                                 profiles != null && scene.index() < profiles.size()
                                         ? profiles.get(scene.index()) : null);
-                        log.warn("[ScriptStep] Scena {} — GPT nie podał imagePrompt, backfill: {}", scene.index(), imagePrompt);
+                        log.warn("[ScriptStep] Scene {} — GPT omitted imagePrompt, using fallback: {}", scene.index(), imagePrompt);
                     }
                     return SceneAsset.builder()
                             .index(scene.index())
@@ -130,22 +112,18 @@ public class ScriptStep implements GenerationStep {
 
         context.setScenes(scenes);
 
-        log.info("[ScriptStep] DONE — {} scen, {}ms total, {} overlays, contentType: {}",
+        log.info("[ScriptStep] DONE — {} scenes, {}ms total, {} overlays, contentType: {}",
                 scenes.size(),
                 script.totalDurationMs(),
                 script.overlays() != null ? script.overlays().size() : 0,
                 script.contentType());
     }
 
-    /**
-     * Wzbogaca prompt o kontekst assetów i styl.
-     * Dodaje style-specific hints do promptu — GPT dostaje więcej kontekstu.
-     */
+    /** Enriches the user prompt with asset context and style-specific hints. */
     private String buildEnrichedPrompt(GenerationContext context) {
         StringBuilder sb = new StringBuilder(
                 context.getPrompt() != null ? context.getPrompt() : "");
 
-        // Instrukcje ze StyleConfig (pacing, energy, opis stylu)
         if (context.getStyleConfig() != null) {
             sb.append(context.getStyleConfig().getPromptInstructions());
         }

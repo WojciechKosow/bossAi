@@ -100,7 +100,7 @@ public class OpenAiService {
 
         JSON SCHEMA:
         {
-          "narration": "full narration text for TTS (user's language or English)",
+          "narration": "full narration text for TTS (always in English)",
           "scenes": [
             {
               "index": 0,
@@ -218,7 +218,7 @@ public class OpenAiService {
         - If user doesn't specify N, default to 5 items (7 scenes total)
 
         NARRATION RULES:
-        - Language: SAME language as user's prompt (if Polish prompt -> Polish narration)
+        - Language: Always English — regardless of the user's prompt language
         - Conversational flow: hook -> "Alright, number one..." -> explain -> "Number two..." -> ... -> CTA
         - Each item intro uses casual transition: "Okay number two", "Next up", "And finally"
         - NO filler words, NO "um", NO "so basically" \u2014 every word earns its place
@@ -247,6 +247,82 @@ public class OpenAiService {
         VIDEO scenes MUST have durationMs=5000 (API minimum is 5 seconds).
         """;
 
+    private static final String STORY_HOOK_STRUCTURE = """
+
+        CONTENT TYPE: STORY/HOOK — High-Converting TikTok Ad
+        This is the classic VSL (Video Sales Letter) format adapted for TikTok.
+        Structure: Pattern-Interrupt Hook → Problem → Agitation → Solution → CTA
+        Every scene serves a purpose. Every word earns its place.
+
+        THE FEEL:
+        - Urgent, intimate, one-on-one — like a friend who just discovered something life-changing
+        - NOT salesy, NOT corporate — authentic, direct, slightly urgent
+        - Narration tone: "Okay, I have to tell you this..." / "Here's something most people miss..."
+        - Energy builds through the video: calm hook → emotional problem → urgency → relief → action
+
+        MANDATORY STRUCTURE:
+          Scene 0 [VIDEO, 5s, durationMs=5000]: PATTERN INTERRUPT HOOK — stop the scroll.
+            - Must trigger instant curiosity or recognition: "That's me!"
+            - 1 punchy sentence max, 8 words spoken
+            - Hook patterns: shocking stat, bold claim, question, controversy, "I used to..."
+            - Overlay HOOK: the hook line, CENTER, POP, fontSize 52, bold
+            - Music: volume 0.45-0.55, energetic, fadeOutMs 400
+
+          Scene 1 [IMAGE, 5-7s, durationMs=6000]: THE PROBLEM — make them feel the pain.
+            - Name the exact problem the target viewer faces
+            - Create emotional resonance: "Most people struggling with X feel..."
+            - Overlay BODY: pain point summary, TOP, SLIDE_IN
+            - Music: volume 0.10-0.15 (narrator is king)
+
+          Scene 2 [IMAGE, 5-7s, durationMs=6000]: AGITATION — amplify the stakes.
+            - Make the problem feel more urgent, costly, or embarrassing
+            - "And here's why it keeps happening..." / "The real problem is..."
+            - Overlay BODY: consequence or root cause statement, TOP, SLIDE_IN
+            - Music: volume 0.10-0.15
+
+          Scene 3 [IMAGE, 5-8s, durationMs=7000]: THE SOLUTION — hero moment.
+            - Introduce the product/method as the obvious, simple answer
+            - "But here's what actually works..." / "This is the thing that changed everything..."
+            - Show the transformation, not just the product
+            - Overlay BODY: solution statement, TOP, SLIDE_IN
+            - Music: volume 0.12-0.18, rising energy
+
+          Last scene [VIDEO, 5s, durationMs=5000]: CTA — drive immediate action.
+            - Clear, specific action. One ask only.
+            - Add urgency or social proof if applicable
+            - "Link in bio to get yours" / "Follow for more" / "Try it free today"
+            - Overlay CTA: action text, CENTER, POP, fontSize 44, bold
+            - Music: volume 0.35-0.45, fadeInMs 300
+
+        NARRATION RULES:
+        - Language: Always English — regardless of the user's prompt language
+        - Sentence length: max 10 words per sentence — short, punchy, direct
+        - NO filler words: no "basically", "actually", "you know", "um"
+        - Every scene's subtitleText = EXACT narration for that scene
+        - Total narration: 60-120 words (20-40 seconds delivery)
+        - Pacing: slightly faster than normal speech — creates urgency
+
+        HOOK PATTERNS (pick the most relevant):
+        - "[X]% of people are doing this completely wrong"
+        - "I can't believe I didn't know this sooner"
+        - "Stop doing [X] — here's what actually works"
+        - "Nobody talks about why [problem] really happens"
+        - "This one thing changed everything for [outcome]"
+        - "I tried [X things]. Here's the only one that worked."
+        - "Warning: if you do [X], watch this first"
+
+        SCENE COUNT RULES:
+        - Default (no custom assets): exactly 5 scenes (hook + problem + agitation + solution + CTA)
+        - If user provides N custom assets: exactly N scenes, compress/expand phases to fit
+          - N=2: hook + CTA
+          - N=3: hook + solution + CTA
+          - N=4: hook + problem + solution + CTA
+          - N=5: hook + problem + agitation + solution + CTA
+          - N>5: add extra content/proof scenes between solution and CTA
+
+        VIDEO scenes (scene 0 and last) MUST have durationMs=5000.
+        """;
+
     private static final String VIRAL_STRUCTURE = """
 
         CONTENT TYPE: VIRAL EDIT
@@ -265,16 +341,17 @@ public class OpenAiService {
     // =========================================================================
 
     public String detectContentType(String userPrompt) {
-        log.info("[OpenAiService] Wykrywam content type...");
+        log.info("[OpenAiService] Detecting content type...");
 
         String detectionPrompt = """
             Classify this video content request into exactly ONE category.
             Respond with ONLY the category name, nothing else.
             
             Categories:
-            - AD: product advertisement, promotion, selling something
+            - STORY_HOOK: product ad with story structure (hook→problem→agitation→solution→CTA), VSL, high-converting ad
+            - AD: generic advertisement without clear story arc, product promotion, brand awareness
             - EDUCATIONAL: tutorial, tips, list (top 5, how to, explained), facts
-            - STORY: personal story, narrative, experience, transformation
+            - STORY: personal story, narrative, experience, transformation (non-ad)
             - VIRAL: entertainment, trend, challenge, meme, reaction
             
             Request: """ + userPrompt + """
@@ -305,10 +382,10 @@ public class OpenAiService {
                     .trim().toUpperCase();
 
             String type = switch (detected) {
-                case "AD", "EDUCATIONAL", "STORY", "VIRAL" -> detected;
+                case "STORY_HOOK", "AD", "EDUCATIONAL", "STORY", "VIRAL" -> detected;
                 default -> {
-                    log.warn("[OpenAiService] Nieznany content type '{}', uzywam EDUCATIONAL", detected);
-                    yield "EDUCATIONAL";
+                    log.warn("[OpenAiService] Unknown content type '{}', defaulting to STORY_HOOK", detected);
+                    yield "STORY_HOOK";
                 }
             };
 
@@ -367,11 +444,12 @@ public class OpenAiService {
 
     private String buildSystemPrompt(String contentType) {
         String structure = switch (contentType) {
+            case "STORY_HOOK"  -> STORY_HOOK_STRUCTURE;
             case "AD"          -> AD_STRUCTURE;
             case "EDUCATIONAL" -> EDUCATIONAL_STRUCTURE;
             case "STORY"       -> STORY_STRUCTURE;
             case "VIRAL"       -> VIRAL_STRUCTURE;
-            default            -> EDUCATIONAL_STRUCTURE;
+            default            -> STORY_HOOK_STRUCTURE;
         };
 
         return BASE_SYSTEM_PROMPT + structure;
@@ -427,10 +505,10 @@ public class OpenAiService {
                 .block();
 
         if (audioBytes == null || audioBytes.length == 0) {
-            throw new RuntimeException("[OpenAiService] TTS zwrocil pusty plik");
+            throw new RuntimeException("[OpenAiService] TTS returned empty audio");
         }
 
-        log.info("[OpenAiService] TTS gotowy \u2014 {} bytes", audioBytes.length);
+        log.info("[OpenAiService] TTS complete \u2014 {} bytes", audioBytes.length);
         return audioBytes;
     }
 
