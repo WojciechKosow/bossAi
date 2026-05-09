@@ -765,14 +765,13 @@ public class EdlGeneratorService {
         Map<Integer, String> assetRoles = buildAssetRoleMap(editIntent, visualAssets.size());
 
         // === STORY/HOOK: Narrative-optimal asset ordering ===
-        // When narration has hook/cta phases and asset profiles are available,
-        // reorder which asset maps to which scene so that:
-        //   - hook phase → most engaging/energetic asset
-        //   - cta phase → most professional/product-shot asset
-        //   - content phases → remaining assets in original order
-        // Only activates when user has NOT explicitly controlled asset order.
+        // Only for AI-generated assets (no custom media). When the user provides their
+        // own assets, ScriptStep already told GPT the asset descriptions so GPT aligned
+        // each scene's narration to the matching asset — reordering here would decouple
+        // narration from visuals (e.g., TTS talks about state-1 but shows the state-2 image).
         boolean userControlsOrder = editIntent != null && editIntent.isUserControlsOrder();
-        if (!userControlsOrder) {
+        boolean hasCustomMedia = context.hasCustomMedia();
+        if (!userControlsOrder && !hasCustomMedia) {
             NarrationAnalysis narrationAnalysis = context.getNarrationAnalysis();
             List<AssetProfile> assetProfiles = context.getAssetProfiles();
             if (narrationAnalysis != null && assetProfiles != null && !assetProfiles.isEmpty()) {

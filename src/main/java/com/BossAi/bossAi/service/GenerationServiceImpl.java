@@ -512,8 +512,11 @@ public class GenerationServiceImpl implements GenerationService {
     }
 
     /**
-     * Resolves and validates custom assets by IDs. Returns sorted by orderIndex.
-     * Validates ownership. Returns empty list if assetIds is null/empty.
+     * Resolves and validates custom assets by IDs.
+     * Returns assets in the EXACT ORDER the caller specified in assetIds —
+     * this is the user's explicit scene assignment and must be preserved
+     * end-to-end (GPT script generation, VideoStep, EdlGenerator all assume
+     * scene i == assetIds[i]).
      */
     private List<Asset> resolveCustomAssets(List<UUID> assetIds, User user) {
         if (assetIds == null || assetIds.isEmpty()) {
@@ -530,12 +533,16 @@ public class GenerationServiceImpl implements GenerationService {
             }
         });
 
-        // Sort by orderIndex (null-safe, nulls last)
-        return assets.stream()
-                .sorted(java.util.Comparator.comparing(
-                        Asset::getOrderIndex,
-                        java.util.Comparator.nullsLast(java.util.Comparator.naturalOrder())
-                ))
+        // Return in the ORDER the user specified — NOT sorted by orderIndex.
+        // orderIndex reflects when each asset was uploaded; the request ID order
+        // reflects how the user wants the scenes arranged.
+        java.util.Map<UUID, Asset> byId = new java.util.LinkedHashMap<>();
+        for (Asset a : assets) {
+            byId.put(a.getId(), a);
+        }
+        return assetIds.stream()
+                .map(byId::get)
+                .filter(java.util.Objects::nonNull)
                 .toList();
     }
 
