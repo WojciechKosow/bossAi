@@ -20,6 +20,12 @@ import { Bounce } from "../effects/Bounce";
 import { Drift } from "../effects/Drift";
 import { ZoomInOffset } from "../effects/ZoomInOffset";
 import { GrainOverlay } from "../effects/GrainOverlay";
+import { SmashZoom } from "../effects/SmashZoom";
+import { BlurTransition } from "../effects/BlurTransition";
+import { BrightnessBurst } from "../effects/BrightnessBurst";
+import { WhipPan } from "../effects/WhipPan";
+import { ColorPop } from "../effects/ColorPop";
+import { VignettePulse } from "../effects/VignettePulse";
 
 interface VideoSegmentProps {
   segment: Segment;
@@ -187,6 +193,64 @@ function wrapWithEffect(
     case "speed_ramp":
       // Handled at Video playbackRate level
       return element;
+    case "smash_zoom":
+      return (
+        <SmashZoom
+          scaleFrom={p.scale_from as number}
+          scaleTo={p.scale_to as number}
+          durationMs={p.duration_ms as number}
+        >
+          {element}
+        </SmashZoom>
+      );
+    case "blur_transition":
+      return (
+        <BlurTransition
+          blurAmount={p.blur_amount as number}
+          durationMs={p.duration_ms as number}
+          phase={p.phase as "intro" | "outro"}
+        >
+          {element}
+        </BlurTransition>
+      );
+    case "brightness_burst":
+      return (
+        <BrightnessBurst
+          brightnessDelta={p.brightness_delta as number}
+          durationMs={p.duration_ms as number}
+        >
+          {element}
+        </BrightnessBurst>
+      );
+    case "whip_pan":
+      return (
+        <WhipPan
+          direction={p.direction as "left" | "right"}
+          distancePercent={p.distance_percent as number}
+          blurAmount={p.blur_amount as number}
+          durationMs={p.duration_ms as number}
+        >
+          {element}
+        </WhipPan>
+      );
+    case "color_pop":
+      return (
+        <ColorPop
+          saturationBoost={p.saturation_boost as number}
+          durationMs={p.duration_ms as number}
+        >
+          {element}
+        </ColorPop>
+      );
+    case "vignette_pulse":
+      return (
+        <VignettePulse
+          vignetteDelta={p.vignette_delta as number}
+          durationMs={p.duration_ms as number}
+        >
+          {element}
+        </VignettePulse>
+      );
     default:
       return element;
   }

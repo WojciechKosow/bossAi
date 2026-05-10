@@ -23,6 +23,13 @@ export const EffectSchema = z.object({
     "bounce",
     "drift",
     "zoom_in_offset",
+    // TikTok-native effects
+    "smash_zoom",
+    "blur_transition",
+    "brightness_burst",
+    "whip_pan",
+    "color_pop",
+    "vignette_pulse",
   ]),
   intensity: z.number().optional(),
   start_ms: z.number().nullable().optional(),
