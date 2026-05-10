@@ -77,28 +77,23 @@ public class EffectRegistry {
 
     /**
      * Efekty aktualnie zaimplementowane w Remotion renderer.
-     * Nowe efekty TikTok-native (smash_zoom, blur_transition itd.) nie są tu
-     * — zostaną dodane po wdrożeniu na remotion-branch.
+     * Aby dodać nowy efekt: zaimplementuj komponent w remotion-branch, dodaj tu.
      */
     private static final Set<String> REMOTION_EFFECTS = Set.of(
             ZOOM_IN, ZOOM_OUT, FAST_ZOOM,
             PAN_LEFT, PAN_RIGHT, PAN_UP, PAN_DOWN,
             SHAKE, SLOW_MOTION, SPEED_RAMP, ZOOM_PULSE,
-            KEN_BURNS, GLITCH, FLASH, BOUNCE, DRIFT, ZOOM_IN_OFFSET
+            KEN_BURNS, GLITCH, FLASH, BOUNCE, DRIFT, ZOOM_IN_OFFSET,
+            // TikTok-native — wdrożone w remotion-branch (commit 792fdc6)
+            SMASH_ZOOM, BLUR_TRANSITION, BRIGHTNESS_BURST,
+            WHIP_PAN, COLOR_POP, VIGNETTE_PULSE
     );
 
     /**
-     * Fallback mapping: nowe efekty TikTok-native → najbliższy odpowiednik Remotion.
-     * Używane w stripUnknownEffects dopóki Remotion nie zna nowych typów.
+     * Fallback mapping dla efektów jeszcze nie zaimplementowanych w Remotion.
+     * Aktualnie pusty — wszystkie efekty są obsługiwane.
      */
-    private static final Map<String, String> REMOTION_FALLBACKS = Map.of(
-            SMASH_ZOOM,       FAST_ZOOM,
-            BLUR_TRANSITION,  DRIFT,
-            BRIGHTNESS_BURST, FLASH,
-            WHIP_PAN,         PAN_RIGHT,
-            COLOR_POP,        ZOOM_IN,
-            VIGNETTE_PULSE,   ZOOM_IN_OFFSET
-    );
+    private static final Map<String, String> REMOTION_FALLBACKS = Map.of();
 
     private static final Map<String, Map<String, Object>> EFFECT_DEFAULTS = Map.ofEntries(
             Map.entry(ZOOM_IN, Map.of("scale_from", 1.0, "scale_to", 1.3, "easing", "easeInOut")),
