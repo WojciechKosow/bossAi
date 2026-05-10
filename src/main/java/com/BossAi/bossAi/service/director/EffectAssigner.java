@@ -31,7 +31,7 @@ public class EffectAssigner {
     private static final List<EffectType> POOL_AGGRESSIVE = List.of(
             EffectType.SMASH_ZOOM, EffectType.FAST_ZOOM, EffectType.SHAKE,
             EffectType.BOUNCE, EffectType.ZOOM_IN_OFFSET, EffectType.WHIP_PAN,
-            EffectType.VIGNETTE_PULSE
+            EffectType.RGB_SPLIT, EffectType.VIGNETTE_PULSE
     );
 
     /** Narastające efekty na build-up / medium energy */
@@ -65,12 +65,13 @@ public class EffectAssigner {
     // TRANSITION POOLS
     // =========================================================================
 
+    // Wipe/slide now look good (blur+drift, not raw translateX off-screen)
     private static final List<String> TRANSITIONS_AGGRESSIVE = List.of(
-            "fade_white", "wipe_left", "wipe_right", "slide_left", "slide_right"
+            "cut", "fade_white", "wipe_left", "wipe_right"
     );
 
     private static final List<String> TRANSITIONS_SMOOTH = List.of(
-            "fade", "dissolve", "fade_black"
+            "fade", "dissolve", "fade_black", "slide_left", "slide_right"
     );
 
     private static final List<String> TRANSITIONS_MINIMAL = List.of(
@@ -204,11 +205,11 @@ public class EffectAssigner {
             return basePool;
         }
 
-        // Wysoka danceability → więcej bounce i shake
+        // Wysoka danceability → więcej bounce, shake i rgb split na dropach
         if (dance > 0.7 && basePool == POOL_AGGRESSIVE) {
             return List.of(
                     EffectType.BOUNCE, EffectType.SHAKE, EffectType.FAST_ZOOM,
-                    EffectType.BOUNCE, EffectType.ZOOM_IN_OFFSET, EffectType.SHAKE
+                    EffectType.RGB_SPLIT, EffectType.ZOOM_IN_OFFSET, EffectType.SHAKE
             );
         }
 
