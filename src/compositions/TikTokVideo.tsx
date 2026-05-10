@@ -1,7 +1,7 @@
 import React from "react";
 import { AbsoluteFill, Sequence } from "remotion";
 import type { Edl, ColorGrade } from "../types/edl";
-import { parseEdlToTimeline } from "../utils/edl-parser";
+import { parseEdlToTimeline, type RemotionSegment } from "../utils/edl-parser";
 import { VideoSegment } from "../components/VideoSegment";
 import { TextOverlayComponent } from "../components/TextOverlay";
 import { AudioTrackComponent } from "../components/AudioTrackComponent";
@@ -56,6 +56,38 @@ function buildVignetteStyle(
   };
 }
 
+/**
+ * Returns per-segment wrapper styles for multi-layer composition.
+ *
+ * layer < 0  = background (generated asset): dimmed, renders first in DOM
+ * layer = 0  = primary (user asset): slightly transparent when background present
+ * layer > 0  = overlay: semi-transparent, renders last
+ *
+ * DOM order determines z-stacking (last = on top), so segments must be
+ * sorted ascending by layer before rendering.
+ */
+function layerWrapperStyle(
+  seg: RemotionSegment,
+  backgroundIntervals: ReadonlyArray<readonly [number, number]>
+): React.CSSProperties | undefined {
+  const { layer } = seg.segment;
+  if (layer < 0) {
+    // Background: dim so primary content stands out
+    return { filter: "brightness(0.6)" };
+  }
+  if (layer === 0) {
+    // Primary: if a background layer overlaps this scene, go slightly transparent
+    // so the background is visible through the primary (double-exposure effect)
+    const overlapsBackground = backgroundIntervals.some(
+      ([start, end]) =>
+        start < seg.from + seg.durationInFrames && end > seg.from
+    );
+    return overlapsBackground ? { opacity: 0.85 } : undefined;
+  }
+  // Overlay (layer > 0): semi-transparent so primary shows through
+  return { opacity: 0.85 };
+}
+
 export const TikTokVideo: React.FC<TikTokVideoProps> = ({ edl }) => {
   const timeline = parseEdlToTimeline(edl);
 
@@ -66,6 +98,17 @@ export const TikTokVideo: React.FC<TikTokVideoProps> = ({ edl }) => {
   const colorFilter = buildColorGradeFilter(colorGrade);
   const vignetteStyle = buildVignetteStyle(colorGrade);
 
+  // Sort segments ascending by layer so background renders before primary
+  // (DOM order = z-stacking: first in DOM = visually behind).
+  const sortedSegments = [...timeline.segments].sort(
+    (a, b) => a.segment.layer - b.segment.layer
+  );
+
+  // Pre-compute background time intervals for primary opacity logic
+  const backgroundIntervals = sortedSegments
+    .filter((s) => s.segment.layer < 0)
+    .map((s) => [s.from, s.from + s.durationInFrames] as const);
+
   return (
     <AbsoluteFill style={{ backgroundColor: "#000" }}>
       {/* Color-graded video layer */}
@@ -74,16 +117,17 @@ export const TikTokVideo: React.FC<TikTokVideoProps> = ({ edl }) => {
           filter: colorFilter !== "none" ? colorFilter : undefined,
         }}
       >
-        {/* Video/Image segments */}
-        {timeline.segments.map((seg) => (
-          <Sequence
-            key={seg.id}
-            from={seg.from}
-            durationInFrames={seg.durationInFrames}
-          >
-            <VideoSegment segment={seg.segment} bpm={timeline.bpm} />
-          </Sequence>
-        ))}
+        {/* Video/Image segments — sorted by layer (background first, overlay last) */}
+        {sortedSegments.map((seg) => {
+          const wrapperStyle = layerWrapperStyle(seg, backgroundIntervals);
+          return (
+            <AbsoluteFill key={seg.id} style={wrapperStyle}>
+              <Sequence from={seg.from} durationInFrames={seg.durationInFrames}>
+                <VideoSegment segment={seg.segment} bpm={timeline.bpm} />
+              </Sequence>
+            </AbsoluteFill>
+          );
+        })}
       </AbsoluteFill>
 
       {/* Vignette overlay */}
