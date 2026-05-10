@@ -26,6 +26,7 @@ import { BrightnessBurst } from "../effects/BrightnessBurst";
 import { WhipPan } from "../effects/WhipPan";
 import { ColorPop } from "../effects/ColorPop";
 import { VignettePulse } from "../effects/VignettePulse";
+import { RGBSplit } from "../effects/RGBSplit";
 
 interface VideoSegmentProps {
   segment: Segment;
@@ -191,7 +192,7 @@ function wrapWithEffect(
       );
     case "slow_motion":
     case "speed_ramp":
-      // Handled at Video playbackRate level
+      // Handled at Video playbackRate level via getPlaybackRate()
       return element;
     case "smash_zoom":
       return (
@@ -251,6 +252,15 @@ function wrapWithEffect(
           {element}
         </VignettePulse>
       );
+    case "rgb_split":
+      return (
+        <RGBSplit
+          offsetPx={p.offset_px as number}
+          durationMs={p.duration_ms as number}
+        >
+          {element}
+        </RGBSplit>
+      );
     default:
       return element;
   }
@@ -285,7 +295,6 @@ function applyTransition(
     ? Math.round((transition.duration_ms / 1000) * fps)
     : Math.round(0.3 * fps);
 
-  // Transition OUT at the end of this segment (transition belongs to this segment)
   const outStart = durationInFrames - dur;
 
   if (frame >= outStart) {
@@ -301,20 +310,34 @@ function applyTransition(
         opacity = 1 - progress;
         break;
       case "fade_white":
-        // White overlay handled separately
+        // White overlay handled separately below
         opacity = 1;
         break;
       case "wipe_left":
-        transform = `translateX(${-progress * 100}%)`;
+        // Repurposed: scale-down + drift left + fade — was translateX(-100%) revealing black
+        opacity = 1 - progress;
+        transform = `translateX(${-progress * 15}%) scale(${1 - progress * 0.05})`;
         break;
       case "wipe_right":
-        transform = `translateX(${progress * 100}%)`;
+        opacity = 1 - progress;
+        transform = `translateX(${progress * 15}%) scale(${1 - progress * 0.05})`;
         break;
       case "slide_left":
-        transform = `translateX(${-progress * 100}%)`;
+        // Repurposed: blur + gentle drift left + fade — was translateX(-100%) revealing black
+        opacity = interpolate(progress, [0, 0.6, 1], [1, 0.5, 0], {
+          extrapolateLeft: "clamp",
+          extrapolateRight: "clamp",
+        });
+        filter = `blur(${(progress * 7).toFixed(1)}px)`;
+        transform = `translateX(${-progress * 8}%)`;
         break;
       case "slide_right":
-        transform = `translateX(${progress * 100}%)`;
+        opacity = interpolate(progress, [0, 0.6, 1], [1, 0.5, 0], {
+          extrapolateLeft: "clamp",
+          extrapolateRight: "clamp",
+        });
+        filter = `blur(${(progress * 7).toFixed(1)}px)`;
+        transform = `translateX(${progress * 8}%)`;
         break;
     }
   }
@@ -336,7 +359,7 @@ export const VideoSegment: React.FC<VideoSegmentProps> = ({
     segment.transition
   );
 
-  // White flash for fade_white transition
+  // White flash overlay for fade_white transition
   let whiteOpacity = 0;
   if (segment.transition?.type === "fade_white" && segment.transition.duration_ms) {
     const dur = Math.round((segment.transition.duration_ms / 1000) * fps);
@@ -351,11 +374,11 @@ export const VideoSegment: React.FC<VideoSegmentProps> = ({
 
   const playbackRate = getPlaybackRate(segment.effects);
 
-  // Render asset
-  let content: React.ReactNode;
   const trimIn = segment.trim_in_ms
     ? Math.round((segment.trim_in_ms / 1000) * fps)
     : 0;
+
+  let content: React.ReactNode;
 
   if (segment.asset_type === "VIDEO") {
     content = (
@@ -377,7 +400,6 @@ export const VideoSegment: React.FC<VideoSegmentProps> = ({
     content = null;
   }
 
-  // Apply visual effects
   if (segment.effects) {
     for (const effect of segment.effects) {
       content = wrapWithEffect(content, effect, bpm);

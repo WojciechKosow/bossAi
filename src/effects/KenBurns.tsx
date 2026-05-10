@@ -11,7 +11,7 @@ interface KenBurnsProps {
 export const KenBurns: React.FC<KenBurnsProps> = ({
   children,
   scaleFrom = 1.0,
-  scaleTo = 1.2,
+  scaleTo = 1.25,
   panDirection = "right",
 }) => {
   const frame = useCurrentFrame();
@@ -24,9 +24,10 @@ export const KenBurns: React.FC<KenBurnsProps> = ({
 
   const scale = scaleFrom + (scaleTo - scaleFrom) * progress;
 
+  // 12% pan gives visible cinematic drift (was 5% — barely noticeable)
+  const panAmount = 12;
   let translateX = 0;
   let translateY = 0;
-  const panAmount = 5;
 
   switch (panDirection) {
     case "left":
@@ -43,13 +44,19 @@ export const KenBurns: React.FC<KenBurnsProps> = ({
       break;
   }
 
+  // Subtle counter-rotation for organic handheld feel
+  const rotation =
+    panDirection === "left" || panDirection === "right"
+      ? (progress - 0.5) * 0.4
+      : 0;
+
   return (
     <div style={{ width: "100%", height: "100%", overflow: "hidden" }}>
       <div
         style={{
           width: "100%",
           height: "100%",
-          transform: `scale(${scale}) translate(${translateX}%, ${translateY}%)`,
+          transform: `scale(${scale}) translate(${translateX}%, ${translateY}%) rotate(${rotation}deg)`,
           transformOrigin: "center center",
         }}
       >

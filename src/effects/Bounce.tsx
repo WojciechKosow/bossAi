@@ -1,5 +1,5 @@
 import React from "react";
-import { useCurrentFrame, useVideoConfig, spring } from "remotion";
+import { useVideoConfig } from "remotion";
 import { useBeatSync } from "../utils/beat-sync";
 
 interface BounceProps {
@@ -15,21 +15,13 @@ export const Bounce: React.FC<BounceProps> = ({
   easing = "spring",
   bpm = 120,
 }) => {
-  const frame = useCurrentFrame();
-  const { fps } = useVideoConfig();
+  // Hook always called unconditionally — Rules of Hooks compliant
+  const { beatProgress } = useBeatSync(bpm);
 
-  let scale: number;
-
-  if (easing === "spring") {
-    const { beatProgress } = useBeatSync(bpm);
-    // Pulse on each beat with spring decay
-    const pulse = Math.exp(-beatProgress * 6);
-    scale = 1 + (scalePeak - 1) * pulse;
-  } else {
-    // Sinusoidal bounce
-    const { beatProgress } = useBeatSync(bpm);
-    scale = 1 + (scalePeak - 1) * Math.sin(beatProgress * Math.PI);
-  }
+  const scale =
+    easing === "spring"
+      ? 1 + (scalePeak - 1) * Math.exp(-beatProgress * 6)
+      : 1 + (scalePeak - 1) * Math.sin(beatProgress * Math.PI);
 
   return (
     <div
