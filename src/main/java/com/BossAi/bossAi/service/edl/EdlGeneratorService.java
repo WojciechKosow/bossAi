@@ -587,16 +587,33 @@ public class EdlGeneratorService {
     private void stripUnknownEffects(EdlDto edl) {
         if (edl.getSegments() == null) return;
         int stripped = 0;
+        int remapped = 0;
         for (EdlSegment seg : edl.getSegments()) {
             if (seg.getEffects() == null || seg.getEffects().isEmpty()) continue;
             List<EdlEffect> mutableEffects = new ArrayList<>(seg.getEffects());
-            int before = mutableEffects.size();
-            mutableEffects.removeIf(e -> e.getType() == null || !effectRegistry.isValidEffect(e.getType()));
+            for (int i = 0; i < mutableEffects.size(); i++) {
+                EdlEffect e = mutableEffects.get(i);
+                if (e.getType() == null || !effectRegistry.isValidEffect(e.getType())) {
+                    mutableEffects.remove(i--);
+                    stripped++;
+                } else if (!effectRegistry.isRemotionSupportedEffect(e.getType())) {
+                    // Nowy efekt TikTok-native — zastąp Remotion-safe odpowiednikiem
+                    String safe = effectRegistry.mapToRemotionSafeEffect(e.getType());
+                    mutableEffects.set(i, EdlEffect.builder()
+                            .type(safe)
+                            .intensity(e.getIntensity())
+                            .params(effectRegistry.getEffectDefaults(safe))
+                            .build());
+                    remapped++;
+                }
+            }
             seg.setEffects(mutableEffects);
-            stripped += before - mutableEffects.size();
         }
         if (stripped > 0) {
-            log.warn("[EdlGenerator] Stripped {} unknown effect(s) before render — check preset configs", stripped);
+            log.warn("[EdlGenerator] Stripped {} unknown effect(s) before render", stripped);
+        }
+        if (remapped > 0) {
+            log.info("[EdlGenerator] Remapped {} TikTok-native effect(s) to Remotion fallbacks (pending remotion-branch)", remapped);
         }
     }
 

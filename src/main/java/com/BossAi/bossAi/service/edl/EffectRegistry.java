@@ -4,12 +4,17 @@ import com.BossAi.bossAi.dto.edl.EdlEffect;
 import org.springframework.stereotype.Component;
 
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Registry efektow dostepnych w Remotion renderer.
  *
  * Mapuje nazwy efektow na domyslne parametry.
  * Uzywany przez EdlGeneratorService do walidacji i uzupelniania parametrow.
+ *
+ * REMOTION_EFFECTS — efekty aktualnie zaimplementowane w Remotion renderer.
+ * Nowe efekty TikTok-native sa w pelnym rejestrze, ale mapowane na Remotion-safe
+ * odpowiedniki az do wdrozenia na remotion-branch.
  */
 @Component
 public class EffectRegistry {
@@ -70,6 +75,31 @@ public class EffectRegistry {
     public static final String TEXT_ANIM_WORD_BY_WORD = "word_by_word";
     public static final String TEXT_ANIM_KARAOKE = "karaoke";
 
+    /**
+     * Efekty aktualnie zaimplementowane w Remotion renderer.
+     * Nowe efekty TikTok-native (smash_zoom, blur_transition itd.) nie są tu
+     * — zostaną dodane po wdrożeniu na remotion-branch.
+     */
+    private static final Set<String> REMOTION_EFFECTS = Set.of(
+            ZOOM_IN, ZOOM_OUT, FAST_ZOOM,
+            PAN_LEFT, PAN_RIGHT, PAN_UP, PAN_DOWN,
+            SHAKE, SLOW_MOTION, SPEED_RAMP, ZOOM_PULSE,
+            KEN_BURNS, GLITCH, FLASH, BOUNCE, DRIFT, ZOOM_IN_OFFSET
+    );
+
+    /**
+     * Fallback mapping: nowe efekty TikTok-native → najbliższy odpowiednik Remotion.
+     * Używane w stripUnknownEffects dopóki Remotion nie zna nowych typów.
+     */
+    private static final Map<String, String> REMOTION_FALLBACKS = Map.of(
+            SMASH_ZOOM,       FAST_ZOOM,
+            BLUR_TRANSITION,  DRIFT,
+            BRIGHTNESS_BURST, FLASH,
+            WHIP_PAN,         PAN_RIGHT,
+            COLOR_POP,        ZOOM_IN,
+            VIGNETTE_PULSE,   ZOOM_IN_OFFSET
+    );
+
     private static final Map<String, Map<String, Object>> EFFECT_DEFAULTS = Map.ofEntries(
             Map.entry(ZOOM_IN, Map.of("scale_from", 1.0, "scale_to", 1.3, "easing", "easeInOut")),
             Map.entry(ZOOM_OUT, Map.of("scale_from", 1.3, "scale_to", 1.0, "easing", "easeInOut")),
@@ -110,18 +140,10 @@ public class EffectRegistry {
             TRANSITION_SLIDE_RIGHT, Map.of("duration_ms", 180)
     );
 
-    /**
-     * Zwraca domyslne parametry efektu.
-     * Null jesli efekt nie istnieje w rejestrze.
-     */
     public Map<String, Object> getEffectDefaults(String effectType) {
         return EFFECT_DEFAULTS.get(effectType);
     }
 
-    /**
-     * Zwraca domyslne parametry przejscia.
-     * Null jesli przejscie nie istnieje w rejestrze.
-     */
     public Map<String, Object> getTransitionDefaults(String transitionType) {
         return TRANSITION_DEFAULTS.get(transitionType);
     }
@@ -134,9 +156,21 @@ public class EffectRegistry {
         return TRANSITION_DEFAULTS.containsKey(transitionType);
     }
 
+    /** True jeśli Remotion renderer aktualnie obsługuje ten efekt. */
+    public boolean isRemotionSupportedEffect(String effectType) {
+        return REMOTION_EFFECTS.contains(effectType);
+    }
+
     /**
-     * Tworzy EdlEffect z domyslnymi parametrami, nadpisanymi przez custom params.
+     * Zwraca Remotion-safe odpowiednik efektu.
+     * Jeśli efekt jest już obsługiwany — zwraca go bez zmian.
+     * Nowe efekty TikTok-native → fallback na najbliższy Remotion equivalent.
      */
+    public String mapToRemotionSafeEffect(String effectType) {
+        if (isRemotionSupportedEffect(effectType)) return effectType;
+        return REMOTION_FALLBACKS.getOrDefault(effectType, ZOOM_IN);
+    }
+
     public EdlEffect createEffect(String type, double intensity, Map<String, Object> customParams) {
         Map<String, Object> defaults = EFFECT_DEFAULTS.getOrDefault(type, Map.of());
         java.util.Map<String, Object> merged = new java.util.HashMap<>(defaults);
