@@ -525,10 +525,24 @@ public class EdlGeneratorService {
             }
 
             for (Map.Entry<Integer, UUID> e : layers.entrySet()) {
-                int layerIndex = e.getKey();
-                if (layerIndex == 0) continue; // primary already emitted
+                int directiveLayerIndex = e.getKey();
                 ProjectAsset asset = assetById.get(e.getValue());
                 if (asset == null) continue;
+
+                // Map SceneDirective.layerIndex → EdlSegment.layer (z-order):
+                //   directive 0 = background (behind primary) → EdlSegment.layer = -1
+                //   directive 1 = primary    (already emitted as layer=0, skip)
+                //   directive 2 = overlay    (in front of primary) → EdlSegment.layer = 2
+                // LayerAssetGenerator only generates source=generate assets, so the
+                // provided primary (directive 1) is never present in layerAssetIds.
+                int edlLayer;
+                if (directiveLayerIndex == 0) {
+                    edlLayer = -1;  // background: render behind primary
+                } else if (directiveLayerIndex == 1) {
+                    continue;  // provided primary: already emitted
+                } else {
+                    edlLayer = directiveLayerIndex;  // overlay (2+): render in front
+                }
 
                 layerSegments.add(EdlSegment.builder()
                         .id(UUID.randomUUID().toString())
@@ -537,7 +551,7 @@ public class EdlGeneratorService {
                         .assetType(asset.getType().name())
                         .startMs(sceneStart)
                         .endMs(sceneEnd)
-                        .layer(layerIndex)
+                        .layer(edlLayer)
                         .effects(new ArrayList<>())
                         .build());
             }
@@ -545,7 +559,7 @@ public class EdlGeneratorService {
 
         if (!layerSegments.isEmpty()) {
             primarySegments.addAll(layerSegments);
-            log.info("[EdlGenerator] Appended {} layer segments (layer>0) for {} multi-layer scenes",
+            log.info("[EdlGenerator] Appended {} layer segments for {} multi-layer scenes",
                     layerSegments.size(),
                     scenes.stream().filter(s -> !s.getLayerAssetIds().isEmpty()).count());
         }
