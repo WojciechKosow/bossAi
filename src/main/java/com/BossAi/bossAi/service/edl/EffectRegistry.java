@@ -53,6 +53,8 @@ public class EffectRegistry {
     public static final String COLOR_POP = "color_pop";
     /** Szybkie wzmocnienie vignette na dropie */
     public static final String VIGNETTE_PULSE = "vignette_pulse";
+    /** Chromatic aberration burst na wejściu sceny — red/blue channel split, dropy i hooki */
+    public static final String RGB_SPLIT = "rgb_split";
 
     // ─── Przejscia ────────────────────────────────────────────────────
 
@@ -84,9 +86,9 @@ public class EffectRegistry {
             PAN_LEFT, PAN_RIGHT, PAN_UP, PAN_DOWN,
             SHAKE, SLOW_MOTION, SPEED_RAMP, ZOOM_PULSE,
             KEN_BURNS, GLITCH, FLASH, BOUNCE, DRIFT, ZOOM_IN_OFFSET,
-            // TikTok-native — wdrożone w remotion-branch (commit 792fdc6)
+            // TikTok-native
             SMASH_ZOOM, BLUR_TRANSITION, BRIGHTNESS_BURST,
-            WHIP_PAN, COLOR_POP, VIGNETTE_PULSE
+            WHIP_PAN, COLOR_POP, VIGNETTE_PULSE, RGB_SPLIT
     );
 
     /**
@@ -120,7 +122,8 @@ public class EffectRegistry {
             Map.entry(BRIGHTNESS_BURST, Map.of("brightness_delta", 0.45, "duration_ms", 120, "easing", "easeOut")),
             Map.entry(WHIP_PAN, Map.of("direction", "right", "distance_percent", 55, "blur_amount", 22, "duration_ms", 140)),
             Map.entry(COLOR_POP, Map.of("saturation_boost", 0.35, "duration_ms", 200, "easing", "easeOut")),
-            Map.entry(VIGNETTE_PULSE, Map.of("vignette_delta", 0.4, "duration_ms", 150, "easing", "easeOut"))
+            Map.entry(VIGNETTE_PULSE, Map.of("vignette_delta", 0.4, "duration_ms", 150, "easing", "easeOut")),
+            Map.entry(RGB_SPLIT, Map.of("offset_px", 8, "duration_ms", 100))
     );
 
     private static final Map<String, Map<String, Object>> TRANSITION_DEFAULTS = Map.of(

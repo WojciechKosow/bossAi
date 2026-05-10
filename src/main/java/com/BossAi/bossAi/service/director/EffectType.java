@@ -34,5 +34,7 @@ public enum EffectType {
     /** Color pop — chwilowy skok saturacji (+0.3) na reveal produktu / CTA */
     COLOR_POP,
     /** Vignette pulse — szybkie wzmocnienie vignette na dropie muzycznym */
-    VIGNETTE_PULSE
+    VIGNETTE_PULSE,
+    /** RGB split — chromatic aberration burst na wejściu sceny, idealny na dropy */
+    RGB_SPLIT
 }
