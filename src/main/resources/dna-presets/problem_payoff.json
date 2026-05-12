@@ -343,6 +343,40 @@
     "music_style": "energetic_upbeat"
   },
 
+  "composition_rules": {
+    "enabled": true,
+    "max_layered_scenes_pct": 40,
+    "rules": {
+      "TalkingHeadBg": {
+        "enabled": true,
+        "applicable_beats": ["B", "C", "E"],
+        "composition": "pip",
+        "background_opacity": 0.65,
+        "background_blur": true,
+        "primary_scale": 0.85,
+        "primary_position": "center"
+      },
+      "ProductReveal": {
+        "enabled": true,
+        "applicable_beats": ["D", "E"],
+        "composition": "overlay",
+        "overlay_scale": 0.45,
+        "overlay_position": "center",
+        "overlay_opacity": 1.0,
+        "trigger_segment_types": ["climax", "emphasis"]
+      },
+      "CtaOverlay": {
+        "enabled": true,
+        "applicable_beats": ["F"],
+        "composition": "overlay",
+        "overlay_scale": 0.6,
+        "overlay_position": "bottom_center",
+        "overlay_opacity": 1.0,
+        "trigger_segment_types": ["cta"]
+      }
+    }
+  },
+
   "text_overlay_templates": [
     {
       "beat": "A",
