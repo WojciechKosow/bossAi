@@ -1,5 +1,6 @@
 package com.BossAi.bossAi.dto.edl;
 
+import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.AllArgsConstructor;
@@ -105,5 +106,26 @@ public class EdlTextOverlay {
         @JsonProperty("text_align")
         @Builder.Default
         private String textAlign = "center";
+
+        /**
+         * GPT often returns position as a plain string (e.g. "center", "bottom_third").
+         * This factory maps named positions to concrete x/y values.
+         */
+        @JsonCreator
+        public static TextPosition fromString(String value) {
+            if (value == null) return new TextPosition();
+            return switch (value.toLowerCase()) {
+                case "top"           -> new TextPosition("center", "10%", "90%", "center");
+                case "top_left"      -> new TextPosition("5%",     "10%", "45%", "left");
+                case "top_right"     -> new TextPosition("95%",    "10%", "45%", "right");
+                case "center"        -> new TextPosition("center", "50%", "90%", "center");
+                case "bottom_third"  -> new TextPosition("center", "75%", "90%", "center");
+                case "bottom_quarter"-> new TextPosition("center", "85%", "90%", "center");
+                case "bottom"        -> new TextPosition("center", "92%", "90%", "center");
+                case "bottom_left"   -> new TextPosition("5%",     "85%", "45%", "left");
+                case "bottom_center" -> new TextPosition("center", "88%", "90%", "center");
+                default              -> new TextPosition("center", "80%", "90%", "center");
+            };
+        }
     }
 }
