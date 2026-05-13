@@ -7,6 +7,7 @@ import com.BossAi.bossAi.service.*;
 import com.BossAi.bossAi.service.audio.AudioAnalysisClient;
 import com.BossAi.bossAi.service.audio.AudioAnalysisResponse;
 import com.BossAi.bossAi.service.director.*;
+import com.BossAi.bossAi.service.director.composition.AutonomousCompositionDecider;
 import com.BossAi.bossAi.service.generation.GenerationContext;
 import com.BossAi.bossAi.service.generation.context.SceneAsset;
 import com.BossAi.bossAi.service.render.RemotionRenderClient;
@@ -59,6 +60,7 @@ public class VideoProductionOrchestrator {
     private final AssetAnalyzer assetAnalyzer;
     private final UserIntentParser userIntentParser;
     private final LayerAssetGenerator layerAssetGenerator;
+    private final AutonomousCompositionDecider autonomousCompositionDecider;
     private final ObjectMapper objectMapper;
 
     /**
@@ -111,6 +113,13 @@ public class VideoProductionOrchestrator {
             List<JustifiedCut> justifiedCuts = generateJustifiedCuts(
                     context, narrationAnalysis, speechAnalysis, audioAnalysis, editDna, projectAssets);
             context.setJustifiedCuts(justifiedCuts);
+
+            // 6.5 NOWE: Autonomous composition decisions
+            //   Decider analizuje asset profiles + narration + cuts + DNA preset
+            //   i autonomicznie decyduje kiedy/jak nakładać warstwy (jak montażysta).
+            //   Wynik: SceneAsset.layerAssetIds wypełnione → appendLayerSegments w EdlGenerator
+            //   emituje multi-layer segmenty do Remotion.
+            autonomousCompositionDecider.decide(context, projectAssets);
 
             // 7. Generuj EDL z edit_dna + justified cuts
             EdlDto edl = edlGeneratorService.generateEdl(context, audioAnalysis, projectAssets, editDna);

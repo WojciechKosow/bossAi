@@ -294,7 +294,10 @@ public class AssetAnalyzer {
                   "loopable": false,
                   "dominant_colors": ["color1", "color2"],
                   "has_text": false,
-                  "has_person": false
+                  "has_person": false,
+                  "can_be_background": false,
+                  "can_be_overlay": false,
+                  "visual_weight": 0.0-1.0
                 }
 
                 ROLE RULES:
@@ -304,6 +307,15 @@ public class AssetAnalyzer {
                 - If it's ambient/scenic → "b-roll" or "background"
                 - If asset is first (%d==0) and no clear role → "hook"
                 - If asset is last (%d==%d) and no clear role → "cta" or "outro"
+
+                COMPOSITION FLAGS:
+                - can_be_background: true if asset works as blurred background (scenic, b-roll, ambient, lifestyle, wide shot)
+                - can_be_overlay: true if asset works as overlay on top (logo, cta button, product close-up, small graphic)
+                - visual_weight: 0.0-1.0 — how strongly the asset demands the foreground
+                  * 0.9+ = person talking directly to camera, explicit CTA
+                  * 0.6-0.9 = product shot, brand logo
+                  * 0.3-0.6 = content/b-roll
+                  * 0.0-0.3 = ambient, background scenery
 
                 Return ONLY valid JSON.
                 """,
@@ -338,17 +350,24 @@ public class AssetAnalyzer {
             if (node.path("has_person").asBoolean(false)) tags.add("person");
             if (node.path("has_text").asBoolean(false)) tags.add("text-overlay");
 
+            String role = node.path("suggested_role").asText("content");
             return AssetProfile.builder()
                     .assetId(asset.getId())
                     .index(index)
                     .assetType(asset.getType().name())
                     .visualDescription(node.path("visual_description").asText("unknown"))
-                    .suggestedRole(node.path("suggested_role").asText("content"))
+                    .suggestedRole(role)
                     .mood(node.path("mood").asText("neutral"))
                     .visualComplexity(node.path("visual_complexity").asDouble(0.5))
                     .tags(tags)
                     .durationSeconds(asset.getDurationSeconds())
                     .loopable(node.path("loopable").asBoolean(false))
+                    .canBeBackground(node.path("can_be_background").asBoolean(
+                            isBackgroundRole(role)))
+                    .canBeOverlay(node.path("can_be_overlay").asBoolean(
+                            isOverlayRole(role)))
+                    .visualWeight(node.path("visual_weight").asDouble(
+                            defaultVisualWeight(role)))
                     .build();
 
         } catch (Exception e) {
@@ -412,6 +431,11 @@ public class AssetAnalyzer {
                 - If asset is first in order and user didn't specify → likely intro or hook
                 - If asset is last in order and user didn't specify → likely outro or cta
 
+                Also determine:
+                - can_be_background: true if this asset works as blurred background (scenic, b-roll, wide shot, ambient, lifestyle)
+                - can_be_overlay: true if this asset works as a small overlay element (logo, CTA button, product close-up graphic)
+                - visual_weight: 0.0-1.0 how strongly asset demands the foreground (1.0=must be primary, 0.0=fine as ambient bg)
+
                 Return ONLY valid JSON array:
                 [
                   {
@@ -421,7 +445,10 @@ public class AssetAnalyzer {
                     "mood": "professional",
                     "visual_complexity": 0.6,
                     "tags": ["logo", "brand", "animation"],
-                    "loopable": false
+                    "loopable": false,
+                    "can_be_background": false,
+                    "can_be_overlay": true,
+                    "visual_weight": 0.7
                   }
                 ]
 
@@ -477,17 +504,21 @@ public class AssetAnalyzer {
                         }
                     }
 
+                    String role = node.path("suggested_role").asText("content");
                     profiles.add(AssetProfile.builder()
                             .assetId(asset.getId())
                             .index(i)
                             .assetType(asset.getType().name())
                             .visualDescription(node.path("visual_description").asText("unknown"))
-                            .suggestedRole(node.path("suggested_role").asText("content"))
+                            .suggestedRole(role)
                             .mood(node.path("mood").asText("neutral"))
                             .visualComplexity(node.path("visual_complexity").asDouble(0.5))
                             .tags(tags)
                             .durationSeconds(asset.getDurationSeconds())
                             .loopable(node.path("loopable").asBoolean(false))
+                            .canBeBackground(node.path("can_be_background").asBoolean(isBackgroundRole(role)))
+                            .canBeOverlay(node.path("can_be_overlay").asBoolean(isOverlayRole(role)))
+                            .visualWeight(node.path("visual_weight").asDouble(defaultVisualWeight(role)))
                             .build());
                 } else {
                     profiles.add(buildSingleMetadataProfile(asset, i));
@@ -564,6 +595,40 @@ public class AssetAnalyzer {
                 .tags(tags)
                 .durationSeconds(dur)
                 .loopable(false)
+                .canBeBackground(isBackgroundRole(role))
+                .canBeOverlay(isOverlayRole(role))
+                .visualWeight(defaultVisualWeight(role))
                 .build();
+    }
+
+    // =========================================================================
+    // COMPOSITION HELPERS
+    // =========================================================================
+
+    static boolean isBackgroundRole(String role) {
+        return role != null && switch (role) {
+            case "b-roll", "background", "content", "transition" -> true;
+            default -> false;
+        };
+    }
+
+    static boolean isOverlayRole(String role) {
+        return role != null && switch (role) {
+            case "cta", "outro", "intro" -> true;
+            default -> false;
+        };
+    }
+
+    static double defaultVisualWeight(String role) {
+        if (role == null) return 0.5;
+        return switch (role) {
+            case "hook", "testimonial" -> 0.9;
+            case "cta", "product-shot" -> 0.75;
+            case "intro", "outro" -> 0.65;
+            case "content" -> 0.5;
+            case "b-roll", "transition" -> 0.3;
+            case "background" -> 0.1;
+            default -> 0.5;
+        };
     }
 }

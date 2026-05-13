@@ -83,4 +83,28 @@ public class AssetProfile {
      */
     @Builder.Default
     private List<String> dominantColors = List.of();
+
+    /**
+     * Czy asset nadaje się jako tło (blur behind primary).
+     * True dla: b-roll, background, scenery, ambient footage, lifestyle.
+     * False dla: testimonial, product-shot, cta, logo.
+     */
+    @Builder.Default
+    private boolean canBeBackground = false;
+
+    /**
+     * Czy asset nadaje się jako nakładka (overlay on top of primary).
+     * True dla: cta, logo, product-shot, button, outro.
+     * False dla: b-roll, testimonial, content.
+     */
+    @Builder.Default
+    private boolean canBeOverlay = false;
+
+    /**
+     * Siła wizualna — jak bardzo asset "domaga się" pierwszego planu (0.0-1.0).
+     * Wysoki = chce być primary (person talking, product reveal).
+     * Niski = pasuje jako tło (b-roll, ambient).
+     */
+    @Builder.Default
+    private double visualWeight = 0.5;
 }
