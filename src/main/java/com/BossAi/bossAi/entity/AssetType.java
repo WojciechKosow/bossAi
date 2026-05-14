@@ -6,5 +6,6 @@ public enum AssetType {
     AUDIO,
     VOICE,
     MUSIC,
-    SCRIPT
+    SCRIPT,
+    GIF
 }

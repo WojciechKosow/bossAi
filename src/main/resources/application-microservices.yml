@@ -11,6 +11,13 @@ dna:
   presets:
     enabled: true
 
+gif:
+  enabled: true
+  # Giphy SDK API key (bezpłatny): https://developers.giphy.com/dashboard/ → Create App
+  api-key: ${GIPHY_API_KEY:}
+  search-limit: 5
+  rating: g
+
 remotion-renderer:
   base-url: ${REMOTION_RENDERER_URL:http://localhost:3000}
   callback-base-url: ${SPRING_BOOT_BASE_URL:http://localhost:8080}

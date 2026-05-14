@@ -46,6 +46,10 @@ public class EdlDto {
     @JsonProperty("text_overlays")
     private List<EdlTextOverlay> textOverlays;
 
+    /** GIF overlays (subscribe button, follow, fire, etc.) nakładane na sceny */
+    @JsonProperty("gif_overlays")
+    private List<EdlGifOverlay> gifOverlays;
+
     @JsonProperty("subtitle_config")
     private EdlSubtitleConfig subtitleConfig;
 
