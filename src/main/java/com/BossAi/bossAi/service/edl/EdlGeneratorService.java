@@ -65,6 +65,7 @@ public class EdlGeneratorService {
     private final AssetClassifierService assetClassifierService;
     private final TextOverlayGeneratorService textOverlayGeneratorService;
     private final ColorGradeInterpolator colorGradeInterpolator;
+    private final com.BossAi.bossAi.service.gif.GifOverlayService gifOverlayService;
 
     @Value("${dna.presets.enabled:false}")
     private boolean dnaPresetsEnabled;
@@ -162,6 +163,13 @@ public class EdlGeneratorService {
 
         // Multi-layer composition (same as deterministic path)
         appendLayerSegments(edl, context, projectAssets);
+
+        // GIF overlays
+        List<com.BossAi.bossAi.dto.edl.EdlGifOverlay> gifOverlaysGpt =
+                gifOverlayService.buildOverlays(edl.getSegments(), context);
+        if (!gifOverlaysGpt.isEmpty()) {
+            edl.setGifOverlays(gifOverlaysGpt);
+        }
 
         // Strip effects and normalize transitions unknown to Remotion — prevents 400 errors
         stripUnknownEffects(edl);
@@ -455,6 +463,13 @@ public class EdlGeneratorService {
         // Multi-layer composition: emit additional EdlSegments (layer>0) for scenes
         // that LayerAssetGenerator populated with background/overlay assets.
         appendLayerSegments(edl, context, projectAssets);
+
+        // GIF overlays: subscribe/follow button on last scene, etc.
+        List<com.BossAi.bossAi.dto.edl.EdlGifOverlay> gifOverlays =
+                gifOverlayService.buildOverlays(edl.getSegments(), context);
+        if (!gifOverlays.isEmpty()) {
+            edl.setGifOverlays(gifOverlays);
+        }
 
         return edl;
     }
