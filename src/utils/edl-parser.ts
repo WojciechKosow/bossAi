@@ -1,4 +1,4 @@
-import type { Edl, Segment, AudioTrack, TextOverlay } from "../types/edl";
+import type { Edl, Segment, AudioTrack, TextOverlay, GifOverlay } from "../types/edl";
 
 export interface RemotionTimeline {
   durationInFrames: number;
@@ -9,6 +9,7 @@ export interface RemotionTimeline {
   segments: RemotionSegment[];
   audioTracks: RemotionAudioTrack[];
   textOverlays: RemotionTextOverlay[];
+  gifOverlays: RemotionGifOverlay[];
 }
 
 export interface RemotionSegment {
@@ -30,6 +31,13 @@ export interface RemotionTextOverlay {
   from: number;
   durationInFrames: number;
   overlay: TextOverlay;
+}
+
+export interface RemotionGifOverlay {
+  id: string;
+  from: number;
+  durationInFrames: number;
+  overlay: GifOverlay;
 }
 
 export function msToFrames(ms: number, fps: number): number {
@@ -72,6 +80,15 @@ export function parseEdlToTimeline(edl: Edl): RemotionTimeline {
     })
   );
 
+  const gifOverlays: RemotionGifOverlay[] = (edl.gif_overlays ?? []).map(
+    (overlay) => ({
+      id: overlay.id,
+      from: msToFrames(overlay.start_ms, fps),
+      durationInFrames: msToFrames(overlay.end_ms - overlay.start_ms, fps),
+      overlay,
+    })
+  );
+
   return {
     durationInFrames,
     fps,
@@ -81,5 +98,6 @@ export function parseEdlToTimeline(edl: Edl): RemotionTimeline {
     segments,
     audioTracks,
     textOverlays,
+    gifOverlays,
   };
 }

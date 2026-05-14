@@ -6,6 +6,7 @@ import { VideoSegment } from "../components/VideoSegment";
 import { TextOverlayComponent } from "../components/TextOverlay";
 import { AudioTrackComponent } from "../components/AudioTrackComponent";
 import { SubtitleTrack } from "../components/SubtitleTrack";
+import { GifOverlayComponent } from "../components/GifOverlayComponent";
 
 export interface TikTokVideoProps {
   edl: Edl;
@@ -164,6 +165,17 @@ export const TikTokVideo: React.FC<TikTokVideoProps> = ({ edl }) => {
           <SubtitleTrack config={subtitleConfig} words={whisperWords} />
         </Sequence>
       )}
+
+      {/* GIF overlays (subscribe button, follow, etc.) — rendered above everything */}
+      {timeline.gifOverlays.map((g) => (
+        <Sequence
+          key={g.id}
+          from={g.from}
+          durationInFrames={g.durationInFrames}
+        >
+          <GifOverlayComponent overlay={g.overlay} />
+        </Sequence>
+      ))}
     </AbsoluteFill>
   );
 };

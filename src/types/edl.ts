@@ -176,6 +176,21 @@ export const WhisperWordSchema = z.object({
   sentence_index: z.number().default(0),
 });
 
+// --- GIF overlay ---
+
+export const GifOverlaySchema = z.object({
+  id: z.string(),
+  url: z.string(),
+  category: z.string().optional(),
+  start_ms: z.number(),
+  end_ms: z.number(),
+  position: z.string().default("bottom_center"),
+  scale: z.number().default(0.5),
+  opacity: z.number().default(1.0),
+  animation_in: z.string().optional(),
+  animation_in_duration_ms: z.number().default(300),
+});
+
 // --- EDL root ---
 
 export const EdlSchema = z.object({
@@ -184,6 +199,7 @@ export const EdlSchema = z.object({
   segments: z.array(SegmentSchema),
   audio_tracks: z.array(AudioTrackSchema).optional(),
   text_overlays: z.array(TextOverlaySchema).optional(),
+  gif_overlays: z.array(GifOverlaySchema).optional(),
   subtitle_config: SubtitleConfigSchema.optional(),
   whisper_words: z.array(WhisperWordSchema).optional(),
 });
@@ -219,6 +235,7 @@ export type Metadata = z.infer<typeof MetadataSchema>;
 export type ColorGrade = z.infer<typeof ColorGradeSchema>;
 export type SubtitleConfig = z.infer<typeof SubtitleConfigSchema>;
 export type WhisperWord = z.infer<typeof WhisperWordSchema>;
+export type GifOverlay = z.infer<typeof GifOverlaySchema>;
 export type Edl = z.infer<typeof EdlSchema>;
 export type OutputConfig = z.infer<typeof OutputConfigSchema>;
 export type RenderRequest = z.infer<typeof RenderRequestSchema>;
