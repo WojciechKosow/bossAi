@@ -616,7 +616,14 @@ public class EdlGeneratorService {
         List<Asset> media = context.getCustomMediaAssets();
         List<SceneAsset> scenes = context.getScenes();
 
-        if (media == null || media.isEmpty()) return;
+        log.info("[EdlGenerator] appendImageOverlays: customMedia={}, scenes={}",
+                media != null ? media.size() : "null",
+                scenes != null ? scenes.size() : "null");
+
+        if (media == null || media.isEmpty()) {
+            log.info("[EdlGenerator] appendImageOverlays: customMediaAssets empty — skipping");
+            return;
+        }
         if (scenes == null || scenes.isEmpty()) return;
         if (edl.getSegments() == null) return;
 
@@ -625,6 +632,13 @@ public class EdlGeneratorService {
         // Separate image scenes (with imageUrl) and video scene indices
         List<Integer> videoSceneIndices = new ArrayList<>();
         Map<Integer, String> imageSceneUrls = new LinkedHashMap<>(); // sceneIdx → imageUrl
+
+        for (int i = 0; i < n; i++) {
+            String typeName = media.get(i).getType().name();
+            SceneAsset scene = scenes.get(i);
+            log.info("[EdlGenerator] appendImageOverlays: scene {} type={} imageUrl={}",
+                    i, typeName, scene.getImageUrl() != null ? "set" : "null");
+        }
 
         for (int i = 0; i < n; i++) {
             String typeName = media.get(i).getType().name();
