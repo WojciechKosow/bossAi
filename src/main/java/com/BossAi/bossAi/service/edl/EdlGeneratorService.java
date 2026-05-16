@@ -168,6 +168,9 @@ public class EdlGeneratorService {
         // Multi-layer composition (same as deterministic path)
         appendLayerSegments(edl, context, projectAssets);
 
+        // Image overlays: user-uploaded images on top of video scenes (director logic)
+        appendImageOverlays(edl, context, projectAssets);
+
         // GIF overlays
         List<com.BossAi.bossAi.dto.edl.EdlGifOverlay> gifOverlaysGpt =
                 gifOverlayService.buildOverlays(edl.getSegments(), context);
@@ -480,6 +483,9 @@ public class EdlGeneratorService {
         // that LayerAssetGenerator populated with background/overlay assets.
         appendLayerSegments(edl, context, projectAssets);
 
+        // Image overlays: user-uploaded images on top of video scenes (director logic)
+        appendImageOverlays(edl, context, projectAssets);
+
         // GIF overlays: subscribe/follow button on last scene, etc.
         List<com.BossAi.bossAi.dto.edl.EdlGifOverlay> gifOverlays =
                 gifOverlayService.buildOverlays(edl.getSegments(), context);
@@ -594,6 +600,108 @@ public class EdlGeneratorService {
                     layerSegments.size(),
                     scenes.stream().filter(s -> !s.getLayerAssetIds().isEmpty()).count());
         }
+    }
+
+    /**
+     * Adds user-uploaded IMAGE assets as layer=2 overlay segments on top of VIDEO scenes.
+     *
+     * Uses context.getCustomMediaAssets() to distinguish IMAGE vs VIDEO by original type.
+     * Uses scene.imageUrl (set by ImageStep) as the overlay source URL.
+     * Distributes images proportionally across video scenes (round-robin by default).
+     * Both GPT and deterministic EDL paths call this after primary segments are built.
+     */
+    private void appendImageOverlays(EdlDto edl,
+                                     GenerationContext context,
+                                     List<ProjectAsset> projectAssets) {
+        List<Asset> media = context.getCustomMediaAssets();
+        List<SceneAsset> scenes = context.getScenes();
+
+        if (media == null || media.isEmpty()) return;
+        if (scenes == null || scenes.isEmpty()) return;
+        if (edl.getSegments() == null) return;
+
+        int n = Math.min(media.size(), scenes.size());
+
+        // Separate image scenes (with imageUrl) and video scene indices
+        List<Integer> videoSceneIndices = new ArrayList<>();
+        Map<Integer, String> imageSceneUrls = new LinkedHashMap<>(); // sceneIdx → imageUrl
+
+        for (int i = 0; i < n; i++) {
+            String typeName = media.get(i).getType().name();
+            SceneAsset scene = scenes.get(i);
+            if ("IMAGE".equals(typeName) && scene.getImageUrl() != null) {
+                imageSceneUrls.put(i, scene.getImageUrl());
+            } else if ("VIDEO".equals(typeName)) {
+                videoSceneIndices.add(i);
+            }
+        }
+
+        if (imageSceneUrls.isEmpty() || videoSceneIndices.isEmpty()) {
+            log.debug("[EdlGenerator] appendImageOverlays: images={}, videoScenes={} — nothing to overlay",
+                    imageSceneUrls.size(), videoSceneIndices.size());
+            return;
+        }
+
+        // Build assetId → sceneIndex map (same logic as appendLayerSegments)
+        Map<String, Integer> assetIdToSceneIdx = new HashMap<>();
+        int sIdx = 0;
+        for (ProjectAsset asset : projectAssets) {
+            String tn = asset.getType().name();
+            if ("VIDEO".equals(tn) || "IMAGE".equals(tn)) {
+                assetIdToSceneIdx.put(asset.getId().toString(), sIdx++);
+            }
+        }
+
+        // Compute time range per video scene from primary (layer=0) segments
+        Map<Integer, int[]> videoRanges = new LinkedHashMap<>();
+        for (int vidIdx : videoSceneIndices) {
+            videoRanges.put(vidIdx, new int[]{Integer.MAX_VALUE, Integer.MIN_VALUE});
+        }
+        for (EdlSegment seg : edl.getSegments()) {
+            if (seg.getLayer() != 0) continue;
+            Integer sceneIdx = assetIdToSceneIdx.get(seg.getAssetId());
+            if (sceneIdx == null || !videoRanges.containsKey(sceneIdx)) continue;
+            int[] range = videoRanges.get(sceneIdx);
+            range[0] = Math.min(range[0], seg.getStartMs());
+            range[1] = Math.max(range[1], seg.getEndMs());
+        }
+        videoRanges.entrySet().removeIf(e -> e.getValue()[1] <= e.getValue()[0]);
+
+        if (videoRanges.isEmpty()) {
+            log.debug("[EdlGenerator] appendImageOverlays: no video segments found in EDL — skipping");
+            return;
+        }
+
+        List<Integer> orderedVideoScenes = new ArrayList<>(videoRanges.keySet());
+        List<Map.Entry<Integer, String>> imageList = new ArrayList<>(imageSceneUrls.entrySet());
+        List<EdlSegment> overlays = new ArrayList<>();
+
+        for (int i = 0; i < imageList.size(); i++) {
+            Map.Entry<Integer, String> imgEntry = imageList.get(i);
+            int imgSceneIdx = imgEntry.getKey();
+            String imageUrl = imgEntry.getValue();
+
+            int targetVidSceneIdx = orderedVideoScenes.get(i % orderedVideoScenes.size());
+            int[] range = videoRanges.get(targetVidSceneIdx);
+
+            overlays.add(EdlSegment.builder()
+                    .id(UUID.randomUUID().toString())
+                    .assetId(media.get(imgSceneIdx).getId().toString())
+                    .assetUrl(imageUrl)
+                    .assetType("IMAGE")
+                    .startMs(range[0])
+                    .endMs(range[1])
+                    .layer(2)
+                    .effects(new ArrayList<>())
+                    .build());
+
+            log.info("[EdlGenerator] Image overlay: scene {} → video scene {} ({}ms-{}ms)",
+                    imgSceneIdx, targetVidSceneIdx, range[0], range[1]);
+        }
+
+        edl.getSegments().addAll(overlays);
+        log.info("[EdlGenerator] Appended {} image overlay segment(s) across {} video scene(s)",
+                overlays.size(), orderedVideoScenes.size());
     }
 
     // =========================================================================
