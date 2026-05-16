@@ -32,7 +32,6 @@ public class GifLibraryService {
 
     private final GifProperties gifProperties;
     private final ObjectMapper objectMapper;
-    private final WebClient.Builder webClientBuilder;
 
     /** In-memory cache: kategoria → URL GIF-a */
     private final Map<GifCategory, String> cache = new EnumMap<>(GifCategory.class);
@@ -81,7 +80,8 @@ public class GifLibraryService {
 
     private Optional<String> fetchFromGiphy(GifCategory category) {
         try {
-            WebClient client = webClientBuilder.build();
+            // Fresh builder — avoids port leak from shared WebClient.Builder pre-configured with localhost:3000
+            WebClient client = WebClient.builder().build();
 
             String raw = client.get()
                     .uri(uriBuilder -> uriBuilder
