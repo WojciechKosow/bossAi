@@ -281,7 +281,7 @@ public class EdlGeneratorService {
         // Total voice duration = end of the last individual voice track
         int totalVoiceMs = timelineEdl.getAudioTracks().stream()
                 .filter(t -> "voiceover".equals(t.getType()))
-                .mapToInt(EdlAudioTrack::getEndMs)
+                .mapToInt(t -> t.getEndMs() != null ? t.getEndMs() : 0)
                 .max()
                 .orElse(0);
 
