@@ -1507,6 +1507,7 @@ public class EdlGeneratorService {
             int singleVoiceEndMs = (context.getWordTimings() != null && !context.getWordTimings().isEmpty())
                     ? context.getWordTimings().get(context.getWordTimings().size() - 1).endMs()
                     : 0;
+            Integer voiceEndMs = singleVoiceEndMs > 0 ? singleVoiceEndMs : null;
             voiceProjectAssets.stream().findFirst().ifPresent(voiceAsset ->
                 audioTracks.add(EdlAudioTrack.builder()
                         .id(UUID.randomUUID().toString())
@@ -1514,9 +1515,9 @@ public class EdlGeneratorService {
                         .assetUrl(buildAssetUrl(callbackBase, voiceAsset.getId().toString(), voiceAsset.getStorageUrl()))
                         .type("voiceover")
                         .startMs(0)
-                        .endMs(singleVoiceEndMs > 0 ? singleVoiceEndMs : null)
+                        .endMs(voiceEndMs)
                         .trimInMs(0)
-                        .trimOutMs(singleVoiceEndMs > 0 ? singleVoiceEndMs : null)
+                        .trimOutMs(voiceEndMs)
                         .volume(1.0)
                         .build())
             );
