@@ -41,6 +41,10 @@ public class GifOverlayService {
     public List<EdlGifOverlay> buildOverlays(List<EdlSegment> segments, GenerationContext context) {
         List<EdlGifOverlay> overlays = new ArrayList<>();
 
+        if (!context.isGifOverlaysEnabled()) {
+            return overlays;
+        }
+
         if (segments == null || segments.isEmpty()) {
             return overlays;
         }

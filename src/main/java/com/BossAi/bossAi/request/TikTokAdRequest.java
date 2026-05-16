@@ -102,4 +102,11 @@ public class TikTokAdRequest {
      * Requires feature flag dna.presets.enabled=true.
      */
     private String dnaPreset;
+
+    /**
+     * When true, pipeline adds an animated GIF overlay (subscribe/follow sticker)
+     * on the last scene via Giphy Stickers API.
+     * Requires giphy.api-key to be configured.
+     */
+    private boolean gifOverlaysEnabled = false;
 }
