@@ -146,6 +146,10 @@ public class EdlGeneratorService {
         // Inject asset URLs — GPT nie zna URLi, tylko asset_id
         injectAssetUrls(edl, projectAssets);
 
+        // Override GPT's audio tracks with deterministic buildAudioTracks — GPT doesn't know
+        // asset durations so its endMs values are unreliable (often null or wrong).
+        edl.setAudioTracks(buildAudioTracks(context, projectAssets));
+
         // Inject whisper words — GPT nie generuje per-word timings, mamy je z Whisper
         injectWhisperWords(edl, context);
 
@@ -278,12 +282,23 @@ public class EdlGeneratorService {
             return timelineEdl;
         }
 
-        // Total voice duration = end of the last individual voice track
+        // Total voice duration = end of the last individual voice track.
+        // GPT sometimes omits endMs on voiceover — fall back to total segment duration.
         int totalVoiceMs = timelineEdl.getAudioTracks().stream()
                 .filter(t -> "voiceover".equals(t.getType()))
                 .mapToInt(t -> t.getEndMs() != null ? t.getEndMs() : 0)
                 .max()
                 .orElse(0);
+
+        if (totalVoiceMs <= 0 && timelineEdl.getSegments() != null) {
+            totalVoiceMs = timelineEdl.getSegments().stream()
+                    .mapToInt(s -> s.getEndMs() != null ? s.getEndMs() : 0)
+                    .max()
+                    .orElse(0);
+            if (totalVoiceMs > 0) {
+                log.debug("[EdlGenerator] totalVoiceMs derived from segments: {}ms", totalVoiceMs);
+            }
+        }
 
         if (totalVoiceMs <= 0) {
             return timelineEdl;
@@ -1489,6 +1504,9 @@ public class EdlGeneratorService {
                     context.getCustomTtsAssets().size(), voiceCursorMs);
         } else {
             // Single voice asset (AI TTS or user voice)
+            int singleVoiceEndMs = (context.getWordTimings() != null && !context.getWordTimings().isEmpty())
+                    ? context.getWordTimings().get(context.getWordTimings().size() - 1).endMs()
+                    : 0;
             voiceProjectAssets.stream().findFirst().ifPresent(voiceAsset ->
                 audioTracks.add(EdlAudioTrack.builder()
                         .id(UUID.randomUUID().toString())
@@ -1496,6 +1514,9 @@ public class EdlGeneratorService {
                         .assetUrl(buildAssetUrl(callbackBase, voiceAsset.getId().toString(), voiceAsset.getStorageUrl()))
                         .type("voiceover")
                         .startMs(0)
+                        .endMs(singleVoiceEndMs > 0 ? singleVoiceEndMs : null)
+                        .trimInMs(0)
+                        .trimOutMs(singleVoiceEndMs > 0 ? singleVoiceEndMs : null)
                         .volume(1.0)
                         .build())
             );
