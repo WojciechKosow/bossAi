@@ -8,9 +8,12 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
 
+import java.util.ArrayList;
 import java.util.EnumMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.ThreadLocalRandom;
 
 /**
  * Pobiera URL-e GIF-ów z Giphy Stickers API i cachuje wyniki.
@@ -33,8 +36,8 @@ public class GifLibraryService {
     private final GifProperties gifProperties;
     private final ObjectMapper objectMapper;
 
-    /** In-memory cache: kategoria → URL GIF-a */
-    private final Map<GifCategory, String> cache = new EnumMap<>(GifCategory.class);
+    /** In-memory cache: kategoria → lista URL-i GIF-ów (losowany przy każdym wywołaniu) */
+    private final Map<GifCategory, List<String>> cache = new EnumMap<>(GifCategory.class);
 
     /**
      * Zwraca URL GIF-a dla podanej kategorii.
@@ -50,9 +53,9 @@ public class GifLibraryService {
             return Optional.empty();
         }
 
-        String cached = cache.get(category);
-        if (cached != null) {
-            return Optional.of(cached);
+        List<String> cached = cache.get(category);
+        if (cached != null && !cached.isEmpty()) {
+            return Optional.of(pickRandom(cached));
         }
 
         return fetchFromGiphy(category);
@@ -110,29 +113,33 @@ public class GifLibraryService {
                 return Optional.empty();
             }
 
-            // Take the first result — best match for the query
-            String gifUrl = data.get(0)
-                    .path("images")
-                    .path("original")
-                    .path("url")
-                    .asText();
+            List<String> urls = new ArrayList<>();
+            for (JsonNode item : data) {
+                String gifUrl = item.path("images").path("original").path("url").asText();
+                if (gifUrl != null && !gifUrl.isBlank()) {
+                    int q = gifUrl.indexOf('?');
+                    urls.add(q > 0 ? gifUrl.substring(0, q) : gifUrl);
+                }
+            }
 
-            if (gifUrl == null || gifUrl.isBlank()) {
-                log.warn("[GifLibrary] GIF URL empty in Giphy response for {}", category);
+            if (urls.isEmpty()) {
+                log.warn("[GifLibrary] All GIF URLs empty in Giphy response for {}", category);
                 return Optional.empty();
             }
 
-            // Strip Giphy tracking params for cleaner URL
-            int queryStart = gifUrl.indexOf('?');
-            String cleanUrl = queryStart > 0 ? gifUrl.substring(0, queryStart) : gifUrl;
-
-            cache.put(category, cleanUrl);
-            log.info("[GifLibrary] Fetched & cached GIF for {} → {}", category, cleanUrl);
-            return Optional.of(cleanUrl);
+            cache.put(category, urls);
+            String picked = pickRandom(urls);
+            log.info("[GifLibrary] Fetched & cached {} GIFs for {} → picking {}",
+                    urls.size(), category, picked);
+            return Optional.of(picked);
 
         } catch (Exception e) {
             log.warn("[GifLibrary] Failed to fetch GIF for {} from Giphy: {}", category, e.getMessage());
             return Optional.empty();
         }
+    }
+
+    private String pickRandom(List<String> urls) {
+        return urls.get(ThreadLocalRandom.current().nextInt(urls.size()));
     }
 }
