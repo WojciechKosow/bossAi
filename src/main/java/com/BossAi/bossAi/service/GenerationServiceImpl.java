@@ -508,6 +508,7 @@ public class GenerationServiceImpl implements GenerationService {
                 .styleConfig(styleConfig)
                 .style(request.getStyle())
                 .dnaPreset(resolvedDnaPreset)
+                .gifOverlaysEnabled(request.isGifOverlaysEnabled())
                 .build();
     }
 

@@ -351,6 +351,9 @@ public class GenerationContext {
      */
     private UserDnaInput userDnaInput;
 
+    /** When true, pipeline adds an animated GIF overlay on the last scene. */
+    private boolean gifOverlaysEnabled;
+
     // -------------------------------------------------------------------------
     // METODY POMOCNICZE
     // -------------------------------------------------------------------------
