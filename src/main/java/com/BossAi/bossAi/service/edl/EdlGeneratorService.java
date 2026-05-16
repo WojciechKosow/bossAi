@@ -168,6 +168,9 @@ public class EdlGeneratorService {
         // Multi-layer composition (same as deterministic path)
         appendLayerSegments(edl, context, projectAssets);
 
+        // Image overlays: user-uploaded images on top of video scenes (director logic)
+        appendImageOverlays(edl, context, projectAssets);
+
         // GIF overlays
         List<com.BossAi.bossAi.dto.edl.EdlGifOverlay> gifOverlaysGpt =
                 gifOverlayService.buildOverlays(edl.getSegments(), context);
@@ -480,6 +483,9 @@ public class EdlGeneratorService {
         // that LayerAssetGenerator populated with background/overlay assets.
         appendLayerSegments(edl, context, projectAssets);
 
+        // Image overlays: user-uploaded images on top of video scenes (director logic)
+        appendImageOverlays(edl, context, projectAssets);
+
         // GIF overlays: subscribe/follow button on last scene, etc.
         List<com.BossAi.bossAi.dto.edl.EdlGifOverlay> gifOverlays =
                 gifOverlayService.buildOverlays(edl.getSegments(), context);
@@ -594,6 +600,169 @@ public class EdlGeneratorService {
                     layerSegments.size(),
                     scenes.stream().filter(s -> !s.getLayerAssetIds().isEmpty()).count());
         }
+    }
+
+    /**
+     * Adds user-uploaded IMAGE assets as layer=2 overlay segments on top of VIDEO scenes.
+     *
+     * Uses context.getCustomMediaAssets() to distinguish IMAGE vs VIDEO by original type.
+     * Uses scene.imageUrl (set by ImageStep) as the overlay source URL.
+     * Distributes images proportionally across video scenes (round-robin by default).
+     * Both GPT and deterministic EDL paths call this after primary segments are built.
+     */
+    private void appendImageOverlays(EdlDto edl,
+                                     GenerationContext context,
+                                     List<ProjectAsset> projectAssets) {
+        List<Asset> media = context.getCustomMediaAssets();
+        List<SceneAsset> scenes = context.getScenes();
+
+        log.info("[EdlGenerator] appendImageOverlays: customMedia={}, scenes={}",
+                media != null ? media.size() : "null",
+                scenes != null ? scenes.size() : "null");
+
+        if (media == null || media.isEmpty()) {
+            log.info("[EdlGenerator] appendImageOverlays: customMediaAssets empty — skipping");
+            return;
+        }
+        if (scenes == null || scenes.isEmpty()) return;
+        if (edl.getSegments() == null) return;
+
+        int n = Math.min(media.size(), scenes.size());
+
+        // Build assetId ↔ sceneIndex maps (VIDEO/IMAGE assets in insertion order)
+        Map<String, Integer> assetIdToSceneIdx = new HashMap<>();
+        Map<Integer, String> sceneIdxToAssetId = new HashMap<>();
+        int sIdx = 0;
+        for (ProjectAsset asset : projectAssets) {
+            String tn = asset.getType().name();
+            if ("VIDEO".equals(tn) || "IMAGE".equals(tn)) {
+                assetIdToSceneIdx.put(asset.getId().toString(), sIdx);
+                sceneIdxToAssetId.put(sIdx, asset.getId().toString());
+                sIdx++;
+            }
+        }
+
+        // Categorize scenes by original asset type
+        Map<Integer, String> imageSceneUrls = new LinkedHashMap<>();
+        List<Integer> videoSceneIndices = new ArrayList<>();
+        for (int i = 0; i < n; i++) {
+            String typeName = media.get(i).getType().name();
+            SceneAsset scene = scenes.get(i);
+            log.info("[EdlGenerator] appendImageOverlays: scene {} type={} imageUrl={}",
+                    i, typeName, scene.getImageUrl() != null ? "set" : "null");
+            if ("IMAGE".equals(typeName) && scene.getImageUrl() != null) {
+                imageSceneUrls.put(i, scene.getImageUrl());
+            } else if ("VIDEO".equals(typeName)) {
+                videoSceneIndices.add(i);
+            }
+        }
+
+        if (imageSceneUrls.isEmpty()) {
+            log.debug("[EdlGenerator] appendImageOverlays: no IMAGE assets — nothing to overlay");
+            return;
+        }
+
+        // Collect asset IDs for all image scenes
+        Set<String> imageAssetIds = new HashSet<>();
+        for (int imgIdx : imageSceneUrls.keySet()) {
+            String aid = sceneIdxToAssetId.get(imgIdx);
+            if (aid != null) imageAssetIds.add(aid);
+        }
+
+        // Remove the standalone layer=0 segments that were created for image assets
+        // (VideoStep converts images to Ken Burns clips, but we want them as overlays only)
+        List<EdlSegment> standaloneImageSegs = edl.getSegments().stream()
+                .filter(s -> s.getLayer() == 0 && imageAssetIds.contains(s.getAssetId()))
+                .collect(Collectors.toList());
+        edl.getSegments().removeAll(standaloneImageSegs);
+        log.info("[EdlGenerator] appendImageOverlays: removed {} standalone image segment(s)", standaloneImageSegs.size());
+
+        // Extend adjacent video segments to fill the gaps left by removed image segments
+        for (EdlSegment removed : standaloneImageSegs) {
+            int gapStart = removed.getStartMs();
+            int gapEnd = removed.getEndMs();
+
+            // Prefer extending the preceding video segment's end
+            Optional<EdlSegment> prevSeg = edl.getSegments().stream()
+                    .filter(s -> s.getLayer() == 0 && s.getEndMs() <= gapStart)
+                    .max(Comparator.comparingInt(EdlSegment::getEndMs));
+
+            if (prevSeg.isPresent()) {
+                prevSeg.get().setEndMs(gapEnd);
+                log.info("[EdlGenerator] appendImageOverlays: extended prev segment (asset {}) endMs → {}ms (filled gap {}ms-{}ms)",
+                        prevSeg.get().getAssetId(), gapEnd, gapStart, gapEnd);
+            } else {
+                // No preceding segment — extend the next one backwards
+                Optional<EdlSegment> nextSeg = edl.getSegments().stream()
+                        .filter(s -> s.getLayer() == 0 && s.getStartMs() >= gapEnd)
+                        .min(Comparator.comparingInt(EdlSegment::getStartMs));
+                if (nextSeg.isPresent()) {
+                    nextSeg.get().setStartMs(gapStart);
+                    log.info("[EdlGenerator] appendImageOverlays: extended next segment (asset {}) startMs → {}ms (filled gap {}ms-{}ms)",
+                            nextSeg.get().getAssetId(), gapStart, gapStart, gapEnd);
+                } else {
+                    log.warn("[EdlGenerator] appendImageOverlays: could not fill gap [{}ms-{}ms] — no adjacent video segment",
+                            gapStart, gapEnd);
+                }
+            }
+        }
+
+        if (videoSceneIndices.isEmpty()) {
+            log.info("[EdlGenerator] appendImageOverlays: no VIDEO scenes — cannot place image overlays");
+            return;
+        }
+
+        // Recompute video scene time ranges from the (now gap-filled) layer=0 segments
+        Map<Integer, int[]> videoRanges = new LinkedHashMap<>();
+        for (int vidIdx : videoSceneIndices) {
+            videoRanges.put(vidIdx, new int[]{Integer.MAX_VALUE, Integer.MIN_VALUE});
+        }
+        for (EdlSegment seg : edl.getSegments()) {
+            if (seg.getLayer() != 0) continue;
+            Integer sceneIdx = assetIdToSceneIdx.get(seg.getAssetId());
+            if (sceneIdx == null || !videoRanges.containsKey(sceneIdx)) continue;
+            int[] range = videoRanges.get(sceneIdx);
+            range[0] = Math.min(range[0], seg.getStartMs());
+            range[1] = Math.max(range[1], seg.getEndMs());
+        }
+        videoRanges.entrySet().removeIf(e -> e.getValue()[1] <= e.getValue()[0]);
+
+        if (videoRanges.isEmpty()) {
+            log.debug("[EdlGenerator] appendImageOverlays: no video segments found in EDL — skipping overlays");
+            return;
+        }
+
+        // Distribute images across video scenes (round-robin)
+        List<Integer> orderedVideoScenes = new ArrayList<>(videoRanges.keySet());
+        List<Map.Entry<Integer, String>> imageList = new ArrayList<>(imageSceneUrls.entrySet());
+        List<EdlSegment> overlays = new ArrayList<>();
+
+        for (int i = 0; i < imageList.size(); i++) {
+            Map.Entry<Integer, String> imgEntry = imageList.get(i);
+            int imgSceneIdx = imgEntry.getKey();
+            String imageUrl = imgEntry.getValue();
+
+            int targetVidSceneIdx = orderedVideoScenes.get(i % orderedVideoScenes.size());
+            int[] range = videoRanges.get(targetVidSceneIdx);
+
+            overlays.add(EdlSegment.builder()
+                    .id(UUID.randomUUID().toString())
+                    .assetId(media.get(imgSceneIdx).getId().toString())
+                    .assetUrl(imageUrl)
+                    .assetType("IMAGE")
+                    .startMs(range[0])
+                    .endMs(range[1])
+                    .layer(2)
+                    .effects(new ArrayList<>())
+                    .build());
+
+            log.info("[EdlGenerator] Image overlay: scene {} → video scene {} ({}ms-{}ms)",
+                    imgSceneIdx, targetVidSceneIdx, range[0], range[1]);
+        }
+
+        edl.getSegments().addAll(overlays);
+        log.info("[EdlGenerator] Appended {} image overlay segment(s) across {} video scene(s)",
+                overlays.size(), orderedVideoScenes.size());
     }
 
     // =========================================================================
