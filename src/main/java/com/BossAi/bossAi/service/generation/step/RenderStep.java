@@ -1018,6 +1018,10 @@ public class RenderStep implements GenerationStep {
             case VIGNETTE_PULSE -> String.format(Locale.US,
                     "zoompan=z='1.05':d=%d:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=1080x1920:fps=30,vignette=angle=PI/3:mode=forward",
                     totalFrames);
+            // RGB split — chromatic aberration burst (approximate with split/offset)
+            case RGB_SPLIT -> String.format(Locale.US,
+                    "zoompan=z='1.02':d=%d:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=1080x1920:fps=30",
+                    totalFrames);
             case NONE -> null;
         };
     }

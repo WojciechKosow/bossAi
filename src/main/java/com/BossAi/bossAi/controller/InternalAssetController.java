@@ -1,6 +1,8 @@
 package com.BossAi.bossAi.controller;
 
+import com.BossAi.bossAi.entity.Asset;
 import com.BossAi.bossAi.entity.ProjectAsset;
+import com.BossAi.bossAi.repository.AssetRepository;
 import com.BossAi.bossAi.service.ProjectAssetService;
 import com.BossAi.bossAi.service.StorageService;
 import lombok.RequiredArgsConstructor;
@@ -14,6 +16,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -30,6 +33,7 @@ public class InternalAssetController {
 
     private final ProjectAssetService projectAssetService;
     private final StorageService storageService;
+    private final AssetRepository assetRepository;
 
     /**
      * GET /internal/assets/{assetId}/file — pobiera plik media po UUID assetu.
@@ -92,6 +96,54 @@ public class InternalAssetController {
                     "height", asset.getHeight() != null ? asset.getHeight() : 0
             ));
         } catch (Exception e) {
+            return ResponseEntity.notFound().build();
+        }
+    }
+
+    /**
+     * GET /internal/raw-assets/{assetId}/file — serves the ORIGINAL uploaded Asset file.
+     * Used for IMAGE overlays where we need the raw image, not the Ken Burns video clip.
+     */
+    @GetMapping("/raw/{assetId}/file")
+    public ResponseEntity<Resource> getRawAssetFile(@PathVariable UUID assetId) {
+        try {
+            Optional<Asset> assetOpt = assetRepository.findById(assetId);
+            if (assetOpt.isEmpty()) {
+                log.warn("[InternalAsset] Raw asset {} not found", assetId);
+                return ResponseEntity.notFound().build();
+            }
+            Asset asset = assetOpt.get();
+
+            if (asset.getStorageKey() == null) {
+                log.warn("[InternalAsset] Raw asset {} has no storageKey", assetId);
+                return ResponseEntity.notFound().build();
+            }
+
+            Path filePath = storageService.resolvePath(asset.getStorageKey());
+
+            if (!Files.exists(filePath)) {
+                log.warn("[InternalAsset] Raw asset file not found at path: {}", filePath);
+                return ResponseEntity.notFound().build();
+            }
+
+            Resource resource = new UrlResource(filePath.toUri());
+
+            String mimeType = Files.probeContentType(filePath);
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(resolveMediaType(mimeType));
+            headers.set("Accept-Ranges", "bytes");
+            headers.set("X-Asset-Type", asset.getType().name());
+            if (asset.getOriginalFilename() != null) {
+                headers.set("Content-Disposition", "inline; filename=\"" + asset.getOriginalFilename() + "\"");
+            }
+
+            log.debug("[InternalAsset] Serving raw asset {} from {}", assetId, filePath);
+            return ResponseEntity.ok()
+                    .headers(headers)
+                    .body(resource);
+
+        } catch (Exception e) {
+            log.error("[InternalAsset] Failed to serve raw asset {}: {}", assetId, e.getMessage());
             return ResponseEntity.notFound().build();
         }
     }

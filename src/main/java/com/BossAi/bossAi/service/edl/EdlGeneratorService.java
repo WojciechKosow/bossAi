@@ -295,7 +295,7 @@ public class EdlGeneratorService {
 
         if (totalVoiceMs <= 0 && timelineEdl.getSegments() != null) {
             totalVoiceMs = timelineEdl.getSegments().stream()
-                    .mapToInt(s -> s.getEndMs() != null ? s.getEndMs() : 0)
+                    .mapToInt(EdlSegment::getEndMs)
                     .max()
                     .orElse(0);
             if (totalVoiceMs > 0) {
@@ -732,11 +732,6 @@ public class EdlGeneratorService {
             return;
         }
 
-        // Build UUID → ProjectAsset lookup for resolving the internal asset URL
-        Map<String, ProjectAsset> projectAssetById = new HashMap<>();
-        for (ProjectAsset pa : projectAssets) {
-            projectAssetById.put(pa.getId().toString(), pa);
-        }
         String callbackBase = remotionProperties.getCallbackBaseUrl();
 
         // Distribute images across video scenes (round-robin)
@@ -751,13 +746,10 @@ public class EdlGeneratorService {
             int targetVidSceneIdx = orderedVideoScenes.get(i % orderedVideoScenes.size());
             int[] range = videoRanges.get(targetVidSceneIdx);
 
-            // Use the same internal URL scheme as all other segments (no auth required)
+            // Use raw-asset endpoint so Remotion receives the original uploaded image,
+            // not the Ken Burns video clip that VideoStep created from it.
             String assetId = media.get(imgSceneIdx).getId().toString();
-            String paId = sceneIdxToAssetId.get(imgSceneIdx);
-            ProjectAsset pa = paId != null ? projectAssetById.get(paId) : null;
-            String assetUrl = pa != null
-                    ? buildAssetUrl(callbackBase, pa.getId().toString(), pa.getStorageUrl())
-                    : buildAssetUrl(callbackBase, assetId, null);
+            String assetUrl = callbackBase + "/internal/assets/raw/" + assetId + "/file";
 
             overlays.add(EdlSegment.builder()
                     .id(UUID.randomUUID().toString())
@@ -1593,6 +1585,7 @@ public class EdlGeneratorService {
             case WHIP_PAN -> EffectRegistry.WHIP_PAN;
             case COLOR_POP -> EffectRegistry.COLOR_POP;
             case VIGNETTE_PULSE -> EffectRegistry.VIGNETTE_PULSE;
+            case RGB_SPLIT -> EffectRegistry.RGB_SPLIT;
             case NONE -> null;
         };
     }
