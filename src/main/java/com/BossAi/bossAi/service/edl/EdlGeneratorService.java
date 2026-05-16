@@ -732,6 +732,13 @@ public class EdlGeneratorService {
             return;
         }
 
+        // Build UUID → ProjectAsset lookup for resolving the internal asset URL
+        Map<String, ProjectAsset> projectAssetById = new HashMap<>();
+        for (ProjectAsset pa : projectAssets) {
+            projectAssetById.put(pa.getId().toString(), pa);
+        }
+        String callbackBase = remotionProperties.getCallbackBaseUrl();
+
         // Distribute images across video scenes (round-robin)
         List<Integer> orderedVideoScenes = new ArrayList<>(videoRanges.keySet());
         List<Map.Entry<Integer, String>> imageList = new ArrayList<>(imageSceneUrls.entrySet());
@@ -740,15 +747,22 @@ public class EdlGeneratorService {
         for (int i = 0; i < imageList.size(); i++) {
             Map.Entry<Integer, String> imgEntry = imageList.get(i);
             int imgSceneIdx = imgEntry.getKey();
-            String imageUrl = imgEntry.getValue();
 
             int targetVidSceneIdx = orderedVideoScenes.get(i % orderedVideoScenes.size());
             int[] range = videoRanges.get(targetVidSceneIdx);
 
+            // Use the same internal URL scheme as all other segments (no auth required)
+            String assetId = media.get(imgSceneIdx).getId().toString();
+            String paId = sceneIdxToAssetId.get(imgSceneIdx);
+            ProjectAsset pa = paId != null ? projectAssetById.get(paId) : null;
+            String assetUrl = pa != null
+                    ? buildAssetUrl(callbackBase, pa.getId().toString(), pa.getStorageUrl())
+                    : buildAssetUrl(callbackBase, assetId, null);
+
             overlays.add(EdlSegment.builder()
                     .id(UUID.randomUUID().toString())
-                    .assetId(media.get(imgSceneIdx).getId().toString())
-                    .assetUrl(imageUrl)
+                    .assetId(assetId)
+                    .assetUrl(assetUrl)
                     .assetType("IMAGE")
                     .startMs(range[0])
                     .endMs(range[1])
@@ -756,8 +770,8 @@ public class EdlGeneratorService {
                     .effects(new ArrayList<>())
                     .build());
 
-            log.info("[EdlGenerator] Image overlay: scene {} → video scene {} ({}ms-{}ms)",
-                    imgSceneIdx, targetVidSceneIdx, range[0], range[1]);
+            log.info("[EdlGenerator] Image overlay: scene {} → video scene {} ({}ms-{}ms) url={}",
+                    imgSceneIdx, targetVidSceneIdx, range[0], range[1], assetUrl);
         }
 
         edl.getSegments().addAll(overlays);
