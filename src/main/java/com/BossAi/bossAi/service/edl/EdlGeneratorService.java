@@ -318,6 +318,7 @@ public class EdlGeneratorService {
                 .segments(timelineEdl.getSegments())
                 .audioTracks(renderTracks)
                 .textOverlays(timelineEdl.getTextOverlays())
+                .gifOverlays(timelineEdl.getGifOverlays())
                 .subtitleConfig(timelineEdl.getSubtitleConfig())
                 .whisperWords(timelineEdl.getWhisperWords())
                 .build();
