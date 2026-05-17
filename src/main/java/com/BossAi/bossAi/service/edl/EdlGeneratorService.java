@@ -11,6 +11,7 @@ import com.BossAi.bossAi.service.director.EffectType;
 import com.BossAi.bossAi.service.director.JustifiedCut;
 import com.BossAi.bossAi.service.director.NarrationAnalysis;
 import com.BossAi.bossAi.service.director.UserEditIntent;
+import com.BossAi.bossAi.service.director.overlay.OverlayPlacement;
 import com.BossAi.bossAi.service.dna.AssetClassifierService;
 import com.BossAi.bossAi.service.dna.ColorGradeInterpolator;
 import com.BossAi.bossAi.service.dna.DnaPresetConfig;
@@ -167,6 +168,9 @@ public class EdlGeneratorService {
 
         // Multi-layer composition (same as deterministic path)
         appendLayerSegments(edl, context, projectAssets);
+
+        // User-provided overlay images with semantic placement
+        appendOverlaySegments(edl, context);
 
         // GIF overlays
         List<com.BossAi.bossAi.dto.edl.EdlGifOverlay> gifOverlaysGpt =
@@ -480,6 +484,9 @@ public class EdlGeneratorService {
         // that LayerAssetGenerator populated with background/overlay assets.
         appendLayerSegments(edl, context, projectAssets);
 
+        // User-provided overlay images with semantic placement
+        appendOverlaySegments(edl, context);
+
         // GIF overlays: subscribe/follow button on last scene, etc.
         List<com.BossAi.bossAi.dto.edl.EdlGifOverlay> gifOverlays =
                 gifOverlayService.buildOverlays(edl.getSegments(), context);
@@ -596,6 +603,59 @@ public class EdlGeneratorService {
         }
     }
 
+    // =========================================================================
+    // OVERLAY SEGMENTS — user-provided images placed by OverlayPlacementEngine
+    // =========================================================================
+
+    /**
+     * Converts OverlayPlacement decisions into EdlSegments with layer=2.
+     * Each segment carries precise position (x/y/width/height/opacity/animationIn)
+     * so the Remotion renderer can composite the image at the right place and time.
+     */
+    private void appendOverlaySegments(EdlDto edl, GenerationContext context) {
+        List<OverlayPlacement> placements = context.getOverlayPlacements();
+        if (placements == null || placements.isEmpty()) return;
+
+        List<EdlSegment> overlaySegments = new ArrayList<>();
+
+        for (OverlayPlacement placement : placements) {
+            if (placement.getStartMs() >= placement.getEndMs()) {
+                log.warn("[EdlGenerator] Skipping invalid overlay placement (startMs >= endMs): {}",
+                        placement.getOverlayAssetId());
+                continue;
+            }
+
+            overlaySegments.add(EdlSegment.builder()
+                    .id(UUID.randomUUID().toString())
+                    .assetId(placement.getOverlayAssetId().toString())
+                    .assetUrl(placement.getOverlayAssetUrl())
+                    .assetType("IMAGE")
+                    .startMs(placement.getStartMs())
+                    .endMs(placement.getEndMs())
+                    .layer(2)
+                    .x(placement.getX())
+                    .y(placement.getY())
+                    .width(placement.getWidth())
+                    .height(placement.getHeight())
+                    .opacity(placement.getOpacity())
+                    .animationIn(placement.getAnimationIn())
+                    .effects(new ArrayList<>())
+                    .build());
+
+            log.debug("[EdlGenerator] Overlay segment: asset={} t=[{}-{}ms] pos=({},{}) size={}x{} anim={}",
+                    placement.getOverlayAssetId(),
+                    placement.getStartMs(), placement.getEndMs(),
+                    placement.getX(), placement.getY(),
+                    placement.getWidth(), placement.getHeight(),
+                    placement.getAnimationIn());
+        }
+
+        if (!overlaySegments.isEmpty()) {
+            edl.getSegments().addAll(overlaySegments);
+            log.info("[EdlGenerator] Appended {} overlay segment(s) from OverlayPlacementEngine",
+                    overlaySegments.size());
+        }
+    }
 
     // =========================================================================
     // BEAT-SNAP — post-process segment boundaries to nearest beat

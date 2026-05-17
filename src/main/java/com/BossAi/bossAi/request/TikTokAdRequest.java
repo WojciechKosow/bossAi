@@ -109,4 +109,19 @@ public class TikTokAdRequest {
      * Requires giphy.api-key to be configured.
      */
     private boolean gifOverlaysEnabled = false;
+
+    /**
+     * Overlay images to be placed ON TOP of the main video at semantically
+     * appropriate moments. These assets are NOT part of the main scene timeline
+     * and do NOT affect scene count.
+     *
+     * Examples: brand logos, Discord/Twitter/Instagram icons, screenshots,
+     * to-do lists, product shots, CTA graphics.
+     *
+     * The pipeline uses GPT Vision to describe each image and then matches it
+     * to the narration transcript to decide when and where to show it.
+     *
+     * Requires PRO+ plan.
+     */
+    private List<UUID> overlayAssetIds;
 }

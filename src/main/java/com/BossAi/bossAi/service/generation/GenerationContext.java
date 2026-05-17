@@ -10,6 +10,7 @@ import com.BossAi.bossAi.service.director.JustifiedCut;
 import com.BossAi.bossAi.service.director.NarrationAnalysis;
 import com.BossAi.bossAi.service.director.SpeechTimingAnalysis;
 import com.BossAi.bossAi.service.director.UserEditIntent;
+import com.BossAi.bossAi.service.director.overlay.OverlayPlacement;
 import com.BossAi.bossAi.service.dna.DnaPreset;
 import com.BossAi.bossAi.service.dna.UserDnaInput;
 import com.BossAi.bossAi.service.generation.context.SceneAsset;
@@ -354,6 +355,22 @@ public class GenerationContext {
     /** When true, pipeline adds an animated GIF overlay on the last scene. */
     private boolean gifOverlaysEnabled;
 
+    /**
+     * Overlay images uploaded by the user to be placed ON TOP of the main video.
+     * These are NOT part of the main scene timeline (do not affect scene count).
+     * Populated from TikTokAdRequest.overlayAssetIds by GenerationServiceImpl.
+     */
+    @Builder.Default
+    private List<Asset> overlayAssets = new ArrayList<>();
+
+    /**
+     * Placement decisions for overlay images — produced by OverlayPlacementEngine
+     * and consumed by EdlGeneratorService to emit layer=2 segments with position data.
+     * Empty until OverlayPlacementEngine runs.
+     */
+    @Builder.Default
+    private List<OverlayPlacement> overlayPlacements = new ArrayList<>();
+
     // -------------------------------------------------------------------------
     // METODY POMOCNICZE
     // -------------------------------------------------------------------------
@@ -389,6 +406,13 @@ public class GenerationContext {
      */
     public boolean hasCustomMedia() {
         return customMediaAssets != null && !customMediaAssets.isEmpty();
+    }
+
+    /**
+     * Zwraca true jeśli user dostarczył overlay images do nałożenia na wideo.
+     */
+    public boolean hasOverlayAssets() {
+        return overlayAssets != null && !overlayAssets.isEmpty();
     }
 
     /**

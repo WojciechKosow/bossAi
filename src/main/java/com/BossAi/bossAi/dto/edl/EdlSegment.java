@@ -50,6 +50,36 @@ public class EdlSegment {
     @Builder.Default
     private int layer = 0;
 
+    /**
+     * Overlay position and size — normalized 0.0–1.0 of frame dimensions.
+     * (x, y) = top-left corner; (width, height) = size fraction.
+     * Defaults represent fullscreen (no repositioning).
+     * Only meaningful for layer=2 overlay segments.
+     */
+    @JsonProperty("x")
+    @Builder.Default
+    private float x = 0f;
+
+    @JsonProperty("y")
+    @Builder.Default
+    private float y = 0f;
+
+    @JsonProperty("width")
+    @Builder.Default
+    private float width = 1f;
+
+    @JsonProperty("height")
+    @Builder.Default
+    private float height = 1f;
+
+    @JsonProperty("opacity")
+    @Builder.Default
+    private float opacity = 1f;
+
+    /** Entrance animation at segment start: fade_in, slide_up, zoom_in, null = instant */
+    @JsonProperty("animation_in")
+    private String animationIn;
+
     @JsonProperty("effects")
     private List<EdlEffect> effects;
 
