@@ -33,7 +33,7 @@ Add to every segment in the EDL:
 Generate these text overlays IN ADDITION to subtitles (whisper_words handle subtitles separately):
   1. HOOK overlay (beat A, layer 2):
      - "content": <3-6 word pain question or bold claim derived from user prompt>
-     - "type": "TEXT_OVERLAY", "animation": "punch_in"
+     - "type": "TEXT_OVERLAY", "animation": "bounce"
      - style: font_size 58, font_weight "bold", color "#FFFFFF", stroke_color "#000000", stroke_width 4
      - position: "center"
 

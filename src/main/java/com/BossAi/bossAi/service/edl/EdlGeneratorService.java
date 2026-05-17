@@ -2567,6 +2567,13 @@ public class EdlGeneratorService {
                 dnaConfig, edl.getTextOverlays(), textOverrides, totalDurationMs);
 
         if (!dnaOverlays.isEmpty()) {
+            // Sanitize animation values from DNA preset before storing (Remotion Zod strict enum)
+            dnaOverlays.forEach(o -> {
+                if (o.getAnimation() != null && !VALID_TEXT_ANIMATIONS.contains(o.getAnimation())) {
+                    log.warn("[EdlGenerator] DNA overlay animation '{}' not supported by Remotion — replacing with 'bounce'", o.getAnimation());
+                    o.setAnimation("bounce");
+                }
+            });
             edl.setTextOverlays(dnaOverlays);
         }
 
