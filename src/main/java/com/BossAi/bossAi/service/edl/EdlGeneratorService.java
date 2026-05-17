@@ -18,6 +18,7 @@ import com.BossAi.bossAi.service.dna.DnaPresetService;
 import com.BossAi.bossAi.service.dna.TextOverlayGeneratorService;
 import com.BossAi.bossAi.service.generation.GenerationContext;
 import com.BossAi.bossAi.service.generation.context.SceneAsset;
+import com.BossAi.bossAi.service.generation.context.ScriptResult;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
@@ -734,22 +735,42 @@ public class EdlGeneratorService {
 
         String callbackBase = remotionProperties.getCallbackBaseUrl();
 
-        // Distribute images across video scenes (round-robin)
+        // Distribute images across video scenes, timing driven by narration when possible
         List<Integer> orderedVideoScenes = new ArrayList<>(videoRanges.keySet());
         List<Map.Entry<Integer, String>> imageList = new ArrayList<>(imageSceneUrls.entrySet());
         List<EdlSegment> overlays = new ArrayList<>();
+        ScriptResult script = context.getScript();
 
         for (int i = 0; i < imageList.size(); i++) {
             Map.Entry<Integer, String> imgEntry = imageList.get(i);
             int imgSceneIdx = imgEntry.getKey();
 
-            int targetVidSceneIdx = orderedVideoScenes.get(i % orderedVideoScenes.size());
-            int[] range = videoRanges.get(targetVidSceneIdx);
-
             // Use raw-asset endpoint so Remotion receives the original uploaded image,
             // not the Ken Burns video clip that VideoStep created from it.
             String assetId = media.get(imgSceneIdx).getId().toString();
             String assetUrl = callbackBase + "/internal/assets/raw/" + assetId + "/file";
+
+            // --- Narration-driven timing ------------------------------------------------
+            // Find the exact voice window when the narrator talks about this image by
+            // matching its scene's subtitleText against whisper word timestamps.
+            // This makes the overlay appear precisely when spoken, not for the whole scene.
+            String subtitleText = null;
+            if (script != null && script.scenes() != null && imgSceneIdx < script.scenes().size()) {
+                subtitleText = script.scenes().get(imgSceneIdx).subtitleText();
+            }
+            int[] range = findNarrationWindow(subtitleText, edl.getWhisperWords());
+
+            if (range != null) {
+                log.info("[EdlGenerator] Image overlay scene {}: narration window {}ms-{}ms (text: '{}')",
+                        imgSceneIdx, range[0], range[1], subtitleText);
+            } else {
+                // Fallback: spread across video scenes round-robin
+                int targetVidSceneIdx = orderedVideoScenes.get(i % orderedVideoScenes.size());
+                range = videoRanges.get(targetVidSceneIdx);
+                log.info("[EdlGenerator] Image overlay scene {}: no narration match → video scene {} range {}ms-{}ms (text: '{}')",
+                        imgSceneIdx, targetVidSceneIdx, range[0], range[1], subtitleText);
+            }
+            // ---------------------------------------------------------------------------
 
             overlays.add(EdlSegment.builder()
                     .id(UUID.randomUUID().toString())
@@ -761,14 +782,48 @@ public class EdlGeneratorService {
                     .layer(2)
                     .effects(new ArrayList<>())
                     .build());
-
-            log.info("[EdlGenerator] Image overlay: scene {} → video scene {} ({}ms-{}ms) url={}",
-                    imgSceneIdx, targetVidSceneIdx, range[0], range[1], assetUrl);
         }
 
         edl.getSegments().addAll(overlays);
-        log.info("[EdlGenerator] Appended {} image overlay segment(s) across {} video scene(s)",
-                overlays.size(), orderedVideoScenes.size());
+        log.info("[EdlGenerator] Appended {} image overlay segment(s)", overlays.size());
+    }
+
+    /**
+     * Finds the time window [startMs, endMs] in the whisper words that corresponds
+     * to the given subtitleText by normalising both sides and matching words.
+     * Returns null if fewer than 2 words match (too uncertain).
+     */
+    private int[] findNarrationWindow(String subtitleText, List<EdlWhisperWord> whisperWords) {
+        if (subtitleText == null || subtitleText.isBlank()
+                || whisperWords == null || whisperWords.isEmpty()) {
+            return null;
+        }
+
+        // Build a set of content words from the subtitle (length ≥ 3 handles Polish stop words)
+        Set<String> subtitleTokens = Arrays.stream(subtitleText.split("\\s+"))
+                .map(w -> w.toLowerCase().replaceAll("[.,!?;:'\"]+$", "").replaceAll("^[.,!?;:'\"]+", ""))
+                .filter(w -> w.length() >= 3)
+                .collect(Collectors.toSet());
+
+        if (subtitleTokens.isEmpty()) return null;
+
+        int startMs = Integer.MAX_VALUE;
+        int endMs   = Integer.MIN_VALUE;
+        int matches = 0;
+
+        for (EdlWhisperWord word : whisperWords) {
+            String token = word.getWord().toLowerCase()
+                    .replaceAll("[.,!?;:'\"]+$", "")
+                    .replaceAll("^[.,!?;:'\"]+", "");
+            if (subtitleTokens.contains(token)) {
+                startMs = Math.min(startMs, word.getStartMs());
+                endMs   = Math.max(endMs,   word.getEndMs());
+                matches++;
+            }
+        }
+
+        if (matches < 2 || endMs <= startMs) return null;
+        return new int[]{startMs, endMs};
     }
 
     // =========================================================================
