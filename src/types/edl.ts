@@ -67,6 +67,14 @@ export const SegmentSchema = z.object({
   trim_in_ms: z.number().nullable().optional(),
   trim_out_ms: z.number().nullable().optional(),
   layer: z.number().default(0),
+  /** Overlay position & size — normalized 0.0–1.0 of frame. Only used when layer=2. */
+  x: z.number().default(0),
+  y: z.number().default(0),
+  width: z.number().default(1),
+  height: z.number().default(1),
+  opacity: z.number().default(1),
+  /** Entrance animation: fade_in | slide_up | slide_left | zoom_in | null */
+  animation_in: z.string().nullable().optional(),
   effects: z.array(EffectSchema).optional(),
   transition: TransitionSchema.nullable().optional(),
 });

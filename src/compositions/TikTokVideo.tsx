@@ -3,6 +3,7 @@ import { AbsoluteFill, Sequence } from "remotion";
 import type { Edl, ColorGrade } from "../types/edl";
 import { parseEdlToTimeline, type RemotionSegment } from "../utils/edl-parser";
 import { VideoSegment } from "../components/VideoSegment";
+import { ImageOverlayComponent } from "../components/ImageOverlayComponent";
 import { TextOverlayComponent } from "../components/TextOverlay";
 import { AudioTrackComponent } from "../components/AudioTrackComponent";
 import { SubtitleTrack } from "../components/SubtitleTrack";
@@ -85,8 +86,22 @@ function layerWrapperStyle(
     );
     return overlapsBackground ? { opacity: 0.85 } : undefined;
   }
-  // Overlay (layer > 0): semi-transparent so primary shows through
+  // Overlay (layer > 0): if it has explicit positioning (width < 1), skip — handled by ImageOverlayComponent
+  if (seg.segment.width !== undefined && seg.segment.width < 1) return undefined;
+  // Full-screen overlay: semi-transparent so primary shows through
   return { opacity: 0.85 };
+}
+
+/**
+ * Returns true when a segment is a positioned overlay image (not fullscreen).
+ * These are rendered by ImageOverlayComponent, not by VideoSegment + AbsoluteFill.
+ */
+function isPositionedOverlay(seg: RemotionSegment): boolean {
+  return (
+    seg.segment.layer === 2 &&
+    seg.segment.width !== undefined &&
+    seg.segment.width < 1
+  );
 }
 
 export const TikTokVideo: React.FC<TikTokVideoProps> = ({ edl }) => {
@@ -118,8 +133,17 @@ export const TikTokVideo: React.FC<TikTokVideoProps> = ({ edl }) => {
           filter: colorFilter !== "none" ? colorFilter : undefined,
         }}
       >
-        {/* Video/Image segments — sorted by layer (background first, overlay last) */}
+        {/* Video/Image segments — sorted by layer (background first, overlay last).
+            Positioned overlays (layer=2 with x/y/width/height) use ImageOverlayComponent
+            instead of fullscreen AbsoluteFill so they appear at the right spot. */}
         {sortedSegments.map((seg) => {
+          if (isPositionedOverlay(seg)) {
+            return (
+              <Sequence key={seg.id} from={seg.from} durationInFrames={seg.durationInFrames}>
+                <ImageOverlayComponent segment={seg.segment} />
+              </Sequence>
+            );
+          }
           const wrapperStyle = layerWrapperStyle(seg, backgroundIntervals);
           return (
             <AbsoluteFill key={seg.id} style={wrapperStyle}>
