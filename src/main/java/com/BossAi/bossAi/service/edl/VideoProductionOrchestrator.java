@@ -8,6 +8,7 @@ import com.BossAi.bossAi.service.audio.AudioAnalysisClient;
 import com.BossAi.bossAi.service.audio.AudioAnalysisResponse;
 import com.BossAi.bossAi.service.director.*;
 import com.BossAi.bossAi.service.director.composition.AutonomousCompositionDecider;
+import com.BossAi.bossAi.service.director.overlay.OverlayPlacementEngine;
 import com.BossAi.bossAi.service.generation.GenerationContext;
 import com.BossAi.bossAi.service.generation.context.SceneAsset;
 import com.BossAi.bossAi.service.render.RemotionRenderClient;
@@ -61,6 +62,7 @@ public class VideoProductionOrchestrator {
     private final UserIntentParser userIntentParser;
     private final LayerAssetGenerator layerAssetGenerator;
     private final AutonomousCompositionDecider autonomousCompositionDecider;
+    private final OverlayPlacementEngine overlayPlacementEngine;
     private final ObjectMapper objectMapper;
 
     /**
@@ -120,6 +122,13 @@ public class VideoProductionOrchestrator {
             //   Wynik: SceneAsset.layerAssetIds wypełnione → appendLayerSegments w EdlGenerator
             //   emituje multi-layer segmenty do Remotion.
             autonomousCompositionDecider.decide(context, projectAssets);
+
+            // 6.6 NOWE: Overlay placement — user-provided overlay images
+            //   OverlayPlacementEngine opisuje każdy overlay (GPT Vision) i dopasowuje
+            //   go do momentu w narracji (semantyczne dopasowanie słów kluczowych).
+            //   Wynik: context.overlayPlacements → appendOverlaySegments w EdlGenerator
+            //   emituje layer=2 segmenty z x/y/width/height/opacity/animationIn.
+            overlayPlacementEngine.describeAndPlace(context);
 
             // 7. Generuj EDL z edit_dna + justified cuts
             EdlDto edl = edlGeneratorService.generateEdl(context, audioAnalysis, projectAssets, editDna);

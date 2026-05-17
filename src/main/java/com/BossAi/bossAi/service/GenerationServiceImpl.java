@@ -449,6 +449,12 @@ public class GenerationServiceImpl implements GenerationService {
         // Resolve custom TTS assets (voice-over clips with user ordering)
         List<Asset> customTtsAssets = resolveCustomAssets(request.getCustomTtsAssetIds(), user);
 
+        // Resolve overlay images — placed ON TOP of main video, outside scene count
+        List<Asset> overlayAssets = resolveCustomAssets(request.getOverlayAssetIds(), user);
+        if (!overlayAssets.isEmpty()) {
+            log.info("[GenerationService] User provided {} overlay asset(s)", overlayAssets.size());
+        }
+
         PlanDefinition planDefinition = planDefinitionRepository.findById(userPlan.getPlanType())
                 .orElseThrow();
 
@@ -509,6 +515,7 @@ public class GenerationServiceImpl implements GenerationService {
                 .style(request.getStyle())
                 .dnaPreset(resolvedDnaPreset)
                 .gifOverlaysEnabled(request.isGifOverlaysEnabled())
+                .overlayAssets(overlayAssets)
                 .build();
     }
 
