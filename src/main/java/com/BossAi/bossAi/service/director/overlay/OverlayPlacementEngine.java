@@ -202,12 +202,18 @@ public class OverlayPlacementEngine {
             return defaultPlacements(descriptors, totalDurationMs);
         }
 
+        List<OverlayPlacement> gptResult;
         try {
-            return callGptForPlacements(descriptors, transcript, totalDurationMs);
+            gptResult = callGptForPlacements(descriptors, transcript, totalDurationMs);
         } catch (Exception e) {
             log.warn("[OverlayEngine] GPT placement failed — using keyword fallback: {}", e.getMessage());
+            gptResult = List.of();
+        }
+        if (gptResult.isEmpty()) {
+            log.info("[OverlayEngine] GPT returned no placements — using keyword fallback");
             return keywordFallbackPlacements(descriptors, context, totalDurationMs);
         }
+        return gptResult;
     }
 
     /**
@@ -302,7 +308,24 @@ public class OverlayPlacementEngine {
 
         // Unwrap OpenAI chat completion envelope
         JsonNode content = root.path("choices").get(0).path("message").path("content");
-        JsonNode placements = objectMapper.readTree(content.asText());
+        JsonNode parsed = objectMapper.readTree(content.asText());
+
+        // generateDirectorPlan uses response_format:json_object, so GPT may wrap the array
+        // in an object like {"placements":[...]}. Find the first array node.
+        JsonNode placements = parsed;
+        if (!parsed.isArray()) {
+            placements = null;
+            for (JsonNode child : parsed) {
+                if (child.isArray()) {
+                    placements = child;
+                    break;
+                }
+            }
+            if (placements == null) {
+                log.warn("[OverlayEngine] GPT returned JSON object with no array inside: {}", content.asText());
+                return List.of();
+            }
+        }
 
         List<OverlayPlacement> result = new ArrayList<>();
         for (JsonNode p : placements) {
@@ -346,13 +369,21 @@ public class OverlayPlacementEngine {
             int endMs = -1;
 
             if (wordTimings != null && !desc.getTriggerKeywords().isEmpty()) {
-                for (SubtitleService.WordTiming wt : wordTimings) {
+                for (int wi = 0; wi < wordTimings.size(); wi++) {
+                    SubtitleService.WordTiming wt = wordTimings.get(wi);
                     String lower = wt.word().toLowerCase().replaceAll("[^a-z0-9]", "");
                     boolean matches = desc.getTriggerKeywords().stream()
                             .anyMatch(kw -> lower.contains(kw.toLowerCase()));
                     if (matches) {
                         startMs = Math.max(0, wt.startMs() - 200);
-                        endMs = Math.min(totalDurationMs, wt.startMs() + 4000);
+                        // Find the end of the current sentence (look ahead up to 10 words or 5s)
+                        int sentenceEnd = wt.endMs();
+                        for (int look = wi + 1; look < wordTimings.size() && look < wi + 10; look++) {
+                            SubtitleService.WordTiming next = wordTimings.get(look);
+                            if (next.startMs() - sentenceEnd > 500) break; // gap = new sentence
+                            sentenceEnd = next.endMs();
+                        }
+                        endMs = Math.min(totalDurationMs, sentenceEnd + 300);
                         break;
                     }
                 }
