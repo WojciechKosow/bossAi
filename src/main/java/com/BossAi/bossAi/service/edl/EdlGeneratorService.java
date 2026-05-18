@@ -611,11 +611,15 @@ public class EdlGeneratorService {
      * Converts OverlayPlacement decisions into EdlSegments with layer=2.
      * Each segment carries precise position (x/y/width/height/opacity/animationIn)
      * so the Remotion renderer can composite the image at the right place and time.
+     *
+     * URL is built using the /internal/assets/raw/{assetId}/file endpoint which
+     * serves plain Asset entities (not ProjectAssets) to the Remotion renderer.
      */
     private void appendOverlaySegments(EdlDto edl, GenerationContext context) {
         List<OverlayPlacement> placements = context.getOverlayPlacements();
         if (placements == null || placements.isEmpty()) return;
 
+        String callbackBase = remotionProperties.getCallbackBaseUrl();
         List<EdlSegment> overlaySegments = new ArrayList<>();
 
         for (OverlayPlacement placement : placements) {
@@ -625,10 +629,15 @@ public class EdlGeneratorService {
                 continue;
             }
 
+            // Use the /raw/ endpoint — serves plain Asset entities by UUID.
+            // The standard /internal/assets/{id}/file only accepts ProjectAsset UUIDs.
+            String assetUrl = callbackBase + "/internal/assets/raw/"
+                    + placement.getOverlayAssetId() + "/file";
+
             overlaySegments.add(EdlSegment.builder()
                     .id(UUID.randomUUID().toString())
                     .assetId(placement.getOverlayAssetId().toString())
-                    .assetUrl(placement.getOverlayAssetUrl())
+                    .assetUrl(assetUrl)
                     .assetType("IMAGE")
                     .startMs(placement.getStartMs())
                     .endMs(placement.getEndMs())
@@ -642,12 +651,11 @@ public class EdlGeneratorService {
                     .effects(new ArrayList<>())
                     .build());
 
-            log.debug("[EdlGenerator] Overlay segment: asset={} t=[{}-{}ms] pos=({},{}) size={}x{} anim={}",
-                    placement.getOverlayAssetId(),
+            log.debug("[EdlGenerator] Overlay segment: asset={} url={} t=[{}-{}ms] pos=({},{}) size={}x{}",
+                    placement.getOverlayAssetId(), assetUrl,
                     placement.getStartMs(), placement.getEndMs(),
                     placement.getX(), placement.getY(),
-                    placement.getWidth(), placement.getHeight(),
-                    placement.getAnimationIn());
+                    placement.getWidth(), placement.getHeight());
         }
 
         if (!overlaySegments.isEmpty()) {
