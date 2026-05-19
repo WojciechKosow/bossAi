@@ -5,306 +5,78 @@ import com.BossAi.bossAi.service.audio.AudioAnalysisResponse;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
-import java.util.*;
-import java.util.concurrent.ThreadLocalRandom;
+import java.util.List;
 
 /**
  * Przypisuje efekty i przejścia do cutów.
  *
- * v2 — muzycznie świadomy, niedeterministyczny:
- *   - Efekty dobierane z pul (pools) na podstawie sekcji muzycznej + mood + danceability
- *   - Losowy wybór z puli → każde wideo jest inne
- *   - Sekcja "drop" → agresywne efekty (FAST_ZOOM, SHAKE, BOUNCE)
- *   - Sekcja "build" → narastające (ZOOM_IN, ZOOM_IN_OFFSET)
- *   - Sekcja "quiet/intro/outro" → spokojne (PAN_*, DRIFT, ZOOM_OUT)
- *   - Zapobiega powtórzeniom (nie ten sam efekt 2x z rzędu)
+ * 3 efekty TikTok:
+ *   - SMASH_ZOOM  — scena 0 (hook), snap zoom 1.0→1.6 w 8 klatkach
+ *   - ZOOM_IN     — sceny parzyste + ostatnia, gładki zoom 1.0→1.20
+ *   - WHIP_PAN    — sceny nieparzyste, poziomy pan z motion blur
+ *
+ * Przejście między scenami: fade_white (scena 0→1) + fade (pozostałe).
  */
 @Slf4j
 @Component
 public class EffectAssigner {
 
     // =========================================================================
-    // EFFECT POOLS — dobierane na podstawie sekcji muzycznej + energii
-    // =========================================================================
-
-    /** Agresywne efekty na dropy / peak / high energy */
-    private static final List<EffectType> POOL_AGGRESSIVE = List.of(
-            EffectType.SMASH_ZOOM, EffectType.FAST_ZOOM, EffectType.SHAKE,
-            EffectType.BOUNCE, EffectType.ZOOM_IN_OFFSET, EffectType.WHIP_PAN,
-            EffectType.RGB_SPLIT, EffectType.VIGNETTE_PULSE
-    );
-
-    /** Narastające efekty na build-up / medium energy */
-    private static final List<EffectType> POOL_BUILDING = List.of(
-            EffectType.ZOOM_IN, EffectType.ZOOM_IN_OFFSET, EffectType.PAN_LEFT,
-            EffectType.PAN_RIGHT, EffectType.PAN_UP, EffectType.BOUNCE,
-            EffectType.BLUR_TRANSITION
-    );
-
-    /** Spokojne efekty na quiet / intro / outro / low energy */
-    private static final List<EffectType> POOL_CALM = List.of(
-            EffectType.PAN_LEFT, EffectType.PAN_RIGHT, EffectType.PAN_UP,
-            EffectType.PAN_DOWN, EffectType.DRIFT, EffectType.ZOOM_OUT,
-            EffectType.BLUR_TRANSITION
-    );
-
-    /** Filmowe efekty (cinematic / luxury) */
-    private static final List<EffectType> POOL_CINEMATIC = List.of(
-            EffectType.PAN_LEFT, EffectType.PAN_RIGHT, EffectType.PAN_UP,
-            EffectType.PAN_DOWN, EffectType.ZOOM_IN, EffectType.ZOOM_OUT,
-            EffectType.DRIFT, EffectType.KEN_BURNS
-    );
-
-    /** Edukacyjne — minimalne ruchy, czytelność */
-    private static final List<EffectType> POOL_EDUCATIONAL = List.of(
-            EffectType.ZOOM_OUT, EffectType.PAN_LEFT, EffectType.PAN_RIGHT,
-            EffectType.DRIFT, EffectType.NONE
-    );
-
-    // =========================================================================
-    // TRANSITION POOLS
-    // =========================================================================
-
-    // Wipe/slide now look good (blur+drift, not raw translateX off-screen)
-    private static final List<String> TRANSITIONS_AGGRESSIVE = List.of(
-            "cut", "fade_white", "wipe_left", "wipe_right"
-    );
-
-    private static final List<String> TRANSITIONS_SMOOTH = List.of(
-            "fade", "dissolve", "fade_black", "slide_left", "slide_right"
-    );
-
-    private static final List<String> TRANSITIONS_MINIMAL = List.of(
-            "cut", "fade"
-    );
-
-    // =========================================================================
     // PUBLIC API
     // =========================================================================
 
-    /**
-     * Przypisuje efekty do cutów z uwzględnieniem muzyki.
-     * Jeśli audioAnalysis == null → fallback na starą logikę (styl + energy).
-     */
     public void applyEffects(DirectorPlan plan, VideoStyle style, String contentType) {
         applyEffects(plan, style, contentType, null);
     }
 
     public void applyEffects(DirectorPlan plan, VideoStyle style, String contentType,
                              AudioAnalysisResponse audioAnalysis) {
-        boolean isEducational = "EDUCATIONAL".equalsIgnoreCase(contentType);
-        ThreadLocalRandom rng = ThreadLocalRandom.current();
+        List<SceneDirection> scenes = plan.getScenes();
+        int lastIdx = scenes.size() - 1;
 
-        for (SceneDirection scene : plan.getScenes()) {
-            EffectType lastEffect = null;
-
-            for (Cut cut : scene.getCuts()) {
-                List<EffectType> pool = resolvePool(cut, style, isEducational, audioAnalysis);
-                EffectType chosen = pickFromPool(pool, lastEffect, rng);
-                cut.setEffect(chosen);
-                lastEffect = chosen;
+        for (int s = 0; s < scenes.size(); s++) {
+            EffectType effect = pickEffectForScene(s, lastIdx, style);
+            for (Cut cut : scenes.get(s).getCuts()) {
+                cut.setEffect(effect);
             }
         }
 
-        log.info("[EffectAssigner] Effects assigned — music-aware: {}, style: {}",
-                audioAnalysis != null, style);
+        log.info("[EffectAssigner] 3-effect TikTok assignment — {} scenes, style: {}", scenes.size(), style);
     }
 
-    /**
-     * Przypisuje przejścia między scenami z uwzględnieniem muzyki.
-     */
     public void applyTransitions(DirectorPlan plan, VideoStyle style, String contentType) {
         applyTransitions(plan, style, contentType, null);
     }
 
     public void applyTransitions(DirectorPlan plan, VideoStyle style, String contentType,
                                  AudioAnalysisResponse audioAnalysis) {
-        ThreadLocalRandom rng = ThreadLocalRandom.current();
-        String lastTransition = null;
+        List<SceneDirection> scenes = plan.getScenes();
 
-        for (int i = 0; i < plan.getScenes().size(); i++) {
-            SceneDirection scene = plan.getScenes().get(i);
-            boolean isLast = (i == plan.getScenes().size() - 1);
-
-            if (isLast) {
+        for (int i = 0; i < scenes.size(); i++) {
+            SceneDirection scene = scenes.get(i);
+            if (i == scenes.size() - 1) {
                 scene.setTransitionToNext("cut");
                 continue;
             }
-
-            // Znajdź sekcję muzyczną w momencie przejścia
-            String sectionType = findSectionAtScene(scene, audioAnalysis);
-            List<String> pool = resolveTransitionPool(style, sectionType);
-            String chosen = pickTransition(pool, lastTransition, rng);
-            scene.setTransitionToNext(chosen);
-            lastTransition = chosen;
+            // Po hooku (scena 0): biały flash — przyciąga uwagę. Potem: fade.
+            scene.setTransitionToNext(i == 0 ? "fade_white" : "fade");
         }
     }
 
     // =========================================================================
-    // POOL RESOLUTION
+    // EFFECT SELECTION
     // =========================================================================
 
-    private List<EffectType> resolvePool(Cut cut, VideoStyle style, boolean isEducational,
-                                         AudioAnalysisResponse audioAnalysis) {
-        if (isEducational) return POOL_EDUCATIONAL;
-
-        // Sekcja muzyczna ma najwyższy priorytet
-        if (audioAnalysis != null) {
-            String sectionType = findSectionAtMs(cut.getStartMs(), audioAnalysis);
-            String sectionEnergy = findSectionEnergyAtMs(cut.getStartMs(), audioAnalysis);
-
-            if (sectionType != null) {
-                return switch (sectionType.toLowerCase()) {
-                    case "drop", "peak" -> adjustForMood(POOL_AGGRESSIVE, audioAnalysis);
-                    case "build", "build_up", "buildup" -> adjustForMood(POOL_BUILDING, audioAnalysis);
-                    case "intro", "outro", "bridge" -> adjustForMood(POOL_CALM, audioAnalysis);
-                    default -> resolveByEnergy(sectionEnergy != null ? sectionEnergy : cut.getEnergy(), style);
-                };
-            }
-        }
-
-        // Fallback na energy z cuta (od GPT lub beat sync)
-        return resolveByEnergy(cut.getEnergy(), style);
-    }
-
-    private List<EffectType> resolveByEnergy(String energy, VideoStyle style) {
+    private EffectType pickEffectForScene(int sceneIndex, int lastIndex, VideoStyle style) {
+        // Cinematic/Luxury: zawsze gładki zoom
         if (style == VideoStyle.CINEMATIC || style == VideoStyle.LUXURY_AD) {
-            return POOL_CINEMATIC;
+            return EffectType.ZOOM_IN;
         }
-
-        if (energy == null) return POOL_BUILDING;
-
-        return switch (energy.toLowerCase()) {
-            case "high" -> POOL_AGGRESSIVE;
-            case "medium" -> POOL_BUILDING;
-            case "low" -> POOL_CALM;
-            default -> POOL_BUILDING;
-        };
-    }
-
-    /**
-     * Modyfikuje pulę efektów na podstawie mood i danceability.
-     * Wysoka danceability → więcej bounce/shake.
-     * Sad/calm mood → łagodniejsze efekty nawet na dropie.
-     */
-    private List<EffectType> adjustForMood(List<EffectType> basePool, AudioAnalysisResponse audio) {
-        if (audio.mood() == null) return basePool;
-
-        String mood = audio.mood().toLowerCase();
-        double dance = audio.danceability();
-
-        // Sad/melancholic mood — nawet na dropie nie szalejemy
-        if (mood.contains("sad") || mood.contains("melanchol") || mood.contains("calm")) {
-            // Zamień agresywne efekty na łagodniejsze
-            if (basePool == POOL_AGGRESSIVE) {
-                return List.of(
-                        EffectType.ZOOM_IN, EffectType.ZOOM_IN_OFFSET,
-                        EffectType.PAN_UP, EffectType.PAN_DOWN, EffectType.DRIFT
-                );
-            }
-            return basePool;
-        }
-
-        // Wysoka danceability → więcej bounce, shake i rgb split na dropach
-        if (dance > 0.7 && basePool == POOL_AGGRESSIVE) {
-            return List.of(
-                    EffectType.BOUNCE, EffectType.SHAKE, EffectType.FAST_ZOOM,
-                    EffectType.RGB_SPLIT, EffectType.ZOOM_IN_OFFSET, EffectType.SHAKE
-            );
-        }
-
-        return basePool;
-    }
-
-    // =========================================================================
-    // MUSIC SECTION LOOKUP
-    // =========================================================================
-
-    private String findSectionAtMs(int cutStartMs, AudioAnalysisResponse audio) {
-        if (audio == null || audio.sections() == null) return null;
-        double timeSec = cutStartMs / 1000.0;
-        return audio.sections().stream()
-                .filter(s -> timeSec >= s.start() && timeSec < s.end())
-                .map(AudioAnalysisResponse.Section::type)
-                .findFirst()
-                .orElse(null);
-    }
-
-    private String findSectionEnergyAtMs(int cutStartMs, AudioAnalysisResponse audio) {
-        if (audio == null || audio.sections() == null) return null;
-        double timeSec = cutStartMs / 1000.0;
-        return audio.sections().stream()
-                .filter(s -> timeSec >= s.start() && timeSec < s.end())
-                .map(AudioAnalysisResponse.Section::energy)
-                .findFirst()
-                .orElse(null);
-    }
-
-    private String findSectionAtScene(SceneDirection scene, AudioAnalysisResponse audio) {
-        if (audio == null || audio.sections() == null || scene.getCuts() == null || scene.getCuts().isEmpty()) {
-            return null;
-        }
-        // Użyj ostatniego cuta sceny (moment przejścia)
-        Cut lastCut = scene.getCuts().get(scene.getCuts().size() - 1);
-        return findSectionAtMs(lastCut.getEndMs(), audio);
-    }
-
-    // =========================================================================
-    // TRANSITION RESOLUTION
-    // =========================================================================
-
-    private List<String> resolveTransitionPool(VideoStyle style, String sectionType) {
-        // Sekcja muzyczna wpływa na przejście
-        if (sectionType != null) {
-            return switch (sectionType.toLowerCase()) {
-                case "drop", "peak" -> TRANSITIONS_AGGRESSIVE;
-                case "build", "build_up", "buildup" -> TRANSITIONS_SMOOTH;
-                case "intro", "outro", "bridge" -> TRANSITIONS_SMOOTH;
-                default -> TRANSITIONS_SMOOTH;
-            };
-        }
-
-        // Fallback na styl
-        if (style == null) return TRANSITIONS_SMOOTH;
-        return switch (style) {
-            case VIRAL_EDIT -> TRANSITIONS_AGGRESSIVE;
-            case UGC_STYLE -> TRANSITIONS_MINIMAL;
-            case CINEMATIC, LUXURY_AD -> TRANSITIONS_SMOOTH;
-            default -> TRANSITIONS_SMOOTH;
-        };
-    }
-
-    // =========================================================================
-    // RANDOM PICK — zapobiega powtórzeniom
-    // =========================================================================
-
-    private EffectType pickFromPool(List<EffectType> pool, EffectType lastEffect, ThreadLocalRandom rng) {
-        if (pool.isEmpty()) return EffectType.NONE;
-        if (pool.size() == 1) return pool.get(0);
-
-        // Próbuj uniknąć powtórzenia (max 3 próby)
-        for (int attempt = 0; attempt < 3; attempt++) {
-            EffectType candidate = pool.get(rng.nextInt(pool.size()));
-            if (candidate != lastEffect) return candidate;
-        }
-        // Jeśli 3 próby nie dały innego efektu — weź jakikolwiek inny
-        return pool.stream()
-                .filter(e -> e != lastEffect)
-                .findFirst()
-                .orElse(pool.get(0));
-    }
-
-    private String pickTransition(List<String> pool, String lastTransition, ThreadLocalRandom rng) {
-        if (pool.isEmpty()) return "fade";
-        if (pool.size() == 1) return pool.get(0);
-
-        for (int attempt = 0; attempt < 3; attempt++) {
-            String candidate = pool.get(rng.nextInt(pool.size()));
-            if (!candidate.equals(lastTransition)) return candidate;
-        }
-        return pool.stream()
-                .filter(t -> !t.equals(lastTransition))
-                .findFirst()
-                .orElse(pool.get(0));
+        // Hook (scena 0): snap zoom
+        if (sceneIndex == 0) return EffectType.SMASH_ZOOM;
+        // Ostatnia scena (CTA): stabilny zoom
+        if (sceneIndex == lastIndex) return EffectType.ZOOM_IN;
+        // Alternacja: parzyste → ZOOM_IN, nieparzyste → WHIP_PAN
+        return sceneIndex % 2 == 0 ? EffectType.ZOOM_IN : EffectType.WHIP_PAN;
     }
 }
