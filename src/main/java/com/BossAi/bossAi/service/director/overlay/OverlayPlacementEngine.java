@@ -297,10 +297,11 @@ public class OverlayPlacementEngine {
 
                 TIMING RULES:
                 1. Match each overlay to narration using trigger_keywords.
-                2. start_ms = word startMs − 200ms (slight lead-in).
-                3. end_ms = last word of the sentence/phrase + 300ms. Never use end_ms = start_ms + fixed_value.
-                4. If no keyword match: place at 80%% of video duration for the length of the nearest phrase.
-                5. Subtitles occupy y > 0.78 — never place overlays there.
+                2. Find the FULL SENTENCE that contains the keyword (scan back to gap >300ms or .!? end, scan forward to gap >300ms or .!? end).
+                3. start_ms = first word of that sentence − 200ms.
+                4. end_ms = last word of that SAME sentence + 300ms. NEVER extend past the sentence boundary into an unrelated sentence.
+                5. If no keyword match: place at 80%% of video duration for the length of the nearest phrase (max 3s).
+                6. Subtitles occupy y > 0.78 — never place overlays there.
 
                 Return ONLY a JSON array (no markdown, no wrapper object):
                 [
@@ -390,18 +391,35 @@ public class OverlayPlacementEngine {
                     String lower = wt.word().toLowerCase().replaceAll("[^a-z0-9]", "");
                     boolean matches = desc.getTriggerKeywords().stream()
                             .anyMatch(kw -> lower.contains(kw.toLowerCase()));
-                    if (matches) {
-                        startMs = Math.max(0, wt.startMs() - 200);
-                        // Find the end of the current sentence (look ahead up to 10 words or 5s)
-                        int sentenceEnd = wt.endMs();
-                        for (int look = wi + 1; look < wordTimings.size() && look < wi + 10; look++) {
-                            SubtitleService.WordTiming next = wordTimings.get(look);
-                            if (next.startMs() - sentenceEnd > 500) break; // gap = new sentence
-                            sentenceEnd = next.endMs();
-                        }
-                        endMs = Math.min(totalDurationMs, sentenceEnd + 300);
-                        break;
+                    if (!matches) continue;
+
+                    // Scan BACKWARD to find sentence start:
+                    // stop when gap to previous word > 300ms or previous word ends sentence
+                    int sentenceStartIdx = wi;
+                    for (int back = wi - 1; back >= 0 && wi - back <= 15; back--) {
+                        SubtitleService.WordTiming prev = wordTimings.get(back);
+                        SubtitleService.WordTiming curr = wordTimings.get(back + 1);
+                        if (curr.startMs() - prev.endMs() > 300) break;
+                        if (prev.word().matches(".*[.!?]$")) break;
+                        sentenceStartIdx = back;
                     }
+
+                    // Scan FORWARD to find sentence end:
+                    // stop when current word ends with . ! ? OR gap to next word > 300ms
+                    int sentenceEndMs = wt.endMs();
+                    for (int look = wi; look < wordTimings.size() && look < wi + 20; look++) {
+                        SubtitleService.WordTiming curr = wordTimings.get(look);
+                        sentenceEndMs = curr.endMs();
+                        if (curr.word().matches(".*[.!?,;\\-]$")) break;
+                        if (look + 1 < wordTimings.size()) {
+                            SubtitleService.WordTiming next = wordTimings.get(look + 1);
+                            if (next.startMs() - curr.endMs() > 300) break;
+                        }
+                    }
+
+                    startMs = Math.max(0, wordTimings.get(sentenceStartIdx).startMs() - 200);
+                    endMs = Math.min(totalDurationMs, sentenceEndMs + 300);
+                    break;
                 }
             }
 
