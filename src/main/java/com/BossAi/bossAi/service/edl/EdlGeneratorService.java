@@ -220,6 +220,12 @@ public class EdlGeneratorService {
         for (int i = 0; i < edl.getSegments().size(); i++) {
             EdlSegment seg = edl.getSegments().get(i);
 
+            // Only apply effect enrichment and humanize to primary segments (layer=0).
+            // Layer/overlay segments (layer != 0) have their own timing from appendLayerSegments /
+            // appendOverlaySegments. Applying humanize to them corrupts their startMs (pushes it
+            // past the last main segment's endMs), producing negative durationInFrames in Remotion.
+            if (seg.getLayer() != 0) continue;
+
             if (seg.getEffects() == null || seg.getEffects().isEmpty()) {
                 // Inject primary palette effect for segments that have none
                 if (primaryEffect != null) {
