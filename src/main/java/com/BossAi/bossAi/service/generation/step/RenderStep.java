@@ -947,9 +947,9 @@ public class RenderStep implements GenerationStep {
             // "Expressions with frame variables not valid in init eval_mode" error
             // in newer FFmpeg versions.
 
-            // Progressive zoom IN to center (100% → 115%)
+            // Progressive zoom IN to center (100% → 120%)
             case ZOOM_IN -> String.format(Locale.US,
-                    "zoompan=z='1+0.15*on/%d':d=%d:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=1080x1920:fps=30",
+                    "zoompan=z='1+0.20*on/%d':d=%d:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=1080x1920:fps=30",
                     totalFrames, totalFrames);
             // Progressive zoom OUT from center (115% → 100%)
             case ZOOM_OUT -> String.format(Locale.US,
@@ -994,10 +994,10 @@ public class RenderStep implements GenerationStep {
             // Slow motion — 1.5x stretch
             case SLOW_MOTION -> "setpts=1.5*PTS";
             // ─── Nowe efekty TikTok-native ─────────────────────────────────────────
-            // SMASH_ZOOM: ekstremalny snap zoom w pierwszych klatkach (stop-scroll)
+            // SMASH_ZOOM: snap zoom 1.0→1.6 w 8 klatkach (~0.27s), potem hold na 1.6
             case SMASH_ZOOM -> String.format(Locale.US,
-                    "zoompan=z='min(2.0,1+0.7*min(on,8)/%d)':d=%d:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=1080x1920:fps=30",
-                    Math.max(1, totalFrames), totalFrames);
+                    "zoompan=z='if(lt(on,8),1+on*0.075,1.6)':d=%d:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=1080x1920:fps=30",
+                    totalFrames);
             // BLUR_TRANSITION: delikatny blur + minimalny zoom (przybliżenie TikTok flow)
             case BLUR_TRANSITION -> String.format(Locale.US,
                     "zoompan=z='1.05':d=%d:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=1080x1920:fps=30,avgblur=sizeX=3:sizeY=3",
@@ -1006,9 +1006,9 @@ public class RenderStep implements GenerationStep {
             case BRIGHTNESS_BURST -> String.format(Locale.US,
                     "zoompan=z='1.02':d=%d:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=1080x1920:fps=30,eq=brightness=0.15:saturation=1.1",
                     totalFrames);
-            // WHIP_PAN: agresywne pan w prawo (sygnatura przejścia sceny)
+            // WHIP_PAN: szybki pan prawo + silny poziomy motion blur
             case WHIP_PAN -> String.format(Locale.US,
-                    "zoompan=z='1.2':d=%d:x='(iw-iw/zoom)*on/%d':y='(ih-ih/zoom)/2':s=1080x1920:fps=30",
+                    "zoompan=z='1.15':d=%d:x='(iw-iw/zoom)*on/%d':y='(ih-ih/zoom)/2':s=1080x1920:fps=30,avgblur=sizeX=20:sizeY=1",
                     totalFrames, totalFrames);
             // COLOR_POP: skok saturacji na reveal/CTA
             case COLOR_POP -> String.format(Locale.US,

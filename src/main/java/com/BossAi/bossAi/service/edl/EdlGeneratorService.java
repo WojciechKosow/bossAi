@@ -1356,23 +1356,11 @@ public class EdlGeneratorService {
         return effects;
     }
 
-    /**
-     * Maps narration segment type to the most appropriate visual effect.
-     * Designed for Story/Hook format (hook → setup → point → climax → cta),
-     * but applies universally to any narration arc.
-     */
     private String mapNarrationTypeToEffect(String segType, int sceneIndex) {
         return switch (segType.toLowerCase()) {
-            case "hook"                   -> EffectRegistry.SMASH_ZOOM;
-            case "setup"                  -> EffectRegistry.ZOOM_IN;
-            case "point"                  -> sceneIndex % 2 == 0
-                                             ? EffectRegistry.PAN_RIGHT
-                                             : EffectRegistry.PAN_LEFT;
-            case "emphasis"               -> EffectRegistry.ZOOM_IN_OFFSET;
-            case "climax"                 -> EffectRegistry.BRIGHTNESS_BURST;
-            case "transition", "cooldown" -> EffectRegistry.BLUR_TRANSITION;
-            case "cta"                    -> EffectRegistry.KEN_BURNS;
-            default                       -> EffectRegistry.ZOOM_IN;
+            case "hook"              -> EffectRegistry.SMASH_ZOOM;
+            case "climax", "emphasis" -> EffectRegistry.WHIP_PAN;
+            default                  -> EffectRegistry.ZOOM_IN;
         };
     }
 
