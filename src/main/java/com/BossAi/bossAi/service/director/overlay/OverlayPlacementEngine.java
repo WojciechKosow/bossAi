@@ -39,17 +39,23 @@ public class OverlayPlacementEngine {
 
     // ── Position & size presets per category ─────────────────────────────────
 
+    // TikTok 9:16 frame — safe overlay zone: y 0.05–0.75 (subtitle area starts ~0.78)
+    // All positions: [x, y, width, height], normalized 0–1, x/y = top-left corner.
     private static final Map<String, float[]> POSITION_PRESETS = Map.of(
-            // category → [x, y, width, height]
-            "logo",        new float[]{0.76f, 0.80f, 0.20f, 0.113f},
-            "screenshot",  new float[]{0.10f, 0.12f, 0.80f, 0.45f},
-            "product",     new float[]{0.25f, 0.25f, 0.50f, 0.28f},
-            "cta",         new float[]{0.10f, 0.72f, 0.80f, 0.14f},
+            // logo — centered, prominent; used when narrator mentions a brand/platform
+            "logo",        new float[]{0.25f, 0.30f, 0.50f, 0.28f},
+            // screenshot — nearly full-width, upper zone so subtitles don't overlap
+            "screenshot",  new float[]{0.05f, 0.08f, 0.90f, 0.50f},
+            // product — centered, slightly upper half
+            "product",     new float[]{0.15f, 0.20f, 0.70f, 0.39f},
+            // cta — bottom strip, full width, above subtitle zone
+            "cta",         new float[]{0.05f, 0.65f, 0.90f, 0.12f},
+            // decoration — small top-right accent
             "decoration",  new float[]{0.78f, 0.04f, 0.18f, 0.10f}
     );
 
     private static final Map<String, String> DEFAULT_ANIMATION = Map.of(
-            "logo",       "fade_in",
+            "logo",       "zoom_in",
             "screenshot", "slide_up",
             "product",    "zoom_in",
             "cta",        "slide_up",
@@ -275,29 +281,39 @@ public class OverlayPlacementEngine {
                 NARRATION TRANSCRIPT (with word timings in ms):
                 %s
 
-                RULES:
-                1. Match overlays to narration moments using trigger_keywords. If the narrator says a keyword, \
-                show the overlay for the duration of that sentence/phrase.
-                2. Social logos (Discord, Twitter etc.) → show when the platform is mentioned, bottom-right corner.
-                3. Screenshots / to-do lists → show when the related topic starts, center or right side, 3-6 seconds.
-                4. CTA graphics → always in the last 20%% of the video, bottom center, large.
-                5. If no matching keywords are found in transcript, place the overlay at the most relevant moment \
-                or at 80%% of video duration.
-                6. Positions (x,y) are the TOP-LEFT corner of the overlay, normalized 0.0–1.0 of frame dimensions.
-                7. TikTok frame is 9:16 — keep overlays away from subtitle zone (y > 0.85).
+                POSITIONING RULES (TikTok 9:16 frame, safe zone y=0.05–0.75):
+                - logo (Discord, YouTube, Twitter, brand icon):
+                    CENTER of frame. x=0.25, y=0.30, width=0.50, height=0.28. Animation: zoom_in.
+                    Show for the duration of the sentence mentioning the platform.
+                - screenshot / stats / to-do list:
+                    Upper area, nearly full width. x=0.05, y=0.08, width=0.90, height=0.50. Animation: slide_up.
+                - product photo:
+                    Center, large. x=0.15, y=0.20, width=0.70, height=0.39. Animation: zoom_in.
+                - cta (call-to-action, QR code, "follow" graphic):
+                    Bottom strip ABOVE subtitles. x=0.05, y=0.65, width=0.90, height=0.12. Animation: slide_up.
+                    Always in the last 20%% of video.
+                - decoration (sticker, abstract):
+                    Small top-right corner. x=0.78, y=0.04, width=0.18, height=0.10. Animation: fade_in.
 
-                Return ONLY a JSON array (no markdown):
+                TIMING RULES:
+                1. Match each overlay to narration using trigger_keywords.
+                2. start_ms = word startMs − 200ms (slight lead-in).
+                3. end_ms = last word of the sentence/phrase + 300ms. Never use end_ms = start_ms + fixed_value.
+                4. If no keyword match: place at 80%% of video duration for the length of the nearest phrase.
+                5. Subtitles occupy y > 0.78 — never place overlays there.
+
+                Return ONLY a JSON array (no markdown, no wrapper object):
                 [
                   {
                     "overlay_index": 0,
                     "start_ms": 4200,
                     "end_ms": 7800,
-                    "x": 0.76,
-                    "y": 0.80,
-                    "width": 0.20,
-                    "height": 0.113,
+                    "x": 0.25,
+                    "y": 0.30,
+                    "width": 0.50,
+                    "height": 0.28,
                     "opacity": 1.0,
-                    "animation_in": "fade_in",
+                    "animation_in": "zoom_in",
                     "reasoning": "narrator says 'join our Discord' at 4.2s"
                   }
                 ]
