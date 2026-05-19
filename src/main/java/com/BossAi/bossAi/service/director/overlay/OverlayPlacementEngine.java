@@ -202,10 +202,12 @@ public class OverlayPlacementEngine {
                                                   GenerationContext context) {
         String transcript = buildTranscript(context);
         int totalDurationMs = estimateTotalDuration(context);
+        // Hard cap: overlay can never extend past the last TTS word + 300ms grace
+        int ttsEndMs = estimateTtsEnd(context);
 
         if (transcript.isBlank()) {
             log.warn("[OverlayEngine] No transcript available — applying default end-of-video placement");
-            return defaultPlacements(descriptors, totalDurationMs);
+            return clampEndMs(defaultPlacements(descriptors, totalDurationMs), ttsEndMs);
         }
 
         List<OverlayPlacement> gptResult;
@@ -217,9 +219,29 @@ public class OverlayPlacementEngine {
         }
         if (gptResult.isEmpty()) {
             log.info("[OverlayEngine] GPT returned no placements — using keyword fallback");
-            return keywordFallbackPlacements(descriptors, context, totalDurationMs);
+            return clampEndMs(keywordFallbackPlacements(descriptors, context, totalDurationMs), ttsEndMs);
         }
-        return gptResult;
+        return clampEndMs(gptResult, ttsEndMs);
+    }
+
+    /** Clamps every placement's endMs to at most maxEndMs. */
+    private List<OverlayPlacement> clampEndMs(List<OverlayPlacement> placements, int maxEndMs) {
+        for (OverlayPlacement p : placements) {
+            if (p.getEndMs() > maxEndMs) {
+                log.debug("[OverlayEngine] Clamping overlay endMs {} → {} (TTS end)", p.getEndMs(), maxEndMs);
+                p.setEndMs(maxEndMs);
+            }
+        }
+        return placements;
+    }
+
+    /** Returns the last word timing's endMs + 300ms — the furthest point TTS audio plays. */
+    private int estimateTtsEnd(GenerationContext context) {
+        List<SubtitleService.WordTiming> wordTimings = context.getWordTimings();
+        if (wordTimings != null && !wordTimings.isEmpty()) {
+            return wordTimings.get(wordTimings.size() - 1).endMs() + 300;
+        }
+        return estimateTotalDuration(context);
     }
 
     /**
@@ -247,12 +269,17 @@ public class OverlayPlacementEngine {
     }
 
     private int estimateTotalDuration(GenerationContext context) {
+        // Prefer TTS word timings (actual audio end) over scene sum — scene sum can include
+        // a music-only outro, which would incorrectly allow overlays to extend into silence.
+        List<SubtitleService.WordTiming> wordTimings = context.getWordTimings();
+        if (wordTimings != null && !wordTimings.isEmpty()) {
+            return wordTimings.get(wordTimings.size() - 1).endMs() + 500;
+        }
         if (context.getScenes() != null && !context.getScenes().isEmpty()) {
             return context.getScenes().stream()
                     .mapToInt(s -> s.getDurationMs())
                     .sum();
         }
-        // Rough fallback: 30 seconds
         return 30_000;
     }
 
