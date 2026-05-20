@@ -242,12 +242,10 @@ public class OverlayPlacementEngine {
         if (gptResult.isEmpty()) {
             log.info("[OverlayEngine] GPT returned no placements — using keyword fallback");
             return clampEndMs(
-                    enforceSceneBoundaries(
-                            keywordFallbackPlacements(descriptors, context, totalDurationMs, sceneBoundaries),
-                            sceneBoundaries, totalDurationMs),
+                    keywordFallbackPlacements(descriptors, context, totalDurationMs, sceneBoundaries),
                     ttsEndMs);
         }
-        return clampEndMs(enforceSceneBoundaries(gptResult, sceneBoundaries, totalDurationMs), ttsEndMs);
+        return clampEndMs(gptResult, ttsEndMs);
     }
 
     /**
@@ -258,24 +256,6 @@ public class OverlayPlacementEngine {
             if (p.getEndMs() > maxEndMs) {
                 log.debug("[OverlayEngine] Clamping overlay endMs {} → {} (TTS end)", p.getEndMs(), maxEndMs);
                 p.setEndMs(maxEndMs);
-            }
-        }
-        return placements;
-    }
-
-    /**
-     * Overrides each placement's endMs to the end of the scene that contains startMs.
-     * Ensures overlays never bleed past a scene cut regardless of what GPT returned.
-     */
-    private List<OverlayPlacement> enforceSceneBoundaries(List<OverlayPlacement> placements,
-                                                           int[][] sceneBoundaries,
-                                                           int totalDurationMs) {
-        for (OverlayPlacement p : placements) {
-            int sceneEnd = sceneEndForTime(p.getStartMs(), sceneBoundaries, totalDurationMs);
-            if (p.getEndMs() > sceneEnd) {
-                log.debug("[OverlayEngine] Enforcing scene boundary: overlay endMs {} → {} (scene end)",
-                        p.getEndMs(), sceneEnd);
-                p.setEndMs(sceneEnd);
             }
         }
         return placements;
@@ -451,11 +431,10 @@ public class OverlayPlacementEngine {
                    start_ms = timestamp of the first word AFTER that stop point − 100ms.
                    Example: "zanim zaczniemy [2s pause] dołącz na serwer discord" → keyword "discord" →
                    scan back: gap found before "dołącz" → start_ms = timestamp of "dołącz" − 100ms.
-                4. end_ms = the END of the scene that contains the keyword (from SCENE BOUNDARIES).
-                   The overlay stays visible for the entire remaining scene from the moment the
-                   keyword phrase begins — each scene corresponds to one TTS clip / one topic,
-                   so covering the full scene is the correct editorial choice.
-                5. If no keyword match: place at 80%% of video duration, end at the containing scene's end.
+                4. end_ms = VIDEO DURATION (the total duration value given at the top).
+                   Once triggered, the overlay stays visible until the very end of the video.
+                   Viewers need time to see and act on it (scan QR, find Discord, etc.).
+                5. If no keyword match: place at 80%% of video duration, end_ms = VIDEO DURATION.
                 6. Subtitles occupy y > 0.78 — never place overlays there.
 
                 Return ONLY a JSON array (no markdown, no wrapper object):
@@ -557,8 +536,8 @@ public class OverlayPlacementEngine {
                     //
                     // CRITICAL: bound the scan to the keyword's own scene start.
                     // Without this, when TTS clips are concatenated with no silence,
-                    // the scan crosses into the previous clip. Then enforceSceneBoundaries
-                    // clips endMs to that previous scene's end → overlay lasts only ~200ms.
+                    // the backward scan crosses into the previous clip, making startMs
+                    // land in the wrong scene.
                     int keywordSceneStart = sceneStartForTime(wt.startMs(), sceneBoundaries);
                     int clauseStartIdx = wtIdx;
                     for (int bwd = wtIdx - 1; bwd >= 0 && (wtIdx - bwd) <= 12; bwd--) {
@@ -571,20 +550,18 @@ public class OverlayPlacementEngine {
                     }
                     startMs = Math.max(0, wordTimings.get(clauseStartIdx).startMs() - 100);
 
-                    // The overlay covers the rest of the scene from the clause start.
-                    // Each TTS clip = one topic, so the overlay stays visible for the
-                    // full clip. appendOverlaySegments hard-clamps this to the actual
-                    // segment boundary, so no overflow into the next clip is possible.
-                    int sceneEnd = sceneEndForTime(wt.startMs(), sceneBoundaries, totalDurationMs);
-                    endMs = sceneEnd;
+                    // Overlay persists from the keyword trigger to the end of the video.
+                    // clampOverlayEnd in EdlGeneratorService caps to the last actual
+                    // primary segment boundary so it never exceeds real video length.
+                    endMs = totalDurationMs;
                     break;
                 }
             }
 
-            // No keyword match → put at 80% of video duration, end at containing scene boundary
+            // No keyword match → put at 80% of video duration, persist to video end
             if (startMs < 0) {
                 startMs = (int) (totalDurationMs * 0.80);
-                endMs = sceneEndForTime(startMs, sceneBoundaries, totalDurationMs);
+                endMs = totalDurationMs;
             }
 
             float[] pos = POSITION_PRESETS.getOrDefault(desc.getCategory(),
@@ -618,7 +595,7 @@ public class OverlayPlacementEngine {
             OverlayDescriptor desc = descriptors.get(i);
             int offset = i * 3000;
             int startMs = Math.min(windowStart + offset, totalDurationMs - 2000);
-            int endMs = Math.min(startMs + 3000, totalDurationMs);
+            int endMs = totalDurationMs;
 
             float[] pos = POSITION_PRESETS.getOrDefault(desc.getCategory(),
                     POSITION_PRESETS.get("decoration"));
