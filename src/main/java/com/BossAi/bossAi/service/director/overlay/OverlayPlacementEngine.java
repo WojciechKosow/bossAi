@@ -220,21 +220,40 @@ public class OverlayPlacementEngine {
         if (gptResult.isEmpty()) {
             log.info("[OverlayEngine] GPT returned no placements — using keyword fallback");
             return clampEndMs(
-                    keywordFallbackPlacements(descriptors, context, totalDurationMs, sceneBoundaries),
+                    enforceSceneBoundaries(
+                            keywordFallbackPlacements(descriptors, context, totalDurationMs, sceneBoundaries),
+                            sceneBoundaries, totalDurationMs),
                     ttsEndMs);
         }
-        return clampEndMs(gptResult, ttsEndMs);
+        return clampEndMs(enforceSceneBoundaries(gptResult, sceneBoundaries, totalDurationMs), ttsEndMs);
     }
 
     /**
-     * Clamps every placement's endMs to at most maxEndMs.
-     * Also enforces that endMs never crosses the scene boundary that contains startMs.
+     * Clamps every placement's endMs to at most maxEndMs (TTS end cap).
      */
     private List<OverlayPlacement> clampEndMs(List<OverlayPlacement> placements, int maxEndMs) {
         for (OverlayPlacement p : placements) {
             if (p.getEndMs() > maxEndMs) {
                 log.debug("[OverlayEngine] Clamping overlay endMs {} → {} (TTS end)", p.getEndMs(), maxEndMs);
                 p.setEndMs(maxEndMs);
+            }
+        }
+        return placements;
+    }
+
+    /**
+     * Overrides each placement's endMs to the end of the scene that contains startMs.
+     * Ensures overlays never bleed past a scene cut regardless of what GPT returned.
+     */
+    private List<OverlayPlacement> enforceSceneBoundaries(List<OverlayPlacement> placements,
+                                                           int[][] sceneBoundaries,
+                                                           int totalDurationMs) {
+        for (OverlayPlacement p : placements) {
+            int sceneEnd = sceneEndForTime(p.getStartMs(), sceneBoundaries, totalDurationMs);
+            if (p.getEndMs() > sceneEnd) {
+                log.debug("[OverlayEngine] Enforcing scene boundary: overlay endMs {} → {} (scene end)",
+                        p.getEndMs(), sceneEnd);
+                p.setEndMs(sceneEnd);
             }
         }
         return placements;
