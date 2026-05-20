@@ -561,16 +561,23 @@ public class OverlayPlacementEngine {
                     // sentence boundary (. ! ? ;) or a long pause (>500ms) after the keyword.
                     // Commas do NOT stop the scan (see endsWithSentenceMarker) so a single
                     // thought like "dołącz na discord, klikając w link" stays fully covered.
+                    //
+                    // IMPORTANT: cap to the scene boundary of the keyword's TTS clip.
+                    // TTS clips are often concatenated with no silence, so without this cap
+                    // the scan bleeds into the next clip and the overlay lingers there.
+                    int keywordSceneEnd = sceneEndForTime(wt.startMs(), sceneBoundaries, totalDurationMs);
                     int clauseEndIdx = wtIdx;
                     for (int fwd = wtIdx; fwd < wordTimings.size(); fwd++) {
+                        SubtitleService.WordTiming cur = wordTimings.get(fwd);
+                        if (cur.startMs() >= keywordSceneEnd) break; // don't cross into next clip
                         clauseEndIdx = fwd;
-                        if (endsWithSentenceMarker(wordTimings.get(fwd).word())) break;
+                        if (endsWithSentenceMarker(cur.word())) break;
                         if (fwd + 1 < wordTimings.size()) {
-                            int gapMs = wordTimings.get(fwd + 1).startMs() - wordTimings.get(fwd).endMs();
+                            int gapMs = wordTimings.get(fwd + 1).startMs() - cur.endMs();
                             if (gapMs > 500) break;
                         }
                     }
-                    endMs = wordTimings.get(clauseEndIdx).endMs() + 200;
+                    endMs = Math.min(wordTimings.get(clauseEndIdx).endMs() + 200, keywordSceneEnd);
                     break;
                 }
             }
