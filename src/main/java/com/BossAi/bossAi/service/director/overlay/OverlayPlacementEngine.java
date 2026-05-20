@@ -262,6 +262,11 @@ public class OverlayPlacementEngine {
     /**
      * Returns scene boundaries as int[][]{startMs, endMs} derived from context scenes.
      * Falls back to a single full-video "scene" when scenes aren't available.
+     *
+     * IMPORTANT: applies the same voice/scene scale factor that EdlGeneratorService uses
+     * so that boundaries are in the same coordinate system as WhisperX word timings.
+     * Without this, overlays calculated here would appear at wrong positions in the
+     * rendered video (unscaled scene time ≠ actual TTS audio time).
      */
     private int[][] buildSceneBoundaries(GenerationContext context) {
         var scenes = context.getScenes();
@@ -269,12 +274,34 @@ public class OverlayPlacementEngine {
             int total = estimateTotalDuration(context);
             return new int[][]{{0, total}};
         }
+
+        // Mirror the scaling logic from EdlGeneratorService so boundaries match the
+        // actual rendered timeline (word timings are in TTS audio time, not raw scene time).
+        int sceneDurationMs = scenes.stream().mapToInt(s -> s.getDurationMs()).sum();
+        int voiceDurationMs = 0;
+        List<SubtitleService.WordTiming> wordTimings = context.getWordTimings();
+        if (wordTimings != null && !wordTimings.isEmpty()) {
+            voiceDurationMs = wordTimings.get(wordTimings.size() - 1).endMs();
+        }
+        double scale = (voiceDurationMs > sceneDurationMs && sceneDurationMs > 0)
+                ? (double) voiceDurationMs / sceneDurationMs
+                : 1.0;
+
+        if (scale != 1.0) {
+            log.debug("[OverlayEngine] Scaling scene boundaries by {} (voice={}ms, scenes={}ms)",
+                    String.format("%.3f", scale), voiceDurationMs, sceneDurationMs);
+        }
+
         int[][] boundaries = new int[scenes.size()][2];
         int cursor = 0;
         for (int i = 0; i < scenes.size(); i++) {
             boundaries[i][0] = cursor;
-            cursor += scenes.get(i).getDurationMs();
+            cursor += (int)(scenes.get(i).getDurationMs() * scale);
             boundaries[i][1] = cursor;
+        }
+        // Snap last boundary to actual voice end — eliminates rounding drift.
+        if (voiceDurationMs > 0) {
+            boundaries[boundaries.length - 1][1] = voiceDurationMs;
         }
         return boundaries;
     }
@@ -393,9 +420,14 @@ public class OverlayPlacementEngine {
 
                 TIMING RULES — CRITICAL:
                 1. Match each overlay to narration using trigger_keywords.
-                2. Find which SCENE contains the keyword (use SCENE BOUNDARIES above).
-                3. start_ms = moment the keyword is first spoken − 200ms.
-                4. end_ms = END of that scene (from SCENE BOUNDARIES). The overlay must NEVER cross a scene boundary — it should disappear exactly when the scene changes.
+                2. Find the first word in the transcript that matches a trigger_keyword.
+                3. start_ms = that word's timestamp − 200ms (minimum 0).
+                4. end_ms: scan FORWARD in the transcript from the matched keyword and find
+                   the last word that is still part of the same topic/passage about this overlay.
+                   Use that word's timestamp + 500ms as end_ms.
+                   end_ms must NEVER exceed the containing scene's boundary (from SCENE BOUNDARIES above).
+                   The overlay should disappear naturally when the narrator finishes talking about this
+                   topic — NOT necessarily at the exact scene cut.
                 5. If no keyword match: place at 80%% of video duration, end at the containing scene's end.
                 6. Subtitles occupy y > 0.78 — never place overlays there.
 
@@ -484,16 +516,26 @@ public class OverlayPlacementEngine {
             int endMs = -1;
 
             if (wordTimings != null && !desc.getTriggerKeywords().isEmpty()) {
-                for (SubtitleService.WordTiming wt : wordTimings) {
+                for (int wtIdx = 0; wtIdx < wordTimings.size(); wtIdx++) {
+                    SubtitleService.WordTiming wt = wordTimings.get(wtIdx);
                     String lower = wt.word().toLowerCase().replaceAll("[^a-z0-9]", "");
                     boolean matches = desc.getTriggerKeywords().stream()
                             .anyMatch(kw -> lower.contains(kw.toLowerCase()));
                     if (!matches) continue;
 
-                    // Start from the scene boundary that contains this keyword
-                    startMs = Math.max(0, sceneStartForTime(wt.startMs(), sceneBoundaries));
-                    // End exactly at the scene boundary — overlay disappears with the scene
-                    endMs = sceneEndForTime(wt.startMs(), sceneBoundaries, totalDurationMs);
+                    // Start exactly when the keyword is spoken (same logic as GPT path)
+                    startMs = Math.max(0, wt.startMs() - 200);
+
+                    // Scan forward to find the last word still in the same scene —
+                    // overlay should cover the entire passage about this topic.
+                    int sceneEnd = sceneEndForTime(wt.startMs(), sceneBoundaries, totalDurationMs);
+                    int passageEndMs = wt.endMs();
+                    for (int fwd = wtIdx + 1; fwd < wordTimings.size(); fwd++) {
+                        SubtitleService.WordTiming next = wordTimings.get(fwd);
+                        if (next.startMs() >= sceneEnd) break;
+                        passageEndMs = next.endMs();
+                    }
+                    endMs = Math.min(passageEndMs + 500, sceneEnd);
                     break;
                 }
             }
