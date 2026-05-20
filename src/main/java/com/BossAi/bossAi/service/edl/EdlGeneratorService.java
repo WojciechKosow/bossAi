@@ -693,18 +693,17 @@ public class EdlGeneratorService {
     }
 
     /**
-     * Returns endMs clamped to the endMs of the last primary segment (layer=0) that overlaps
-     * with the overlay's time range [startMs, endMs]. Overlays may span multiple scene cuts.
-     * If no segments overlap, returns the original endMs unchanged.
+     * Returns endMs clamped to the endMs of the primary segment (layer=0) that contains startMs.
+     * One overlay = one TTS clip — prevents the overlay bleeding into the next clip.
+     * If no segment contains startMs, returns the original endMs unchanged.
      */
     private int clampOverlayEnd(int startMs, int endMs, List<EdlSegment> primarySegments) {
-        int lastEnd = -1;
         for (EdlSegment seg : primarySegments) {
-            if (seg.getStartMs() < endMs && seg.getEndMs() > startMs) {
-                lastEnd = Math.max(lastEnd, seg.getEndMs());
+            if (startMs >= seg.getStartMs() && startMs < seg.getEndMs()) {
+                return Math.min(endMs, seg.getEndMs());
             }
         }
-        return lastEnd > 0 ? Math.min(endMs, lastEnd) : endMs;
+        return endMs;
     }
 
     // =========================================================================
