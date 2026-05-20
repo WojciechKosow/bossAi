@@ -431,10 +431,16 @@ public class OverlayPlacementEngine {
                    start_ms = timestamp of the first word AFTER that stop point − 100ms.
                    Example: "zanim zaczniemy [2s pause] dołącz na serwer discord" → keyword "discord" →
                    scan back: gap found before "dołącz" → start_ms = timestamp of "dołącz" − 100ms.
-                4. end_ms = VIDEO DURATION (the total duration value given at the top).
-                   Once triggered, the overlay stays visible until the very end of the video.
-                   Viewers need time to see and act on it (scan QR, find Discord, etc.).
-                5. If no keyword match: place at 80%% of video duration, end_ms = VIDEO DURATION.
+                4. end_ms: the overlay is visible ONLY while the topic is being spoken.
+                   Scan FORWARD from the matched keyword and STOP at whichever comes first:
+                     a) A word ending with SENTENCE punctuation (period, exclamation, question, semicolon).
+                        Commas do NOT stop the scan — keep one continuous thought together,
+                        e.g. "dołącz na discord, klikając w link" stays fully covered.
+                     b) A gap >500ms between two consecutive words (a pause = topic ended).
+                   end_ms = timestamp of the END of that last word + 200ms.
+                   Do NOT extend the overlay to the end of the video — it must disappear once
+                   the narrator stops talking about it.
+                5. If no keyword match: place at 80%% of video duration with a ~3500ms window.
                 6. Subtitles occupy y > 0.78 — never place overlays there.
 
                 Return ONLY a JSON array (no markdown, no wrapper object):
@@ -550,18 +556,29 @@ public class OverlayPlacementEngine {
                     }
                     startMs = Math.max(0, wordTimings.get(clauseStartIdx).startMs() - 100);
 
-                    // Overlay persists from the keyword trigger to the end of the video.
-                    // clampOverlayEnd in EdlGeneratorService caps to the last actual
-                    // primary segment boundary so it never exceeds real video length.
-                    endMs = totalDurationMs;
+                    // Scan FORWARD to find where the mention ends. The overlay is visible
+                    // exactly while the topic is being spoken — it ends at the first hard
+                    // sentence boundary (. ! ? ;) or a long pause (>500ms) after the keyword.
+                    // Commas do NOT stop the scan (see endsWithSentenceMarker) so a single
+                    // thought like "dołącz na discord, klikając w link" stays fully covered.
+                    int clauseEndIdx = wtIdx;
+                    for (int fwd = wtIdx; fwd < wordTimings.size(); fwd++) {
+                        clauseEndIdx = fwd;
+                        if (endsWithSentenceMarker(wordTimings.get(fwd).word())) break;
+                        if (fwd + 1 < wordTimings.size()) {
+                            int gapMs = wordTimings.get(fwd + 1).startMs() - wordTimings.get(fwd).endMs();
+                            if (gapMs > 500) break;
+                        }
+                    }
+                    endMs = wordTimings.get(clauseEndIdx).endMs() + 200;
                     break;
                 }
             }
 
-            // No keyword match → put at 80% of video duration, persist to video end
+            // No keyword match → no spoken cue to anchor to; show a short window near the end.
             if (startMs < 0) {
                 startMs = (int) (totalDurationMs * 0.80);
-                endMs = totalDurationMs;
+                endMs = Math.min(startMs + 3500, totalDurationMs);
             }
 
             float[] pos = POSITION_PRESETS.getOrDefault(desc.getCategory(),
@@ -595,7 +612,7 @@ public class OverlayPlacementEngine {
             OverlayDescriptor desc = descriptors.get(i);
             int offset = i * 3000;
             int startMs = Math.min(windowStart + offset, totalDurationMs - 2000);
-            int endMs = totalDurationMs;
+            int endMs = Math.min(startMs + 3500, totalDurationMs);
 
             float[] pos = POSITION_PRESETS.getOrDefault(desc.getCategory(),
                     POSITION_PRESETS.get("decoration"));
