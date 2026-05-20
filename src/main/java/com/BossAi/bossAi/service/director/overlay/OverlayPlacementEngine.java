@@ -449,14 +449,10 @@ public class OverlayPlacementEngine {
                    start_ms = timestamp of the first word AFTER that stop point − 100ms.
                    Example: "zanim zaczniemy [2s pause] dołącz na serwer discord" → keyword "discord" →
                    scan back: gap found before "dołącz" → start_ms = timestamp of "dołącz" − 100ms.
-                4. end_ms: find the END OF THE FULL THOUGHT about this topic.
-                   Scan forward word by word from the matched keyword and STOP at whichever comes first:
-                     a) A word ending with a SENTENCE boundary: period (.), exclamation (!), question (?), semicolon (;)
-                        NOTE: commas do NOT stop the scan — "discord, klikając w link" must stay visible through the comma.
-                     b) A gap >500ms between two consecutive word timestamps (natural pause = new thought begins)
-                     c) 25 words scanned past the keyword (absolute safety limit)
-                   end_ms = last included word timestamp + 400ms
-                   end_ms must NEVER exceed the containing scene boundary from SCENE BOUNDARIES.
+                4. end_ms = the END of the scene that contains the keyword (from SCENE BOUNDARIES).
+                   The overlay stays visible for the entire remaining scene from the moment the
+                   keyword phrase begins — each scene corresponds to one TTS clip / one topic,
+                   so covering the full scene is the correct editorial choice.
                 5. If no keyword match: place at 80%% of video duration, end at the containing scene's end.
                 6. Subtitles occupy y > 0.78 — never place overlays there.
 
@@ -566,26 +562,12 @@ public class OverlayPlacementEngine {
                     }
                     startMs = Math.max(0, wordTimings.get(clauseStartIdx).startMs() - 100);
 
-                    // Find the end of the full thought about this topic.
-                    // Stop at: sentence-ending punctuation (.!?;), natural pause >500ms, or 25 words.
-                    // Commas do NOT stop the scan — "discord, klikając w link" stays visible.
-                    // Scene boundary is a hard cap of last resort only.
+                    // The overlay covers the rest of the scene from the clause start.
+                    // Each TTS clip = one topic, so the overlay stays visible for the
+                    // full clip. appendOverlaySegments hard-clamps this to the actual
+                    // segment boundary, so no overflow into the next clip is possible.
                     int sceneEnd = sceneEndForTime(wt.startMs(), sceneBoundaries, totalDurationMs);
-                    int passageEndMs = wt.endMs();
-                    if (!endsWithSentenceMarker(wt.word())) {
-                        int prevWordEnd = wt.endMs();
-                        int wordsScanned = 0;
-                        for (int fwd = wtIdx + 1; fwd < wordTimings.size() && wordsScanned < 25; fwd++) {
-                            SubtitleService.WordTiming next = wordTimings.get(fwd);
-                            if (next.startMs() >= sceneEnd) break;
-                            if (next.startMs() - prevWordEnd > 500) break; // pause = new thought
-                            passageEndMs = next.endMs();
-                            prevWordEnd = next.endMs();
-                            wordsScanned++;
-                            if (endsWithSentenceMarker(next.word())) break;
-                        }
-                    }
-                    endMs = Math.min(passageEndMs + 400, sceneEnd);
+                    endMs = sceneEnd;
                     break;
                 }
             }
