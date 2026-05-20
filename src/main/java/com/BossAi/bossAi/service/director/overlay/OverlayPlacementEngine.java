@@ -62,11 +62,26 @@ public class OverlayPlacementEngine {
             "decoration", "fade_in"
     );
 
-    /** Returns true when a word ends a clause or sentence (., , ! ? ;). */
+    /**
+     * Clause boundary for BACKWARD scan (finding clause start).
+     * Comma included — stops us from pulling in the preceding unrelated clause.
+     */
     private static boolean endsWithClauseMarker(String word) {
         if (word == null || word.isEmpty()) return false;
         char last = word.charAt(word.length() - 1);
         return last == '.' || last == ',' || last == '!' || last == '?' || last == ';';
+    }
+
+    /**
+     * Sentence boundary for FORWARD scan (finding overlay end).
+     * Comma intentionally excluded — "dołącz na discord, klikając w link" should
+     * keep the overlay visible through the full thought, not cut at the comma.
+     * Only hard sentence endings and long pauses stop the forward scan.
+     */
+    private static boolean endsWithSentenceMarker(String word) {
+        if (word == null || word.isEmpty()) return false;
+        char last = word.charAt(word.length() - 1);
+        return last == '.' || last == '!' || last == '?' || last == ';';
     }
 
     // =========================================================================
@@ -434,14 +449,14 @@ public class OverlayPlacementEngine {
                    start_ms = timestamp of the first word AFTER that stop point − 100ms.
                    Example: "zanim zaczniemy [2s pause] dołącz na serwer discord" → keyword "discord" →
                    scan back: gap found before "dołącz" → start_ms = timestamp of "dołącz" − 100ms.
-                4. end_ms: find the END OF THE CLAUSE containing the keyword.
+                4. end_ms: find the END OF THE FULL THOUGHT about this topic.
                    Scan forward word by word from the matched keyword and STOP at whichever comes first:
-                     a) A word whose text ends with clause punctuation: period (.), comma (,), exclamation (!), question (?), semicolon (;)
-                     b) A gap >500ms between two consecutive word timestamps (natural speech pause / sentence break)
-                     c) 15 words scanned past the keyword
+                     a) A word ending with a SENTENCE boundary: period (.), exclamation (!), question (?), semicolon (;)
+                        NOTE: commas do NOT stop the scan — "discord, klikając w link" must stay visible through the comma.
+                     b) A gap >500ms between two consecutive word timestamps (natural pause = new thought begins)
+                     c) 25 words scanned past the keyword (absolute safety limit)
                    end_ms = last included word timestamp + 400ms
                    end_ms must NEVER exceed the containing scene boundary from SCENE BOUNDARIES.
-                   IMPORTANT: the overlay must disappear when the narrator FINISHES THE SENTENCE about this topic, NOT at the end of the scene.
                 5. If no keyword match: place at 80%% of video duration, end at the containing scene's end.
                 6. Subtitles occupy y > 0.78 — never place overlays there.
 
@@ -551,22 +566,23 @@ public class OverlayPlacementEngine {
                     }
                     startMs = Math.max(0, wordTimings.get(clauseStartIdx).startMs() - 100);
 
-                    // Find the end of the spoken clause about this topic.
-                    // Stop at: clause-ending punctuation (.,!?;), natural pause >500ms, or 15 words.
-                    // Scene boundary is a cap of last resort only.
+                    // Find the end of the full thought about this topic.
+                    // Stop at: sentence-ending punctuation (.!?;), natural pause >500ms, or 25 words.
+                    // Commas do NOT stop the scan — "discord, klikając w link" stays visible.
+                    // Scene boundary is a hard cap of last resort only.
                     int sceneEnd = sceneEndForTime(wt.startMs(), sceneBoundaries, totalDurationMs);
                     int passageEndMs = wt.endMs();
-                    if (!endsWithClauseMarker(wt.word())) {
+                    if (!endsWithSentenceMarker(wt.word())) {
                         int prevWordEnd = wt.endMs();
                         int wordsScanned = 0;
-                        for (int fwd = wtIdx + 1; fwd < wordTimings.size() && wordsScanned < 15; fwd++) {
+                        for (int fwd = wtIdx + 1; fwd < wordTimings.size() && wordsScanned < 25; fwd++) {
                             SubtitleService.WordTiming next = wordTimings.get(fwd);
                             if (next.startMs() >= sceneEnd) break;
-                            if (next.startMs() - prevWordEnd > 500) break; // natural clause pause
+                            if (next.startMs() - prevWordEnd > 500) break; // pause = new thought
                             passageEndMs = next.endMs();
                             prevWordEnd = next.endMs();
                             wordsScanned++;
-                            if (endsWithClauseMarker(next.word())) break;
+                            if (endsWithSentenceMarker(next.word())) break;
                         }
                     }
                     endMs = Math.min(passageEndMs + 400, sceneEnd);
