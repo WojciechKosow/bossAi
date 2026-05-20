@@ -642,11 +642,12 @@ public class EdlGeneratorService {
         List<EdlSegment> overlaySegments = new ArrayList<>();
 
         for (OverlayPlacement placement : placements) {
-            // Clamp endMs to the actual rendered segment boundary — prevents overlays
-            // from bleeding into the next scene when scene duration estimates were wrong.
+            // Snap endMs to the actual rendered scene boundary so the overlay ends exactly
+            // when its scene (background + subtitles + TTS) ends, correcting any drift in
+            // the placement engine's estimated boundaries.
             int endMs = clampOverlayEnd(placement.getStartMs(), placement.getEndMs(), primarySegments);
             if (endMs != placement.getEndMs()) {
-                log.info("[EdlGenerator] Overlay endMs clamped {} → {}ms (actual segment boundary) asset={}",
+                log.info("[EdlGenerator] Overlay endMs snapped {} → {}ms (scene boundary) asset={}",
                         placement.getEndMs(), endMs, placement.getOverlayAssetId());
             }
 
@@ -693,14 +694,16 @@ public class EdlGeneratorService {
     }
 
     /**
-     * Returns endMs clamped to the endMs of the primary segment (layer=0) that contains startMs.
-     * One overlay = one TTS clip — prevents the overlay bleeding into the next clip.
+     * Snaps endMs to the END of the primary segment (layer=0) that contains startMs.
+     * An overlay belongs to exactly one scene/TTS clip — it appears at its trigger and
+     * disappears together with that scene's background and subtitles, regardless of any
+     * (possibly inaccurate) estimated end the placement engine computed.
      * If no segment contains startMs, returns the original endMs unchanged.
      */
     private int clampOverlayEnd(int startMs, int endMs, List<EdlSegment> primarySegments) {
         for (EdlSegment seg : primarySegments) {
             if (startMs >= seg.getStartMs() && startMs < seg.getEndMs()) {
-                return Math.min(endMs, seg.getEndMs());
+                return seg.getEndMs();
             }
         }
         return endMs;
