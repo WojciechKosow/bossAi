@@ -444,8 +444,10 @@ public class OverlayPlacementEngine {
                 1. Match each overlay to narration using trigger_keywords.
                 2. Find the first word in the transcript that matches a trigger_keyword.
                 3. start_ms: scan BACKWARDS from the matched keyword to find the start of its clause.
-                   Go word by word backwards and STOP when you hit a gap >500ms between two consecutive
-                   words OR a word ending with clause punctuation (period, comma, exclamation, question, semicolon).
+                   Go word by word backwards and STOP at whichever comes first:
+                     a) A gap >500ms between two consecutive words
+                     b) A word ending with clause punctuation (period, comma, exclamation, question, semicolon)
+                     c) The START of the containing scene (from SCENE BOUNDARIES) — NEVER go before the scene start.
                    start_ms = timestamp of the first word AFTER that stop point − 100ms.
                    Example: "zanim zaczniemy [2s pause] dołącz na serwer discord" → keyword "discord" →
                    scan back: gap found before "dołącz" → start_ms = timestamp of "dołącz" − 100ms.
@@ -552,10 +554,17 @@ public class OverlayPlacementEngine {
                     // Scan BACKWARDS to find the start of the clause containing the keyword.
                     // E.g. keyword="discord" in "zanim zaczniemy [pause] dołącz na serwer discord"
                     // → clause starts at "dołącz", not at "discord".
+                    //
+                    // CRITICAL: bound the scan to the keyword's own scene start.
+                    // Without this, when TTS clips are concatenated with no silence,
+                    // the scan crosses into the previous clip. Then enforceSceneBoundaries
+                    // clips endMs to that previous scene's end → overlay lasts only ~200ms.
+                    int keywordSceneStart = sceneStartForTime(wt.startMs(), sceneBoundaries);
                     int clauseStartIdx = wtIdx;
                     for (int bwd = wtIdx - 1; bwd >= 0 && (wtIdx - bwd) <= 12; bwd--) {
                         SubtitleService.WordTiming prev = wordTimings.get(bwd);
                         SubtitleService.WordTiming next = wordTimings.get(bwd + 1);
+                        if (prev.startMs() < keywordSceneStart) break; // never cross scene boundary
                         int gapMs = next.startMs() - prev.endMs();
                         if (gapMs > 500 || endsWithClauseMarker(prev.word())) break;
                         clauseStartIdx = bwd;
