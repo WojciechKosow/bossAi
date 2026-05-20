@@ -202,8 +202,8 @@ public class OverlayPlacementEngine {
                                                   GenerationContext context) {
         String transcript = buildTranscript(context);
         int totalDurationMs = estimateTotalDuration(context);
-        // Hard cap: overlay can never extend past the last TTS word + 300ms grace
         int ttsEndMs = estimateTtsEnd(context);
+        int[][] sceneBoundaries = buildSceneBoundaries(context);
 
         if (transcript.isBlank()) {
             log.warn("[OverlayEngine] No transcript available — applying default end-of-video placement");
@@ -212,19 +212,24 @@ public class OverlayPlacementEngine {
 
         List<OverlayPlacement> gptResult;
         try {
-            gptResult = callGptForPlacements(descriptors, transcript, totalDurationMs);
+            gptResult = callGptForPlacements(descriptors, transcript, totalDurationMs, sceneBoundaries);
         } catch (Exception e) {
             log.warn("[OverlayEngine] GPT placement failed — using keyword fallback: {}", e.getMessage());
             gptResult = List.of();
         }
         if (gptResult.isEmpty()) {
             log.info("[OverlayEngine] GPT returned no placements — using keyword fallback");
-            return clampEndMs(keywordFallbackPlacements(descriptors, context, totalDurationMs), ttsEndMs);
+            return clampEndMs(
+                    keywordFallbackPlacements(descriptors, context, totalDurationMs, sceneBoundaries),
+                    ttsEndMs);
         }
         return clampEndMs(gptResult, ttsEndMs);
     }
 
-    /** Clamps every placement's endMs to at most maxEndMs. */
+    /**
+     * Clamps every placement's endMs to at most maxEndMs.
+     * Also enforces that endMs never crosses the scene boundary that contains startMs.
+     */
     private List<OverlayPlacement> clampEndMs(List<OverlayPlacement> placements, int maxEndMs) {
         for (OverlayPlacement p : placements) {
             if (p.getEndMs() > maxEndMs) {
@@ -233,6 +238,42 @@ public class OverlayPlacementEngine {
             }
         }
         return placements;
+    }
+
+    /**
+     * Returns scene boundaries as int[][]{startMs, endMs} derived from context scenes.
+     * Falls back to a single full-video "scene" when scenes aren't available.
+     */
+    private int[][] buildSceneBoundaries(GenerationContext context) {
+        var scenes = context.getScenes();
+        if (scenes == null || scenes.isEmpty()) {
+            int total = estimateTotalDuration(context);
+            return new int[][]{{0, total}};
+        }
+        int[][] boundaries = new int[scenes.size()][2];
+        int cursor = 0;
+        for (int i = 0; i < scenes.size(); i++) {
+            boundaries[i][0] = cursor;
+            cursor += scenes.get(i).getDurationMs();
+            boundaries[i][1] = cursor;
+        }
+        return boundaries;
+    }
+
+    /** Returns the endMs of the scene that contains timeMs, or totalDurationMs if none found. */
+    private int sceneEndForTime(int timeMs, int[][] sceneBoundaries, int totalDurationMs) {
+        for (int[] b : sceneBoundaries) {
+            if (timeMs >= b[0] && timeMs < b[1]) return b[1];
+        }
+        return totalDurationMs;
+    }
+
+    /** Returns the startMs of the scene that contains timeMs, or 0 if none found. */
+    private int sceneStartForTime(int timeMs, int[][] sceneBoundaries) {
+        for (int[] b : sceneBoundaries) {
+            if (timeMs >= b[0] && timeMs < b[1]) return b[0];
+        }
+        return 0;
     }
 
     /** Returns the last word timing's endMs + 300ms — the furthest point TTS audio plays. */
@@ -285,7 +326,8 @@ public class OverlayPlacementEngine {
 
     private List<OverlayPlacement> callGptForPlacements(List<OverlayDescriptor> descriptors,
                                                          String transcript,
-                                                         int totalDurationMs) throws Exception {
+                                                         int totalDurationMs,
+                                                         int[][] sceneBoundaries) throws Exception {
         StringBuilder overlayDesc = new StringBuilder();
         for (int i = 0; i < descriptors.size(); i++) {
             OverlayDescriptor d = descriptors.get(i);
@@ -297,11 +339,20 @@ public class OverlayPlacementEngine {
                        .append("\n");
         }
 
+        StringBuilder sceneInfo = new StringBuilder();
+        for (int i = 0; i < sceneBoundaries.length; i++) {
+            sceneInfo.append("  Scene ").append(i).append(": ")
+                     .append(sceneBoundaries[i][0]).append("ms – ")
+                     .append(sceneBoundaries[i][1]).append("ms\n");
+        }
+
         String prompt = """
                 You are a professional TikTok video editor. Decide WHEN and WHERE to show each overlay image.
 
                 VIDEO DURATION: %dms
 
+                SCENE BOUNDARIES (the video clip changes exactly at these times):
+                %s
                 OVERLAY IMAGES:
                 %s
 
@@ -311,7 +362,6 @@ public class OverlayPlacementEngine {
                 POSITIONING RULES (TikTok 9:16 frame, safe zone y=0.05–0.75):
                 - logo (Discord, YouTube, Twitter, brand icon):
                     CENTER of frame. x=0.25, y=0.30, width=0.50, height=0.28. Animation: zoom_in.
-                    Show for the duration of the sentence mentioning the platform.
                 - screenshot / stats / to-do list:
                     Upper area, nearly full width. x=0.05, y=0.08, width=0.90, height=0.50. Animation: slide_up.
                 - product photo:
@@ -322,12 +372,12 @@ public class OverlayPlacementEngine {
                 - decoration (sticker, abstract):
                     Small top-right corner. x=0.78, y=0.04, width=0.18, height=0.10. Animation: fade_in.
 
-                TIMING RULES:
+                TIMING RULES — CRITICAL:
                 1. Match each overlay to narration using trigger_keywords.
-                2. Find the FULL SENTENCE that contains the keyword (scan back to gap >300ms or .!? end, scan forward to gap >300ms or .!? end).
-                3. start_ms = first word of that sentence − 200ms.
-                4. end_ms = last word of that SAME sentence + 300ms. NEVER extend past the sentence boundary into an unrelated sentence.
-                5. If no keyword match: place at 80%% of video duration for the length of the nearest phrase (max 3s).
+                2. Find which SCENE contains the keyword (use SCENE BOUNDARIES above).
+                3. start_ms = moment the keyword is first spoken − 200ms.
+                4. end_ms = END of that scene (from SCENE BOUNDARIES). The overlay must NEVER cross a scene boundary — it should disappear exactly when the scene changes.
+                5. If no keyword match: place at 80%% of video duration, end at the containing scene's end.
                 6. Subtitles occupy y > 0.78 — never place overlays there.
 
                 Return ONLY a JSON array (no markdown, no wrapper object):
@@ -335,8 +385,7 @@ public class OverlayPlacementEngine {
                   {
                     "overlay_index": 0,
                     "start_ms": 4200,
-                    "end_ms": 7800,
-                    "x": 0.25,
+                    "end_ms": 5800,
                     "y": 0.30,
                     "width": 0.50,
                     "height": 0.28,
@@ -400,11 +449,14 @@ public class OverlayPlacementEngine {
 
     /**
      * Keyword-based fallback when GPT placement fails.
-     * Scans word timings for trigger keywords, places overlay around that window.
+     * Finds the keyword in word timings, then uses SCENE BOUNDARIES to determine
+     * the overlay window — overlay starts when keyword is spoken and ends when the
+     * containing scene ends. This ensures the overlay never bleeds into the next scene.
      */
     private List<OverlayPlacement> keywordFallbackPlacements(List<OverlayDescriptor> descriptors,
                                                               GenerationContext context,
-                                                              int totalDurationMs) {
+                                                              int totalDurationMs,
+                                                              int[][] sceneBoundaries) {
         List<SubtitleService.WordTiming> wordTimings = context.getWordTimings();
         List<OverlayPlacement> result = new ArrayList<>();
 
@@ -413,47 +465,24 @@ public class OverlayPlacementEngine {
             int endMs = -1;
 
             if (wordTimings != null && !desc.getTriggerKeywords().isEmpty()) {
-                for (int wi = 0; wi < wordTimings.size(); wi++) {
-                    SubtitleService.WordTiming wt = wordTimings.get(wi);
+                for (SubtitleService.WordTiming wt : wordTimings) {
                     String lower = wt.word().toLowerCase().replaceAll("[^a-z0-9]", "");
                     boolean matches = desc.getTriggerKeywords().stream()
                             .anyMatch(kw -> lower.contains(kw.toLowerCase()));
                     if (!matches) continue;
 
-                    // Scan BACKWARD to find sentence start:
-                    // stop when gap to previous word > 300ms or previous word ends sentence
-                    int sentenceStartIdx = wi;
-                    for (int back = wi - 1; back >= 0 && wi - back <= 15; back--) {
-                        SubtitleService.WordTiming prev = wordTimings.get(back);
-                        SubtitleService.WordTiming curr = wordTimings.get(back + 1);
-                        if (curr.startMs() - prev.endMs() > 300) break;
-                        if (prev.word().matches(".*[.!?]$")) break;
-                        sentenceStartIdx = back;
-                    }
-
-                    // Scan FORWARD to find sentence end:
-                    // stop when current word ends with . ! ? OR gap to next word > 300ms
-                    int sentenceEndMs = wt.endMs();
-                    for (int look = wi; look < wordTimings.size() && look < wi + 20; look++) {
-                        SubtitleService.WordTiming curr = wordTimings.get(look);
-                        sentenceEndMs = curr.endMs();
-                        if (curr.word().matches(".*[.!?,;\\-]$")) break;
-                        if (look + 1 < wordTimings.size()) {
-                            SubtitleService.WordTiming next = wordTimings.get(look + 1);
-                            if (next.startMs() - curr.endMs() > 300) break;
-                        }
-                    }
-
-                    startMs = Math.max(0, wordTimings.get(sentenceStartIdx).startMs() - 200);
-                    endMs = Math.min(totalDurationMs, sentenceEndMs + 300);
+                    // Start from the scene boundary that contains this keyword
+                    startMs = Math.max(0, sceneStartForTime(wt.startMs(), sceneBoundaries));
+                    // End exactly at the scene boundary — overlay disappears with the scene
+                    endMs = sceneEndForTime(wt.startMs(), sceneBoundaries, totalDurationMs);
                     break;
                 }
             }
 
-            // No keyword match → put at 80% of video duration
+            // No keyword match → put at 80% of video duration, end at containing scene boundary
             if (startMs < 0) {
                 startMs = (int) (totalDurationMs * 0.80);
-                endMs = Math.min(totalDurationMs, startMs + 3000);
+                endMs = sceneEndForTime(startMs, sceneBoundaries, totalDurationMs);
             }
 
             float[] pos = POSITION_PRESETS.getOrDefault(desc.getCategory(),
