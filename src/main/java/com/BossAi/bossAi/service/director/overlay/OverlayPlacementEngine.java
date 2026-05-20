@@ -62,6 +62,13 @@ public class OverlayPlacementEngine {
             "decoration", "fade_in"
     );
 
+    /** Returns true when a word ends a clause or sentence (., , ! ? ;). */
+    private static boolean endsWithClauseMarker(String word) {
+        if (word == null || word.isEmpty()) return false;
+        char last = word.charAt(word.length() - 1);
+        return last == '.' || last == ',' || last == '!' || last == '?' || last == ';';
+    }
+
     // =========================================================================
     // PUBLIC API
     // =========================================================================
@@ -422,12 +429,14 @@ public class OverlayPlacementEngine {
                 1. Match each overlay to narration using trigger_keywords.
                 2. Find the first word in the transcript that matches a trigger_keyword.
                 3. start_ms = that word's timestamp − 200ms (minimum 0).
-                4. end_ms: scan FORWARD in the transcript from the matched keyword and find
-                   the last word that is still part of the same topic/passage about this overlay.
-                   Use that word's timestamp + 500ms as end_ms.
-                   end_ms must NEVER exceed the containing scene's boundary (from SCENE BOUNDARIES above).
-                   The overlay should disappear naturally when the narrator finishes talking about this
-                   topic — NOT necessarily at the exact scene cut.
+                4. end_ms: find the END OF THE CLAUSE containing the keyword.
+                   Scan forward word by word from the matched keyword and STOP at whichever comes first:
+                     a) A word whose text ends with clause punctuation: period (.), comma (,), exclamation (!), question (?), semicolon (;)
+                     b) A gap >500ms between two consecutive word timestamps (natural speech pause / sentence break)
+                     c) 15 words scanned past the keyword
+                   end_ms = last included word timestamp + 400ms
+                   end_ms must NEVER exceed the containing scene boundary from SCENE BOUNDARIES.
+                   IMPORTANT: the overlay must disappear when the narrator FINISHES THE SENTENCE about this topic, NOT at the end of the scene.
                 5. If no keyword match: place at 80%% of video duration, end at the containing scene's end.
                 6. Subtitles occupy y > 0.78 — never place overlays there.
 
@@ -500,9 +509,10 @@ public class OverlayPlacementEngine {
 
     /**
      * Keyword-based fallback when GPT placement fails.
-     * Finds the keyword in word timings, then uses SCENE BOUNDARIES to determine
-     * the overlay window — overlay starts when keyword is spoken and ends when the
-     * containing scene ends. This ensures the overlay never bleeds into the next scene.
+     * Finds the keyword in word timings, then detects the end of the spoken
+     * clause/sentence containing that keyword using punctuation and pause gaps.
+     * Scene boundaries are a secondary safety cap only — primary end detection
+     * is word-timing based to avoid depending on scene duration estimates.
      */
     private List<OverlayPlacement> keywordFallbackPlacements(List<OverlayDescriptor> descriptors,
                                                               GenerationContext context,
@@ -523,19 +533,27 @@ public class OverlayPlacementEngine {
                             .anyMatch(kw -> lower.contains(kw.toLowerCase()));
                     if (!matches) continue;
 
-                    // Start exactly when the keyword is spoken (same logic as GPT path)
                     startMs = Math.max(0, wt.startMs() - 200);
 
-                    // Scan forward to find the last word still in the same scene —
-                    // overlay should cover the entire passage about this topic.
+                    // Find the end of the spoken clause about this topic.
+                    // Stop at: clause-ending punctuation (.,!?;), natural pause >500ms, or 15 words.
+                    // Scene boundary is a cap of last resort only.
                     int sceneEnd = sceneEndForTime(wt.startMs(), sceneBoundaries, totalDurationMs);
                     int passageEndMs = wt.endMs();
-                    for (int fwd = wtIdx + 1; fwd < wordTimings.size(); fwd++) {
-                        SubtitleService.WordTiming next = wordTimings.get(fwd);
-                        if (next.startMs() >= sceneEnd) break;
-                        passageEndMs = next.endMs();
+                    if (!endsWithClauseMarker(wt.word())) {
+                        int prevWordEnd = wt.endMs();
+                        int wordsScanned = 0;
+                        for (int fwd = wtIdx + 1; fwd < wordTimings.size() && wordsScanned < 15; fwd++) {
+                            SubtitleService.WordTiming next = wordTimings.get(fwd);
+                            if (next.startMs() >= sceneEnd) break;
+                            if (next.startMs() - prevWordEnd > 500) break; // natural clause pause
+                            passageEndMs = next.endMs();
+                            prevWordEnd = next.endMs();
+                            wordsScanned++;
+                            if (endsWithClauseMarker(next.word())) break;
+                        }
                     }
-                    endMs = Math.min(passageEndMs + 500, sceneEnd);
+                    endMs = Math.min(passageEndMs + 400, sceneEnd);
                     break;
                 }
             }

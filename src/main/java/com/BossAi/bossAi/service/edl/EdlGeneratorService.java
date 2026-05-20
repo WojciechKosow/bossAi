@@ -620,17 +620,38 @@ public class EdlGeneratorService {
      *
      * URL is built using the /internal/assets/raw/{assetId}/file endpoint which
      * serves plain Asset entities (not ProjectAssets) to the Remotion renderer.
+     *
+     * IMPORTANT: endMs is clamped to the actual primary segment boundary that contains
+     * startMs. This is the only place where correct segment boundaries are known (after
+     * EdlGeneratorService builds them from real TTS clip durations). OverlayPlacementEngine
+     * calculates boundaries from GPT-estimated scene durations which may be inaccurate,
+     * especially for custom TTS where clip durations differ from script estimates.
      */
     private void appendOverlaySegments(EdlDto edl, GenerationContext context) {
         List<OverlayPlacement> placements = context.getOverlayPlacements();
         if (placements == null || placements.isEmpty()) return;
 
+        // Build list of primary segments once for fast boundary lookup.
+        List<EdlSegment> primarySegments = edl.getSegments() != null
+                ? edl.getSegments().stream()
+                      .filter(s -> s.getLayer() == 0)
+                      .collect(Collectors.toList())
+                : List.of();
+
         String callbackBase = remotionProperties.getCallbackBaseUrl();
         List<EdlSegment> overlaySegments = new ArrayList<>();
 
         for (OverlayPlacement placement : placements) {
-            if (placement.getStartMs() >= placement.getEndMs()) {
-                log.warn("[EdlGenerator] Skipping invalid overlay placement (startMs >= endMs): {}",
+            // Clamp endMs to the actual rendered segment boundary — prevents overlays
+            // from bleeding into the next scene when scene duration estimates were wrong.
+            int endMs = clampOverlayEnd(placement.getStartMs(), placement.getEndMs(), primarySegments);
+            if (endMs != placement.getEndMs()) {
+                log.info("[EdlGenerator] Overlay endMs clamped {} → {}ms (actual segment boundary) asset={}",
+                        placement.getEndMs(), endMs, placement.getOverlayAssetId());
+            }
+
+            if (placement.getStartMs() >= endMs) {
+                log.warn("[EdlGenerator] Skipping invalid overlay (startMs >= endMs after clamp): {}",
                         placement.getOverlayAssetId());
                 continue;
             }
@@ -646,7 +667,7 @@ public class EdlGeneratorService {
                     .assetUrl(assetUrl)
                     .assetType("IMAGE")
                     .startMs(placement.getStartMs())
-                    .endMs(placement.getEndMs())
+                    .endMs(endMs)
                     .layer(2)
                     .x(placement.getX())
                     .y(placement.getY())
@@ -659,7 +680,7 @@ public class EdlGeneratorService {
 
             log.debug("[EdlGenerator] Overlay segment: asset={} url={} t=[{}-{}ms] pos=({},{}) size={}x{}",
                     placement.getOverlayAssetId(), assetUrl,
-                    placement.getStartMs(), placement.getEndMs(),
+                    placement.getStartMs(), endMs,
                     placement.getX(), placement.getY(),
                     placement.getWidth(), placement.getHeight());
         }
@@ -669,6 +690,19 @@ public class EdlGeneratorService {
             log.info("[EdlGenerator] Appended {} overlay segment(s) from OverlayPlacementEngine",
                     overlaySegments.size());
         }
+    }
+
+    /**
+     * Returns endMs clamped to the endMs of the primary segment (layer=0) that contains startMs.
+     * If no segment contains startMs, returns the original endMs unchanged.
+     */
+    private int clampOverlayEnd(int startMs, int endMs, List<EdlSegment> primarySegments) {
+        for (EdlSegment seg : primarySegments) {
+            if (startMs >= seg.getStartMs() && startMs < seg.getEndMs()) {
+                return Math.min(endMs, seg.getEndMs());
+            }
+        }
+        return endMs;
     }
 
     // =========================================================================
