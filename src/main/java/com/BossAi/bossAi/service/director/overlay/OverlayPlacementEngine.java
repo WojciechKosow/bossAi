@@ -253,10 +253,13 @@ public class OverlayPlacementEngine {
      * Returns scene boundaries as int[][]{startMs, endMs} derived from context scenes.
      * Falls back to a single full-video "scene" when scenes aren't available.
      *
-     * IMPORTANT: applies the same voice/scene scale factor that EdlGeneratorService uses
-     * so that boundaries are in the same coordinate system as WhisperX word timings.
-     * Without this, overlays calculated here would appear at wrong positions in the
-     * rendered video (unscaled scene time ≠ actual TTS audio time).
+     * CRITICAL: boundaries MUST be in the same coordinate system as the rendered EDL
+     * primary segments, otherwise the backward-scan scene guard fires at the wrong time
+     * and overlays land in the wrong TTS clip (then clampOverlayEnd snaps them to a tiny
+     * duration). For custom TTS the EDL builds segments from PROBED clip durations
+     * (EdlGeneratorService.resolveNormalizedClipDurations), NOT from GPT scene estimates —
+     * so we mirror the probed durations here too. The old code scaled GPT scene estimates,
+     * which drift scene-by-scene from the real probed durations.
      */
     private int[][] buildSceneBoundaries(GenerationContext context) {
         var scenes = context.getScenes();
@@ -265,28 +268,43 @@ public class OverlayPlacementEngine {
             return new int[][]{{0, total}};
         }
 
-        // Mirror the scaling logic from EdlGeneratorService so boundaries match the
-        // actual rendered timeline (word timings are in TTS audio time, not raw scene time).
-        int sceneDurationMs = scenes.stream().mapToInt(s -> s.getDurationMs()).sum();
         int voiceDurationMs = 0;
         List<SubtitleService.WordTiming> wordTimings = context.getWordTimings();
         if (wordTimings != null && !wordTimings.isEmpty()) {
             voiceDurationMs = wordTimings.get(wordTimings.size() - 1).endMs();
         }
-        double scale = (voiceDurationMs > sceneDurationMs && sceneDurationMs > 0)
-                ? (double) voiceDurationMs / sceneDurationMs
-                : 1.0;
 
-        if (scale != 1.0) {
-            log.debug("[OverlayEngine] Scaling scene boundaries by {} (voice={}ms, scenes={}ms)",
-                    String.format("%.3f", scale), voiceDurationMs, sceneDurationMs);
+        // Per-scene durations in the SAME coordinate system as the rendered EDL segments.
+        int[] perScene = new int[scenes.size()];
+        List<Integer> probed = context.getCustomTtsClipDurationsMs();
+        boolean useProbed = context.hasCustomTts()
+                && probed != null && probed.size() == scenes.size()
+                && probed.stream().allMatch(d -> d != null && d > 0);
+
+        if (useProbed) {
+            // Exact match with EdlGeneratorService fast path (uses probed durations directly).
+            for (int i = 0; i < scenes.size(); i++) perScene[i] = probed.get(i);
+            log.debug("[OverlayEngine] Scene boundaries from probed TTS clip durations: {}", probed);
+        } else {
+            // Fallback: scale GPT scene estimates to the voice length.
+            int sceneDurationMs = scenes.stream().mapToInt(s -> s.getDurationMs()).sum();
+            double scale = (voiceDurationMs > sceneDurationMs && sceneDurationMs > 0)
+                    ? (double) voiceDurationMs / sceneDurationMs
+                    : 1.0;
+            for (int i = 0; i < scenes.size(); i++) {
+                perScene[i] = (int) (scenes.get(i).getDurationMs() * scale);
+            }
+            if (scale != 1.0) {
+                log.debug("[OverlayEngine] Scaling scene boundaries by {} (voice={}ms, scenes={}ms)",
+                        String.format("%.3f", scale), voiceDurationMs, sceneDurationMs);
+            }
         }
 
         int[][] boundaries = new int[scenes.size()][2];
         int cursor = 0;
         for (int i = 0; i < scenes.size(); i++) {
             boundaries[i][0] = cursor;
-            cursor += (int)(scenes.get(i).getDurationMs() * scale);
+            cursor += perScene[i];
             boundaries[i][1] = cursor;
         }
         // Snap last boundary to actual voice end — eliminates rounding drift.
@@ -537,7 +555,10 @@ public class OverlayPlacementEngine {
                         if (gapMs > 500 || endsWithClauseMarker(prev.word())) break;
                         clauseStartIdx = bwd;
                     }
-                    startMs = Math.max(0, wordTimings.get(clauseStartIdx).startMs() - 100);
+                    // Floor at the keyword's scene start: the −100ms lead-in must not push
+                    // startMs into the previous clip, or clampOverlayEnd would snap the
+                    // overlay to that clip's end and it would flash for ~100ms.
+                    startMs = Math.max(keywordSceneStart, wordTimings.get(clauseStartIdx).startMs() - 100);
 
                     // The overlay stays visible until the END of the keyword's scene — it
                     // disappears together with that scene's TTS, subtitles and background clip.
