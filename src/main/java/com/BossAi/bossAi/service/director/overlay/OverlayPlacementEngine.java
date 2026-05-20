@@ -72,18 +72,6 @@ public class OverlayPlacementEngine {
         return last == '.' || last == ',' || last == '!' || last == '?' || last == ';';
     }
 
-    /**
-     * Sentence boundary for FORWARD scan (finding overlay end).
-     * Comma intentionally excluded — "dołącz na discord, klikając w link" should
-     * keep the overlay visible through the full thought, not cut at the comma.
-     * Only hard sentence endings and long pauses stop the forward scan.
-     */
-    private static boolean endsWithSentenceMarker(String word) {
-        if (word == null || word.isEmpty()) return false;
-        char last = word.charAt(word.length() - 1);
-        return last == '.' || last == '!' || last == '?' || last == ';';
-    }
-
     // =========================================================================
     // PUBLIC API
     // =========================================================================
@@ -431,16 +419,11 @@ public class OverlayPlacementEngine {
                    start_ms = timestamp of the first word AFTER that stop point − 100ms.
                    Example: "zanim zaczniemy [2s pause] dołącz na serwer discord" → keyword "discord" →
                    scan back: gap found before "dołącz" → start_ms = timestamp of "dołącz" − 100ms.
-                4. end_ms: the overlay is visible ONLY while the topic is being spoken.
-                   Scan FORWARD from the matched keyword and STOP at whichever comes first:
-                     a) A word ending with SENTENCE punctuation (period, exclamation, question, semicolon).
-                        Commas do NOT stop the scan — keep one continuous thought together,
-                        e.g. "dołącz na discord, klikając w link" stays fully covered.
-                     b) A gap >500ms between two consecutive words (a pause = topic ended).
-                   end_ms = timestamp of the END of that last word + 200ms.
-                   Do NOT extend the overlay to the end of the video — it must disappear once
-                   the narrator stops talking about it.
-                5. If no keyword match: place at 80%% of video duration with a ~3500ms window.
+                4. end_ms = the END of the SCENE that contains the keyword (from SCENE BOUNDARIES).
+                   The overlay disappears together with that scene — its background clip,
+                   subtitles and TTS all end at the scene boundary, so the overlay does too.
+                   Do NOT extend it past the keyword's scene, and do NOT cut it short mid-scene.
+                5. If no keyword match: place at 80%% of video duration, end at that scene's end.
                 6. Subtitles occupy y > 0.78 — never place overlays there.
 
                 Return ONLY a JSON array (no markdown, no wrapper object):
@@ -556,36 +539,20 @@ public class OverlayPlacementEngine {
                     }
                     startMs = Math.max(0, wordTimings.get(clauseStartIdx).startMs() - 100);
 
-                    // Scan FORWARD to find where the mention ends. The overlay is visible
-                    // exactly while the topic is being spoken — it ends at the first hard
-                    // sentence boundary (. ! ? ;) or a long pause (>500ms) after the keyword.
-                    // Commas do NOT stop the scan (see endsWithSentenceMarker) so a single
-                    // thought like "dołącz na discord, klikając w link" stays fully covered.
-                    //
-                    // IMPORTANT: cap to the scene boundary of the keyword's TTS clip.
-                    // TTS clips are often concatenated with no silence, so without this cap
-                    // the scan bleeds into the next clip and the overlay lingers there.
-                    int keywordSceneEnd = sceneEndForTime(wt.startMs(), sceneBoundaries, totalDurationMs);
-                    int clauseEndIdx = wtIdx;
-                    for (int fwd = wtIdx; fwd < wordTimings.size(); fwd++) {
-                        SubtitleService.WordTiming cur = wordTimings.get(fwd);
-                        if (cur.startMs() >= keywordSceneEnd) break; // don't cross into next clip
-                        clauseEndIdx = fwd;
-                        if (endsWithSentenceMarker(cur.word())) break;
-                        if (fwd + 1 < wordTimings.size()) {
-                            int gapMs = wordTimings.get(fwd + 1).startMs() - cur.endMs();
-                            if (gapMs > 500) break;
-                        }
-                    }
-                    endMs = Math.min(wordTimings.get(clauseEndIdx).endMs() + 200, keywordSceneEnd);
+                    // The overlay stays visible until the END of the keyword's scene — it
+                    // disappears together with that scene's TTS, subtitles and background clip.
+                    // (Per-sentence forward scans ended too early: WhisperX emits punctuation
+                    // mid-clip and TTS has intra-sentence pauses.) clampOverlayEnd in
+                    // EdlGeneratorService snaps this to the exact rendered segment boundary.
+                    endMs = sceneEndForTime(wt.startMs(), sceneBoundaries, totalDurationMs);
                     break;
                 }
             }
 
-            // No keyword match → no spoken cue to anchor to; show a short window near the end.
+            // No keyword match → anchor near the end and run to that scene's boundary.
             if (startMs < 0) {
                 startMs = (int) (totalDurationMs * 0.80);
-                endMs = Math.min(startMs + 3500, totalDurationMs);
+                endMs = sceneEndForTime(startMs, sceneBoundaries, totalDurationMs);
             }
 
             float[] pos = POSITION_PRESETS.getOrDefault(desc.getCategory(),
