@@ -428,7 +428,12 @@ public class OverlayPlacementEngine {
                 TIMING RULES — CRITICAL:
                 1. Match each overlay to narration using trigger_keywords.
                 2. Find the first word in the transcript that matches a trigger_keyword.
-                3. start_ms = that word's timestamp − 200ms (minimum 0).
+                3. start_ms: scan BACKWARDS from the matched keyword to find the start of its clause.
+                   Go word by word backwards and STOP when you hit a gap >500ms between two consecutive
+                   words OR a word ending with clause punctuation (period, comma, exclamation, question, semicolon).
+                   start_ms = timestamp of the first word AFTER that stop point − 100ms.
+                   Example: "zanim zaczniemy [2s pause] dołącz na serwer discord" → keyword "discord" →
+                   scan back: gap found before "dołącz" → start_ms = timestamp of "dołącz" − 100ms.
                 4. end_ms: find the END OF THE CLAUSE containing the keyword.
                    Scan forward word by word from the matched keyword and STOP at whichever comes first:
                      a) A word whose text ends with clause punctuation: period (.), comma (,), exclamation (!), question (?), semicolon (;)
@@ -533,7 +538,18 @@ public class OverlayPlacementEngine {
                             .anyMatch(kw -> lower.contains(kw.toLowerCase()));
                     if (!matches) continue;
 
-                    startMs = Math.max(0, wt.startMs() - 200);
+                    // Scan BACKWARDS to find the start of the clause containing the keyword.
+                    // E.g. keyword="discord" in "zanim zaczniemy [pause] dołącz na serwer discord"
+                    // → clause starts at "dołącz", not at "discord".
+                    int clauseStartIdx = wtIdx;
+                    for (int bwd = wtIdx - 1; bwd >= 0 && (wtIdx - bwd) <= 12; bwd--) {
+                        SubtitleService.WordTiming prev = wordTimings.get(bwd);
+                        SubtitleService.WordTiming next = wordTimings.get(bwd + 1);
+                        int gapMs = next.startMs() - prev.endMs();
+                        if (gapMs > 500 || endsWithClauseMarker(prev.word())) break;
+                        clauseStartIdx = bwd;
+                    }
+                    startMs = Math.max(0, wordTimings.get(clauseStartIdx).startMs() - 100);
 
                     // Find the end of the spoken clause about this topic.
                     // Stop at: clause-ending punctuation (.,!?;), natural pause >500ms, or 15 words.
