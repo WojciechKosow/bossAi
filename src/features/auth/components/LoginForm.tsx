@@ -18,6 +18,7 @@ import { Loader2 } from "lucide-react";
 import { AxiosError } from "axios";
 import { useAuth } from "../context/AuthContext";
 import { GoogleLoginButton } from "./GoogleLoginButton";
+import { BETA_MODE } from "@/lib/betaMode";
 
 export const LoginForm = () => {
   const navigate = useNavigate();
@@ -49,9 +50,6 @@ export const LoginForm = () => {
       login(res.token ?? "", res.user);
 
       navigate("/dashboard");
-
-      // await loginMutation.mutateAsync(values);
-      // navigate("/dashboard");
     } catch (error) {
       const err = error as AxiosError<{ message?: string }>;
       const message = err.response?.data?.message?.toLowerCase();
@@ -123,7 +121,7 @@ export const LoginForm = () => {
             control={form.control}
             name="rememberMe"
             render={({ field }) => (
-              <label className="flex  text-black items-center gap-2 cursor-pointer">
+              <label className="flex text-black items-center gap-2 cursor-pointer">
                 <input
                   type="checkbox"
                   checked={field.value}
@@ -144,14 +142,16 @@ export const LoginForm = () => {
           </button>
         </div>
 
-        <div className="space-y-4">
-          <GoogleLoginButton />
-          <div className="flex items-center gap-2">
-            <div className="h-px flex-1 bg-gray-200" />
-            <span className="text-xs text-gray-400">OR</span>
-            <div className="h-px flex-1 bg-gray-200" />
+        {!BETA_MODE && (
+          <div className="space-y-4">
+            <GoogleLoginButton />
+            <div className="flex items-center gap-2">
+              <div className="h-px flex-1 bg-gray-200" />
+              <span className="text-xs text-gray-400">OR</span>
+              <div className="h-px flex-1 bg-gray-200" />
+            </div>
           </div>
-        </div>
+        )}
 
         <Button
           type="submit"
@@ -164,15 +164,17 @@ export const LoginForm = () => {
           {loginMutation.isPending ? "Signing in..." : "Sign in"}
         </Button>
 
-        <p className="text-sm text-center text-gray-600">
-          Don't have an account?{" "}
-          <Link
-            to="/register"
-            className="text-black hover:underline font-medium"
-          >
-            Create one
-          </Link>
-        </p>
+        {!BETA_MODE && (
+          <p className="text-sm text-center text-gray-600">
+            Don't have an account?{" "}
+            <Link
+              to="/register"
+              className="text-black hover:underline font-medium"
+            >
+              Create one
+            </Link>
+          </p>
+        )}
       </form>
     </Form>
   );

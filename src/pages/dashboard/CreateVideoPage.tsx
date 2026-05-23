@@ -30,6 +30,7 @@ import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
+import { BETA_MODE } from "@/lib/betaMode";
 
 type Step = "compose" | "review" | "generating";
 
@@ -47,7 +48,7 @@ const CreateVideoPage = () => {
 
   const { data: plan } = useActivePlan();
   const isPro = useMemo(
-    () => (plan?.type ? PRO_PLANS.has(plan.type) : false),
+    () => BETA_MODE || (plan?.type ? PRO_PLANS.has(plan.type) : false),
     [plan],
   );
 
@@ -77,16 +78,6 @@ const CreateVideoPage = () => {
     setAssignments(next);
   }, [analysis]);
 
-  /**
-   * Once the SSE stream signals DONE, route the user to wherever their
-   * video lives:
-   *   - editable project (timeline-first pipeline) → /projects/{id}
-   *   - generation-only (legacy pipeline)          → /library/preview/{id}
-   *
-   * Projects list refreshes every 10s but DONE can fire before the bridge
-   * has committed the VideoProject — we wait one refetch, then fall back
-   * to the preview page so the user is never stranded.
-   */
   useEffect(() => {
     if (!done || !generationId) return;
     const project = (projects ?? []).find(
@@ -143,7 +134,7 @@ const CreateVideoPage = () => {
         customMediaAssetIds: assets.map((a) => a.id),
         sceneAssignments,
         useGptOrdering: false,
-        reuseAssets: true,
+        reuseAssets: false,
         forceReuseForTesting: false,
       });
       setGenerationId(res.generationId);

@@ -1,7 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
 import axios from "@/lib/axios";
-import { Check, Crown } from "lucide-react";
+import { Check, Crown, Sparkles } from "lucide-react";
 import { format } from "date-fns";
+import { BETA_MODE } from "@/lib/betaMode";
 
 const BillingPage = () => {
   const { data: activePlan } = useQuery({
@@ -26,6 +27,7 @@ const BillingPage = () => {
       const res = await axios.get("/api/plans");
       return res.data;
     },
+    enabled: !BETA_MODE,
   });
 
   return (
@@ -39,6 +41,20 @@ const BillingPage = () => {
           Manage your subscription and review your plan usage.
         </p>
       </div>
+
+      {/* BETA BANNER */}
+      {BETA_MODE && (
+        <div className="bg-card border border-primary/30 rounded-xl p-8 text-center space-y-3">
+          <div className="size-12 rounded-xl gradient-bg mx-auto flex items-center justify-center shadow-glow">
+            <Sparkles className="size-5 text-white" />
+          </div>
+          <h2 className="text-lg font-semibold">Beta Access — Unlimited</h2>
+          <p className="text-muted-foreground text-sm max-w-md mx-auto">
+            You have full access to all features during the closed beta.
+            No limits, no payments required. Enjoy!
+          </p>
+        </div>
+      )}
 
       {/* CURRENT PLAN */}
       {activePlan && (
@@ -58,14 +74,16 @@ const BillingPage = () => {
               </p>
             </div>
 
-            <div className="text-right">
-              <p className="text-sm text-muted-foreground">
-                {activePlan.imagesUsed}/{activePlan.imagesTotal} images
-              </p>
-              <p className="text-sm text-muted-foreground">
-                {activePlan.videosUsed}/{activePlan.videosTotal} videos
-              </p>
-            </div>
+            {!BETA_MODE && (
+              <div className="text-right">
+                <p className="text-sm text-muted-foreground">
+                  {activePlan.imagesUsed}/{activePlan.imagesTotal} images
+                </p>
+                <p className="text-sm text-muted-foreground">
+                  {activePlan.videosUsed}/{activePlan.videosTotal} videos
+                </p>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -98,62 +116,66 @@ const BillingPage = () => {
                 {format(new Date(plan.expiresAt), "PPP")}
               </p>
 
-              <div className="mt-4 text-xs text-muted-foreground">
-                {plan.imagesUsed}/{plan.imagesTotal} images used
-              </div>
+              {!BETA_MODE && (
+                <div className="mt-4 text-xs text-muted-foreground">
+                  {plan.imagesUsed}/{plan.imagesTotal} images used
+                </div>
+              )}
             </div>
           ))}
         </div>
       </div>
 
-      {/* AVAILABLE PLANS */}
-      <div>
-        <h2 className="text-lg font-semibold mb-6">Available Plans</h2>
+      {/* AVAILABLE PLANS — hidden in beta */}
+      {!BETA_MODE && (
+        <div>
+          <h2 className="text-lg font-semibold mb-6">Available Plans</h2>
 
-        <div className="grid gap-8 md:grid-cols-3">
-          {allPlans?.map((plan: any) => {
-            const isCurrent = activePlan?.planType === plan.id;
+          <div className="grid gap-8 md:grid-cols-3">
+            {allPlans?.map((plan: any) => {
+              const isCurrent = activePlan?.planType === plan.id;
 
-            return (
-              <div
-                key={plan.id}
-                className={`border rounded-xl p-6 transition ${
-                  isCurrent ? "border-primary shadow-md" : "border-border"
-                }`}
-              >
-                <h3 className="text-lg font-semibold">{plan.id}</h3>
-
-                <p className="text-2xl font-bold mt-2">
-                  ${(plan.priceCents / 100).toFixed(2)}
-                </p>
-
-                <p className="text-xs text-muted-foreground mt-1">
-                  {plan.subscription ? "Subscription" : "One-time"}
-                </p>
-
-                <ul className="mt-6 space-y-2 text-sm">
-                  <Feature text={`${plan.imagesLimit} Images`} />
-                  <Feature text={`${plan.videosLimit} Videos`} />
-                  {plan.watermark && <Feature text="Watermark" />}
-                  {plan.priorityQueue && <Feature text="Priority Queue" />}
-                  {plan.commercialUse && <Feature text="Commercial Use" />}
-                </ul>
-
-                <button
-                  disabled={isCurrent}
-                  className={`mt-8 w-full py-2.5 rounded-lg text-sm font-medium transition ${
-                    isCurrent
-                      ? "bg-muted text-muted-foreground cursor-not-allowed"
-                      : "bg-primary text-primary-foreground hover:opacity-90"
+              return (
+                <div
+                  key={plan.id}
+                  className={`border rounded-xl p-6 transition ${
+                    isCurrent ? "border-primary shadow-md" : "border-border"
                   }`}
                 >
-                  {isCurrent ? "Current Plan" : "Upgrade"}
-                </button>
-              </div>
-            );
-          })}
+                  <h3 className="text-lg font-semibold">{plan.id}</h3>
+
+                  <p className="text-2xl font-bold mt-2">
+                    ${(plan.priceCents / 100).toFixed(2)}
+                  </p>
+
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {plan.subscription ? "Subscription" : "One-time"}
+                  </p>
+
+                  <ul className="mt-6 space-y-2 text-sm">
+                    <Feature text={`${plan.imagesLimit} Images`} />
+                    <Feature text={`${plan.videosLimit} Videos`} />
+                    {plan.watermark && <Feature text="Watermark" />}
+                    {plan.priorityQueue && <Feature text="Priority Queue" />}
+                    {plan.commercialUse && <Feature text="Commercial Use" />}
+                  </ul>
+
+                  <button
+                    disabled={isCurrent}
+                    className={`mt-8 w-full py-2.5 rounded-lg text-sm font-medium transition ${
+                      isCurrent
+                        ? "bg-muted text-muted-foreground cursor-not-allowed"
+                        : "bg-primary text-primary-foreground hover:opacity-90"
+                    }`}
+                  >
+                    {isCurrent ? "Current Plan" : "Upgrade"}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 };

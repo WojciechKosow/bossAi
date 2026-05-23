@@ -23,6 +23,7 @@ import GenerationPreviewPage from "../pages/dashboard/GenerationPreviewPage";
 import AssetPreviewPage from "../pages/dashboard/AssetPreviewPage";
 import BillingPage from "../pages/dashboard/BillingPage";
 import SettingsPage from "../pages/dashboard/SettingsPage";
+import { BETA_MODE } from "@/lib/betaMode";
 
 const AppRouter = () => {
   return (
@@ -52,9 +53,13 @@ const AppRouter = () => {
         <Route
           path="/register"
           element={
-            <PublicOnlyRoute>
-              <RegisterPage />
-            </PublicOnlyRoute>
+            BETA_MODE ? (
+              <Navigate to="/login" replace />
+            ) : (
+              <PublicOnlyRoute>
+                <RegisterPage />
+              </PublicOnlyRoute>
+            )
           }
         />
 

@@ -17,6 +17,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { ProjectThumbnail } from "@/features/video/components/ProjectThumbnail";
+import { BETA_MODE } from "@/lib/betaMode";
 
 const DashboardPage = () => {
   const { user } = useAuth();
@@ -69,28 +70,28 @@ const DashboardPage = () => {
         <StatCard
           icon={<Crown size={16} />}
           label="Current plan"
-          value={plan?.type ?? "—"}
+          value={BETA_MODE ? "Beta Access" : (plan?.type ?? "—")}
           accent
         />
         <StatCard
           icon={<VideoIcon size={16} />}
-          label="Videos remaining"
-          value={
+          label="Videos"
+          value={BETA_MODE ? "Unlimited" : (
             plan ? `${plan.videosTotal - plan.videosUsed}/${plan.videosTotal}` : "—"
-          }
-          progress={
+          )}
+          progress={BETA_MODE ? undefined : (
             plan ? (plan.videosUsed / Math.max(1, plan.videosTotal)) * 100 : 0
-          }
+          )}
         />
         <StatCard
           icon={<ImageIcon size={16} />}
-          label="Image credits"
-          value={
+          label="Images"
+          value={BETA_MODE ? "Unlimited" : (
             plan ? `${plan.imagesTotal - plan.imagesUsed}/${plan.imagesTotal}` : "—"
-          }
-          progress={
+          )}
+          progress={BETA_MODE ? undefined : (
             plan ? (plan.imagesUsed / Math.max(1, plan.imagesTotal)) * 100 : 0
-          }
+          )}
         />
         <StatCard
           icon={<TrendingUp size={16} />}
