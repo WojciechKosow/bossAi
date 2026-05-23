@@ -1,3 +1,5 @@
+import { BETA_MODE } from "@/lib/betaMode";
+
 const Footer = () => {
   return (
     <footer className="w-full bg-background border-t border-border">
@@ -13,42 +15,41 @@ const Footer = () => {
                 Toucan
               </span>
             </div>
-
             <p className="text-sm text-muted-foreground leading-relaxed">
-              Building the future of learning — thoughtfully, simply, and with
-              purpose.
+              Turn your ideas and assets into TikTok-ready videos — automatically.
             </p>
           </div>
 
           {/* LINKS */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-10 text-sm">
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-10 text-sm">
             <FooterColumn
               title="Product"
-              links={["Features", "Pricing", "Testimonials", "Change Log"]}
+              links={[
+                { label: "Features", href: "#features" },
+                ...(!BETA_MODE ? [{ label: "Pricing", href: "#pricing" }] : []),
+                { label: BETA_MODE ? "Join Beta" : "Testimonials", href: BETA_MODE ? "#waitlist" : "#testimonials" },
+              ]}
             />
-
             <FooterColumn
               title="Company"
-              links={["About", "Blog", "Careers", "Press"]}
+              links={[
+                { label: "About", href: "#" },
+                { label: "Blog", href: "#" },
+              ]}
             />
-
-            <FooterColumn
-              title="Support"
-              links={["Help Center", "Community", "Status", "Guides"]}
-            />
-
             <FooterColumn
               title="Legal"
-              links={["Privacy Policy", "Terms of Service", "Cookies"]}
+              links={[
+                { label: "Privacy Policy", href: "#" },
+                { label: "Terms of Service", href: "#" },
+              ]}
             />
           </div>
         </div>
 
         <div className="mt-14 pt-6 border-t border-border text-sm text-muted-foreground flex flex-col sm:flex-row justify-between gap-4">
           <p>© {new Date().getFullYear()} Toucan. All rights reserved.</p>
-          <p className="hover:text-foreground cursor-pointer transition">
-            Poland / EUR 🇵🇱
-          </p>
+          <p>Poland 🇵🇱</p>
         </div>
       </div>
     </footer>
@@ -59,15 +60,15 @@ export default Footer;
 
 /* ---------- COLUMN COMPONENT ---------- */
 
-const FooterColumn = ({ title, links }: { title: string; links: string[] }) => {
+const FooterColumn = ({ title, links }: { title: string; links: { label: string; href: string }[] }) => {
   return (
     <div>
       <h4 className="text-foreground font-semibold mb-3">{title}</h4>
       <ul className="space-y-2 text-muted-foreground">
         {links.map((link, index) => (
           <li key={index}>
-            <a href="#" className="hover:text-foreground transition">
-              {link}
+            <a href={link.href} className="hover:text-foreground transition">
+              {link.label}
             </a>
           </li>
         ))}

@@ -1,37 +1,52 @@
 import { motion } from "framer-motion";
+import { BETA_MODE } from "@/lib/betaMode";
 
 const testimonials = [
   {
-    name: "Laura M.",
-    role: "Marketing Student",
+    name: "Marta K.",
+    role: "Content Creator",
     quote:
-      "Chico helped me learn at my own pace. The courses actually feel modern and engaging.",
+      "Toucan cuts my video editing time from 3 hours to 10 minutes. The auto-cut engine just gets the rhythm right.",
   },
   {
-    name: "James K.",
-    role: "Software Engineer",
+    name: "Piotr W.",
+    role: "E-commerce Brand",
     quote:
-      "Clear lessons, real-world exercises, and progress tracking made it super easy to stay motivated.",
+      "We went from 2 TikToks a week to 15. The AI script is surprisingly good — hooks that actually convert.",
   },
   {
-    name: "Adriana F.",
-    role: "UX Designer",
+    name: "Julia R.",
+    role: "Social Media Manager",
     quote:
-      "The certificate I earned helped me land my first full-time role. Couldn’t be happier.",
+      "Drop the assets, write two sentences, done. It took me longer to read this testimonial than to make a video.",
   },
 ];
 
 const Testimonials = () => {
+  if (BETA_MODE) return null;
+
   return (
     <section id="testimonials" className="py-28 bg-muted">
       <div className="max-w-6xl mx-auto px-8 text-center">
-        <h2 className="text-3xl md:text-4xl font-semibold text-foreground">
-          Loved by learners around the world.
-        </h2>
+        <motion.h2
+          className="text-3xl md:text-4xl font-semibold text-foreground"
+          initial={{ opacity: 0, y: 20 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.6 }}
+          viewport={{ once: true }}
+        >
+          Loved by creators.
+        </motion.h2>
 
-        <p className="mt-4 text-muted-foreground max-w-xl mx-auto">
+        <motion.p
+          className="mt-4 text-muted-foreground max-w-xl mx-auto"
+          initial={{ opacity: 0, y: 20 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.6, delay: 0.1 }}
+          viewport={{ once: true }}
+        >
           Real stories from real people.
-        </p>
+        </motion.p>
 
         <div className="relative overflow-hidden mt-20">
           <motion.div
@@ -50,9 +65,8 @@ const Testimonials = () => {
                 className="min-w-[320px] md:min-w-[420px] bg-card border border-border rounded-2xl p-8 text-left"
               >
                 <p className="text-foreground text-lg leading-relaxed">
-                  {t.quote}
+                  &ldquo;{t.quote}&rdquo;
                 </p>
-
                 <div className="mt-6">
                   <p className="font-medium text-foreground">{t.name}</p>
                   <p className="text-sm text-muted-foreground">{t.role}</p>
