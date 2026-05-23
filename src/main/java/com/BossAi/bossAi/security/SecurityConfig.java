@@ -1,5 +1,6 @@
 package com.BossAi.bossAi.security;
 
+import com.BossAi.bossAi.config.BetaConfig;
 import com.BossAi.bossAi.ratelimit.RateLimitFilter;
 import com.BossAi.bossAi.ratelimit.RateLimitService;
 import jakarta.servlet.Filter;
@@ -31,6 +32,7 @@ public class SecurityConfig {
     private final RateLimitFilter rateLimitFilter;
     private final OAuth2SuccessHandler oAuth2SuccessHandler;
     private final CustomOAuth2UserService customOAuth2UserService;
+    private final BetaConfig betaConfig;
 
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
@@ -51,21 +53,25 @@ public class SecurityConfig {
                         ).permitAll()
                         .anyRequest().authenticated()
                 )
-                .oauth2Login(oauth -> oauth
-                        .authorizationEndpoint(authEndpoint -> authEndpoint
-                                .baseUri("/oauth2/authorization")
-                        )
-                        .redirectionEndpoint(redirection -> redirection
-                                .baseUri("/oauth2/callback/*")
-                        )
-                        .userInfoEndpoint(userInfo -> userInfo
-                                .userService(customOAuth2UserService)
-                        )
-                        .successHandler(oAuth2SuccessHandler)
-                )
                 .httpBasic(basic -> basic.disable())
                 .addFilterBefore(rateLimitFilter, UsernamePasswordAuthenticationFilter.class)
                 .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
+
+        if (!betaConfig.isBetaMode()) {
+            http.oauth2Login(oauth -> oauth
+                    .authorizationEndpoint(authEndpoint -> authEndpoint
+                            .baseUri("/oauth2/authorization")
+                    )
+                    .redirectionEndpoint(redirection -> redirection
+                            .baseUri("/oauth2/callback/*")
+                    )
+                    .userInfoEndpoint(userInfo -> userInfo
+                            .userService(customOAuth2UserService)
+                    )
+                    .successHandler(oAuth2SuccessHandler)
+            );
+        }
+
         return http.build();
     }
 

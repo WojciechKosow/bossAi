@@ -1,5 +1,6 @@
 package com.BossAi.bossAi.controller;
 
+import com.BossAi.bossAi.config.BetaConfig;
 import com.BossAi.bossAi.dto.UserDTO;
 import com.BossAi.bossAi.entity.RefreshToken;
 import com.BossAi.bossAi.entity.User;
@@ -13,6 +14,7 @@ import com.BossAi.bossAi.service.UserService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseCookie;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
@@ -32,9 +34,14 @@ public class AuthController {
     private final JwtProvider jwtProvider;
     private final RefreshTokenService refreshTokenService;
     private final UserRepository userRepository;
+    private final BetaConfig betaConfig;
 
     @PostMapping("/register")
     public ResponseEntity<String> register(@Valid @RequestBody RegisterRequest request) {
+        if (betaConfig.isBetaMode()) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                    .body("Registration is closed. This is a closed beta — contact the team for access.");
+        }
         userService.register(request);
         return ResponseEntity.ok("\"If registration is possible, you will receive further instructions.\"\n");
     }

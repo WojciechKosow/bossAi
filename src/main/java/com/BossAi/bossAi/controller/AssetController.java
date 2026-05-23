@@ -1,5 +1,6 @@
 package com.BossAi.bossAi.controller;
 
+import com.BossAi.bossAi.config.BetaConfig;
 import com.BossAi.bossAi.dto.AssetDTO;
 import com.BossAi.bossAi.entity.AssetType;
 import com.BossAi.bossAi.entity.ProjectAsset;
@@ -9,6 +10,7 @@ import com.BossAi.bossAi.service.StorageService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.UrlResource;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
@@ -29,6 +31,7 @@ public class AssetController {
     private final AssetService assetService;
     private final StorageService storageService;
     private final AssetRepository assetRepository;
+    private final BetaConfig betaConfig;
 
     @GetMapping
     public List<AssetDTO> getUserAssets() {
@@ -47,6 +50,10 @@ public class AssetController {
 
     @DeleteMapping("/{id}")
     public ResponseEntity<String> deleteAsset(@PathVariable UUID id) {
+        if (betaConfig.isBetaMode()) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                    .body("Asset deletion is disabled during beta.");
+        }
         assetService.deleteAsset(id);
         return ResponseEntity.ok("Successfully deleted an asset.");
     }
