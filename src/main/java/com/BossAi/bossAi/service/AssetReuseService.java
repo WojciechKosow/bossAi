@@ -1,5 +1,6 @@
 package com.BossAi.bossAi.service;
 
+import com.BossAi.bossAi.config.BetaConfig;
 import com.BossAi.bossAi.entity.Asset;
 import com.BossAi.bossAi.entity.AssetType;
 import com.BossAi.bossAi.entity.User;
@@ -46,6 +47,7 @@ public class AssetReuseService {
     private final WebClient webClient;
     private final OpenAiProperties properties;
     private final ObjectMapper objectMapper;
+    private final BetaConfig betaConfig;
 
     /** Lowered from 3 → 1: even a single reusable image is worth reusing */
     private static final int MIN_REUSABLE_IMAGES = 1;
@@ -56,13 +58,15 @@ public class AssetReuseService {
             UserRepository userRepository,
             @Qualifier("openAiWebClient") WebClient webClient,
             OpenAiProperties properties,
-            ObjectMapper objectMapper
+            ObjectMapper objectMapper,
+            BetaConfig betaConfig
     ) {
         this.assetRepository = assetRepository;
         this.userRepository = userRepository;
         this.webClient = webClient;
         this.properties = properties;
         this.objectMapper = objectMapper;
+        this.betaConfig = betaConfig;
     }
 
     /**
@@ -70,6 +74,13 @@ public class AssetReuseService {
      * Wywoływany po ScriptStep (potrzebujemy scen z imagePrompt).
      */
     public void matchReusableAssets(GenerationContext context) {
+        if (betaConfig.isBetaMode()) {
+            log.info("[AssetReuseService] Beta mode — skipping asset reuse (no OpenAI matching call)");
+            context.setReusedImageAssets(new HashMap<>());
+            context.setReusedVideoAssets(new HashMap<>());
+            return;
+        }
+
         UUID userId = context.getUserId();
         User user = userRepository.findById(userId).orElseThrow();
 
