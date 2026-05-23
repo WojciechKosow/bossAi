@@ -1,8 +1,10 @@
 package com.BossAi.bossAi.service;
 
+import com.BossAi.bossAi.config.BetaConfig;
 import com.BossAi.bossAi.entity.*;
 import com.BossAi.bossAi.repository.*;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -10,6 +12,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.Optional;
 import java.util.UUID;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class CreditServiceImpl implements CreditService {
@@ -22,6 +25,7 @@ public class CreditServiceImpl implements CreditService {
     private final PlanDefinitionRepository planDefinitionRepository;
     private final PlanSelectionService planSelectionService;
     private final UserWalletRepository userWalletRepository;
+    private final BetaConfig betaConfig;
 
     @Override
     public CreditTransaction reserve(User user, OperationType operationType, UUID referenceId) {
@@ -45,6 +49,17 @@ public class CreditServiceImpl implements CreditService {
     @Override
     @Transactional
     public CreditTransaction reserveInternal(User user, OperationType operationType, UUID referenceId) {
+
+        if (betaConfig.isBetaMode()) {
+            log.info("[CreditService] Beta mode — unlimited access, skipping credit check for generation {}", referenceId);
+            CreditTransaction tx = new CreditTransaction();
+            tx.setUser(user);
+            tx.setOperationType(operationType);
+            tx.setAmount(0);
+            tx.setStatus(TransactionStatus.RESERVED);
+            tx.setReferenceId(referenceId);
+            return creditTransactionRepository.save(tx);
+        }
 
         Generation generation = generationRepository.findById(referenceId)
                 .orElseThrow(() -> new RuntimeException("Generation not found"));
@@ -142,6 +157,13 @@ public class CreditServiceImpl implements CreditService {
     public void refund(UUID transactionId) {
         CreditTransaction transaction = creditTransactionRepository.findById(transactionId)
                 .orElseThrow(() -> new RuntimeException("Transaction not found"));
+
+        if (betaConfig.isBetaMode()) {
+            log.info("[CreditService] Beta mode — skipping counter rollback for transaction {}", transactionId);
+            transaction.setStatus(TransactionStatus.REFUNDED);
+            creditTransactionRepository.save(transaction);
+            return;
+        }
 
 //        UserPlan userPlan = userPlanRepository.findById(transaction.getReferenceId())
 //                .orElseThrow(() -> new RuntimeException("Plan not found......"));
