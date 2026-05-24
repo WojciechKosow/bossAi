@@ -1,6 +1,20 @@
+import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import { Sparkles, Zap, Music, ArrowRight, Play } from "lucide-react";
 import { BETA_MODE } from "@/lib/betaMode";
+
+function useClock() {
+  const [time, setTime] = useState(() =>
+    new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+  );
+  useEffect(() => {
+    const id = setInterval(() => {
+      setTime(new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
+    }, 1000);
+    return () => clearInterval(id);
+  }, []);
+  return time;
+}
 
 const container = {
   hidden: { opacity: 0 },
@@ -146,7 +160,9 @@ const Hero = () => {
   );
 };
 
-const PhoneMockup = () => (
+const PhoneMockup = () => {
+  const time = useClock();
+  return (
   <div className="relative select-none">
     {/* Ambient glow */}
     <div className="absolute inset-[-20%] rounded-full bg-primary/15 blur-[80px] animate-orb-3" />
@@ -156,7 +172,7 @@ const PhoneMockup = () => (
 
       {/* Status bar */}
       <div className="flex items-center justify-between px-5 pt-3 pb-2">
-        <span className="text-[10px] text-muted-foreground font-semibold tabular-nums">9:41</span>
+        <span className="text-[10px] text-muted-foreground font-semibold tabular-nums">{time}</span>
         <div className="w-20 h-3.5 rounded-full bg-muted" />
         <div className="flex items-center gap-1">
           <div className="w-3 h-3 rounded-full bg-muted/80" />
@@ -236,6 +252,7 @@ const PhoneMockup = () => (
       </div>
     </div>
   </div>
-);
+  );
+};
 
 export default Hero;
