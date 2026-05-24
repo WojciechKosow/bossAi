@@ -1,4 +1,5 @@
 import { Link } from "react-router-dom";
+import { ArrowRight } from "lucide-react";
 import { BETA_MODE } from "@/lib/betaMode";
 
 const PublicNavbar = () => {
@@ -7,54 +8,73 @@ const PublicNavbar = () => {
   };
 
   return (
-    <nav className="w-full border-b border-border bg-background/80 backdrop-blur-md fixed top-0 left-0 z-50">
-      <div className="max-w-7xl mx-auto px-8 py-4 flex justify-between items-center">
-        {/* LOGO */}
-        <Link to="/" className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-lg bg-primary text-primary-foreground flex items-center justify-center font-semibold text-lg">
-            T
-          </div>
-          <span className="text-xl font-semibold tracking-tight text-foreground">
-            Toucan
-          </span>
-        </Link>
+    <nav className="w-full fixed top-0 left-0 z-50">
+      {/* Glass bar */}
+      <div className="mx-auto max-w-7xl mt-3 mx-3 md:mx-6 rounded-2xl border border-border/60 bg-background/75 backdrop-blur-xl shadow-soft">
+        <div className="px-5 py-3 flex items-center justify-between gap-6">
 
-        {/* NAV LINKS */}
-        <div className="hidden md:flex items-center gap-10 text-sm text-muted-foreground">
-          <a href="#features" className="hover:text-foreground transition">Features</a>
-          {!BETA_MODE && (
-            <a href="#pricing" className="hover:text-foreground transition">Pricing</a>
-          )}
-          <a href="#waitlist" className="hover:text-foreground transition">
-            {BETA_MODE ? "Join beta" : "Testimonials"}
-          </a>
-        </div>
+          {/* Logo */}
+          <Link to="/" className="flex items-center gap-2.5 flex-shrink-0">
+            <div className="w-8 h-8 rounded-lg gradient-bg flex items-center justify-center shadow-glow flex-shrink-0">
+              <span className="text-white font-black text-[15px] leading-none">T</span>
+            </div>
+            <span className="text-[17px] font-bold tracking-tight text-foreground">
+              Toucan
+            </span>
+          </Link>
 
-        {/* ACTIONS */}
-        <div className="flex items-center gap-3">
-          {BETA_MODE ? (
-            <button
-              onClick={scrollToWaitlist}
-              className="px-4 py-2 rounded-lg gradient-bg text-primary-foreground text-sm font-medium hover:opacity-90 transition"
+          {/* Nav links */}
+          <div className="hidden md:flex items-center gap-8 text-[13px] text-muted-foreground">
+            <a
+              href="#features"
+              className="hover:text-foreground transition-colors duration-150 font-medium"
             >
-              Request access
-            </button>
-          ) : (
-            <>
-              <Link
-                to="/login"
-                className="px-4 py-2 rounded-lg border border-border bg-background text-foreground hover:bg-muted transition text-sm"
+              Features
+            </a>
+            {!BETA_MODE && (
+              <a
+                href="#pricing"
+                className="hover:text-foreground transition-colors duration-150 font-medium"
               >
-                Sign In
-              </Link>
-              <Link
-                to="/register"
-                className="px-4 py-2 rounded-lg bg-primary text-primary-foreground hover:opacity-90 transition text-sm"
+                Pricing
+              </a>
+            )}
+            <a
+              href={BETA_MODE ? "#waitlist" : "#testimonials"}
+              className="hover:text-foreground transition-colors duration-150 font-medium"
+            >
+              {BETA_MODE ? "Join beta" : "Testimonials"}
+            </a>
+          </div>
+
+          {/* Actions */}
+          <div className="flex items-center gap-2 flex-shrink-0">
+            {BETA_MODE ? (
+              <button
+                onClick={scrollToWaitlist}
+                className="group inline-flex items-center gap-1.5 px-4 py-2 rounded-lg gradient-bg text-white text-[13px] font-semibold hover:opacity-90 active:scale-[0.97] transition-all duration-200 shadow-glow"
               >
-                Get Started
-              </Link>
-            </>
-          )}
+                Request access
+                <ArrowRight size={13} className="group-hover:translate-x-0.5 transition-transform duration-200" />
+              </button>
+            ) : (
+              <>
+                <Link
+                  to="/login"
+                  className="px-4 py-2 rounded-lg text-foreground/80 hover:text-foreground hover:bg-muted/60 transition-all duration-150 text-[13px] font-medium"
+                >
+                  Sign in
+                </Link>
+                <Link
+                  to="/register"
+                  className="group inline-flex items-center gap-1.5 px-4 py-2 rounded-lg gradient-bg text-white text-[13px] font-semibold hover:opacity-90 active:scale-[0.97] transition-all duration-200 shadow-glow"
+                >
+                  Get started
+                  <ArrowRight size={13} className="group-hover:translate-x-0.5 transition-transform duration-200" />
+                </Link>
+              </>
+            )}
+          </div>
         </div>
       </div>
     </nav>
