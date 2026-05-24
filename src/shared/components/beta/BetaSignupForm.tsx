@@ -7,12 +7,16 @@ const SERVICE_ID = import.meta.env.VITE_EMAILJS_SERVICE_ID ?? "";
 const TEMPLATE_ID = import.meta.env.VITE_EMAILJS_TEMPLATE_ID ?? "";
 const PUBLIC_KEY = import.meta.env.VITE_EMAILJS_PUBLIC_KEY ?? "";
 
+const inputClass =
+  "w-full px-4 py-3 rounded-xl border border-border bg-background text-sm outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/40 placeholder:text-muted-foreground disabled:opacity-50 transition";
+
 type State = "idle" | "loading" | "success" | "error";
 
 const BetaSignupForm = () => {
   const [state, setState] = useState<State>("idle");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
+  const [message, setMessage] = useState("");
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -29,7 +33,12 @@ const BetaSignupForm = () => {
       await emailjs.send(
         SERVICE_ID,
         TEMPLATE_ID,
-        { name: name.trim() || "—", email: email.trim(), reply_to: email.trim() },
+        {
+          name: name.trim() || "—",
+          email: email.trim(),
+          reply_to: email.trim(),
+          message: message.trim() || "—",
+        },
         PUBLIC_KEY
       );
       setState("success");
@@ -51,7 +60,8 @@ const BetaSignupForm = () => {
           <CheckCircle2 className="size-14 text-green-500" />
           <h3 className="text-xl font-semibold">You're on the list!</h3>
           <p className="text-muted-foreground text-sm text-center max-w-xs">
-            We'll reach out with your access credentials soon. Keep an eye on your inbox.
+            We'll reach out with your access credentials soon. Keep an eye on
+            your inbox.
           </p>
         </motion.div>
       ) : (
@@ -68,16 +78,24 @@ const BetaSignupForm = () => {
             value={name}
             onChange={(e) => setName(e.target.value)}
             disabled={state === "loading"}
-            className="w-full px-4 py-3 rounded-xl border border-border bg-background text-sm outline-none focus:ring-2 focus:ring-primary/30 placeholder:text-muted-foreground disabled:opacity-50 transition"
+            className={inputClass}
           />
           <input
             type="email"
-            placeholder="Your email address"
+            placeholder="Your email address *"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             required
             disabled={state === "loading"}
-            className="w-full px-4 py-3 rounded-xl border border-border bg-background text-sm outline-none focus:ring-2 focus:ring-primary/30 placeholder:text-muted-foreground disabled:opacity-50 transition"
+            className={inputClass}
+          />
+          <textarea
+            placeholder="Tell us about your use case (optional)"
+            value={message}
+            onChange={(e) => setMessage(e.target.value)}
+            disabled={state === "loading"}
+            rows={3}
+            className={`${inputClass} resize-none`}
           />
 
           {state === "error" && (
@@ -92,9 +110,13 @@ const BetaSignupForm = () => {
             className="w-full flex items-center justify-center gap-2 px-6 py-3 rounded-xl gradient-bg text-white font-semibold shadow-glow hover:opacity-90 transition disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {state === "loading" ? (
-              <><Loader2 className="size-4 animate-spin" /> Sending...</>
+              <>
+                <Loader2 className="size-4 animate-spin" /> Sending...
+              </>
             ) : (
-              <><Send className="size-4" /> Request beta access</>
+              <>
+                <Send className="size-4" /> Request beta access
+              </>
             )}
           </button>
 

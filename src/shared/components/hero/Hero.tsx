@@ -221,28 +221,20 @@ const PhoneMockup = () => (
     </div>
 
     {/* Floating badge — left */}
-    <motion.div
-      animate={{ y: [-5, 5, -5] }}
-      transition={{ duration: 4.2, repeat: Infinity, ease: "easeInOut" }}
-      className="absolute -left-[76px] top-[22%] glass rounded-xl px-3 py-2 shadow-elev border border-border/60"
-    >
+    <div className="animate-float absolute -left-[76px] top-[22%] glass rounded-xl px-3 py-2 shadow-elev border border-border/60">
       <div className="flex items-center gap-2 text-[11px] font-medium text-foreground whitespace-nowrap">
         <Zap size={11} className="text-primary" fill="currentColor" />
         Auto-cut engine
       </div>
-    </motion.div>
+    </div>
 
     {/* Floating badge — right */}
-    <motion.div
-      animate={{ y: [5, -5, 5] }}
-      transition={{ duration: 3.8, repeat: Infinity, ease: "easeInOut" }}
-      className="absolute -right-[68px] top-[52%] glass rounded-xl px-3 py-2 shadow-elev border border-border/60"
-    >
+    <div className="animate-float-alt absolute -right-[68px] top-[52%] glass rounded-xl px-3 py-2 shadow-elev border border-border/60">
       <div className="flex items-center gap-2 text-[11px] font-medium text-foreground whitespace-nowrap">
         <Music size={11} className="text-primary" />
         Beat-synced
       </div>
-    </motion.div>
+    </div>
   </div>
 );
 
