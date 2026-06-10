@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -8,6 +8,9 @@ import {
   Loader2,
   Wand2,
   Lock,
+  Check,
+  AlertTriangle,
+  RotateCcw,
 } from "lucide-react";
 import { AssetUploader } from "@/features/video/components/AssetUploader";
 import { StylePicker } from "@/features/video/components/StylePicker";
@@ -21,6 +24,7 @@ import {
 } from "@/features/video/hooks";
 import type {
   AssetDTO,
+  ProgressEvent as ProgressPayload,
   PromptAnalysisResponse,
   UUID,
   VideoStyle,
@@ -62,7 +66,7 @@ const CreateVideoPage = () => {
 
   const analyzeMut = useAnalyzePrompt();
   const startMut = useStartGeneration();
-  const { progress, done, error } = useGenerationProgress(
+  const { progress, done, error, failed } = useGenerationProgress(
     generationId,
     step === "generating",
   );
@@ -312,33 +316,17 @@ const CreateVideoPage = () => {
             exit={{ opacity: 0, y: -10 }}
             transition={{ duration: 0.25 }}
           >
-            <div className="rounded-2xl border border-border bg-card p-10 text-center max-w-2xl mx-auto">
-              <div className="size-16 rounded-2xl gradient-bg mx-auto flex items-center justify-center shadow-glow animate-float">
-                <Wand2 className="size-7 text-white" />
-              </div>
-              <h2 className="text-2xl font-semibold mt-6">
-                Crafting your video
-              </h2>
-              <p className="text-sm text-muted-foreground mt-2">
-                {progress?.message ?? "Spinning up the pipeline…"}
-              </p>
-              <div className="mt-8 space-y-2">
-                <Progress
-                  value={progress?.percent ?? 0}
-                  indeterminate={!progress}
-                />
-                <div className="flex items-center justify-between text-xs text-muted-foreground">
-                  <span>{progress?.step ?? "INITIALIZING"}</span>
-                  <span className="tabular-nums">
-                    {progress ? `${Math.round(progress.percent)}%` : "—"}
-                  </span>
-                </div>
-              </div>
-              <p className="text-xs text-muted-foreground mt-6">
-                You can leave this page — we'll drop you in the editor when it's
-                ready.
-              </p>
-            </div>
+            {failed ? (
+              <FailedPanel
+                message={failed}
+                onRetry={() => {
+                  setGenerationId(null);
+                  setStep("review");
+                }}
+              />
+            ) : (
+              <GeneratingPanel progress={progress} done={done} />
+            )}
           </motion.div>
         )}
       </AnimatePresence>
@@ -427,5 +415,187 @@ const Stat = ({ label, value }: { label: string; value: string }) => (
       {label}
     </p>
     <p className="text-base font-semibold mt-1 truncate">{value}</p>
+  </div>
+);
+
+/* ============ generation progress ============ */
+
+/**
+ * Pipeline steps as broadcast by the backend (GenerationStepName) with the
+ * percent each step starts at. Used both for the checklist and to cap the
+ * smoothed progress so it never overtakes a step that hasn't happened.
+ */
+const PIPELINE_STEPS = [
+  { key: "INITIALIZING", label: "Preparing generation", percent: 5 },
+  { key: "SCRIPT", label: "Writing the script", percent: 15 },
+  { key: "IMAGE", label: "Generating scene images", percent: 30 },
+  { key: "VOICE", label: "Recording voice-over", percent: 50 },
+  { key: "VIDEO", label: "Animating scenes", percent: 70 },
+  { key: "MUSIC", label: "Preparing music", percent: 80 },
+  { key: "RENDER", label: "Rendering the final cut", percent: 90 },
+  { key: "SAVING", label: "Saving results", percent: 97 },
+] as const;
+
+const stepIndexOf = (stepKey: string | undefined): number => {
+  const idx = PIPELINE_STEPS.findIndex((s) => s.key === stepKey);
+  return idx === -1 ? 0 : idx;
+};
+
+/**
+ * Smooths the coarse SSE percentages: eases toward the latest real value and
+ * creeps slowly while a long step is in flight, but never crosses into the
+ * next step's range until the backend confirms it. Lives inside
+ * GeneratingPanel so the 60 fps state updates only re-render the panel.
+ */
+const useSmoothedPercent = (
+  progress: ProgressPayload | null,
+  done: boolean,
+): number => {
+  const [display, setDisplay] = useState(0);
+  const ref = useRef({ real: 0, cap: 14, stepStartedAt: 0, display: 0 });
+
+  useEffect(() => {
+    const idx = stepIndexOf(progress?.step);
+    const nextPercent =
+      idx + 1 < PIPELINE_STEPS.length ? PIPELINE_STEPS[idx + 1].percent : 100;
+    ref.current.real = done ? 100 : (progress?.percent ?? 0);
+    ref.current.cap = done ? 100 : Math.max(0, nextPercent - 1);
+    ref.current.stepStartedAt = performance.now();
+  }, [progress?.step, progress?.percent, done]);
+
+  useEffect(() => {
+    let raf = 0;
+    const tick = () => {
+      const s = ref.current;
+      const elapsedSec = (performance.now() - s.stepStartedAt) / 1000;
+      // creep ~0.35%/s within the current step's range while waiting
+      const target = Math.min(
+        Math.max(s.real, s.real + elapsedSec * 0.35),
+        Math.max(s.real, s.cap),
+      );
+      s.display = Math.min(100, s.display + (target - s.display) * 0.04);
+      setDisplay(s.display);
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, []);
+
+  return display;
+};
+
+const GeneratingPanel = ({
+  progress,
+  done,
+}: {
+  progress: ProgressPayload | null;
+  done: boolean;
+}) => {
+  const percent = useSmoothedPercent(progress, done);
+  const [elapsedSec, setElapsedSec] = useState(0);
+  useEffect(() => {
+    const startedAt = Date.now();
+    const timer = window.setInterval(
+      () => setElapsedSec(Math.floor((Date.now() - startedAt) / 1000)),
+      1000,
+    );
+    return () => window.clearInterval(timer);
+  }, []);
+  const elapsed = `${String(Math.floor(elapsedSec / 60)).padStart(2, "0")}:${String(elapsedSec % 60).padStart(2, "0")}`;
+
+  const currentIdx = stepIndexOf(progress?.step);
+
+  return (
+    <div className="rounded-2xl border border-border bg-card p-8 sm:p-10 max-w-2xl mx-auto">
+      <div className="flex items-center gap-4">
+        <div className="size-14 rounded-2xl gradient-bg flex items-center justify-center shadow-glow animate-float shrink-0">
+          <Wand2 className="size-6 text-white" />
+        </div>
+        <div className="min-w-0">
+          <h2 className="text-xl sm:text-2xl font-semibold">
+            Crafting your video
+          </h2>
+          <p className="text-sm text-muted-foreground mt-0.5 truncate">
+            {progress?.message ?? "Connecting to the pipeline…"}
+          </p>
+        </div>
+        <div className="ml-auto text-right shrink-0">
+          <p className="text-2xl font-bold tabular-nums gradient-text">
+            {Math.round(percent)}%
+          </p>
+          <p className="text-[11px] text-muted-foreground tabular-nums">
+            {elapsed}
+          </p>
+        </div>
+      </div>
+
+      <div className="mt-6">
+        <Progress value={percent} indeterminate={!progress && !done} />
+      </div>
+
+      <ul className="mt-8 grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2.5">
+        {PIPELINE_STEPS.map((s, i) => {
+          const isDone = done || i < currentIdx;
+          const isActive = !done && i === currentIdx;
+          return (
+            <li key={s.key} className="flex items-center gap-2.5 text-sm">
+              <span
+                className={cn(
+                  "size-5 rounded-full flex items-center justify-center shrink-0 transition",
+                  isDone
+                    ? "gradient-bg text-white"
+                    : isActive
+                      ? "border-2 border-primary"
+                      : "border-2 border-border",
+                )}
+              >
+                {isDone ? (
+                  <Check size={11} strokeWidth={3} />
+                ) : isActive ? (
+                  <Loader2 size={11} className="animate-spin text-primary" />
+                ) : null}
+              </span>
+              <span
+                className={cn(
+                  isDone
+                    ? "text-foreground"
+                    : isActive
+                      ? "text-foreground font-medium"
+                      : "text-muted-foreground",
+                )}
+              >
+                {s.label}
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+
+      <p className="text-xs text-muted-foreground mt-8 text-center">
+        You can leave this page — we'll drop you in the editor when it's ready.
+      </p>
+    </div>
+  );
+};
+
+const FailedPanel = ({
+  message,
+  onRetry,
+}: {
+  message: string;
+  onRetry: () => void;
+}) => (
+  <div className="rounded-2xl border border-destructive/40 bg-card p-10 text-center max-w-2xl mx-auto">
+    <div className="size-14 rounded-2xl bg-destructive/10 text-destructive mx-auto flex items-center justify-center">
+      <AlertTriangle className="size-6" />
+    </div>
+    <h2 className="text-xl font-semibold mt-5">Generation failed</h2>
+    <p className="text-sm text-muted-foreground mt-2 break-words">{message}</p>
+    <p className="text-xs text-muted-foreground mt-1">
+      Your credits for this run have been refunded.
+    </p>
+    <Button onClick={onRetry} className="mt-6 gradient-bg text-white shadow-glow">
+      <RotateCcw size={14} /> Back to review & try again
+    </Button>
   </div>
 );

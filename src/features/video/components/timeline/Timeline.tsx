@@ -18,9 +18,16 @@ import {
   Type,
   Sparkles,
   Magnet,
+  Captions,
+  Settings2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { EdlAudioTrack, EdlDto, EdlSegment } from "../../types";
+import type {
+  EdlAudioTrack,
+  EdlDto,
+  EdlSegment,
+  EdlTextOverlay,
+} from "../../types";
 import {
   formatTime,
   groupByLayer,
@@ -28,6 +35,14 @@ import {
   pxToMs,
   totalDurationFromSegments,
 } from "./timelineUtils";
+import {
+  type SubtitleGroup,
+  type SubtitleSelection,
+  deleteGroup,
+  groupWhisperWords,
+  retimeGroup,
+  shiftGroup,
+} from "./subtitleUtils";
 
 // ─── Public handle ────────────────────────────────────────────────────────────
 
@@ -43,6 +58,8 @@ interface Props {
   onSelectSegment: (id: string | null) => void;
   selectedAudioId: string | null;
   onSelectAudio: (id: string | null) => void;
+  selectedSubtitle: SubtitleSelection | null;
+  onSelectSubtitle: (sel: SubtitleSelection | null) => void;
   onChange: (next: EdlDto) => void;
   playheadMs: number;
   onScrub: (ms: number) => void;
@@ -70,6 +87,25 @@ type DragState =
       origEnd: number;
       origTrimIn: number;
       origTrimOut: number;
+    }
+  | {
+      /** caption group (whisper words sharing a sentence_index) */
+      kind: "caption";
+      id: string;
+      groupIndex: number;
+      mode: DragMode;
+      startX: number;
+      origStart: number;
+      origEnd: number;
+    }
+  | {
+      /** standalone text overlay */
+      kind: "overlay";
+      id: string;
+      mode: DragMode;
+      startX: number;
+      origStart: number;
+      origEnd: number;
     };
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -122,6 +158,18 @@ function collectSnapPoints(
     pts.add(t.start_ms ?? 0);
     pts.add(t.end_ms ?? totalMs);
   }
+
+  for (const g of groupWhisperWords(edl.whisper_words)) {
+    if (`cap-${g.index}` === excludeId) continue;
+    pts.add(g.startMs);
+    pts.add(g.endMs);
+  }
+
+  (edl.text_overlays ?? []).forEach((t, i) => {
+    if ((t.id ?? `ovl-${i}`) === excludeId) return;
+    pts.add(t.start_ms);
+    pts.add(t.end_ms);
+  });
 
   return Array.from(pts).sort((a, b) => a - b);
 }
@@ -216,6 +264,63 @@ function computeDraft(
     };
   }
 
+  // ── caption groups + text overlays — same move/trim math as segments ──────
+  if (d.kind === "caption" || d.kind === "overlay") {
+    let nextStart = d.origStart;
+    let nextEnd = d.origEnd;
+    const len = d.origEnd - d.origStart;
+    const snapPts = collectSnapPoints(cur, d.id, totalMs);
+
+    if (d.mode === "move") {
+      const rawStart = Math.max(0, d.origStart + deltaMs);
+      const rawEnd = rawStart + len;
+      if (snapEnabled) {
+        const snappedStart = snap(rawStart, snapPts, pps, true);
+        const snappedEnd = snap(rawEnd, snapPts, pps, true);
+        if (
+          Math.abs(snappedStart - rawStart) <= Math.abs(snappedEnd - rawEnd)
+        ) {
+          nextStart = snappedStart;
+        } else {
+          nextStart = snappedEnd - len;
+        }
+      } else {
+        nextStart = rawStart;
+      }
+      nextStart = Math.max(0, nextStart);
+      nextEnd = nextStart + len;
+    } else if (d.mode === "trim-left") {
+      const rawStart = Math.max(
+        0,
+        Math.min(d.origEnd - 100, d.origStart + deltaMs),
+      );
+      nextStart = snap(rawStart, snapPts, pps, snapEnabled);
+      nextStart = Math.max(0, Math.min(d.origEnd - 100, nextStart));
+    } else {
+      const rawEnd = Math.max(d.origStart + 100, d.origEnd + deltaMs);
+      nextEnd = snap(rawEnd, snapPts, pps, snapEnabled);
+      nextEnd = Math.max(d.origStart + 100, nextEnd);
+    }
+
+    if (d.kind === "caption") {
+      const words = cur.whisper_words ?? [];
+      const next =
+        d.mode === "move"
+          ? shiftGroup(words, d.groupIndex, nextStart - d.origStart)
+          : retimeGroup(words, d.groupIndex, nextStart, nextEnd);
+      return { ...cur, whisper_words: next };
+    }
+
+    return {
+      ...cur,
+      text_overlays: (cur.text_overlays ?? []).map((t, i) =>
+        (t.id ?? `ovl-${i}`) === d.id
+          ? { ...t, start_ms: nextStart, end_ms: nextEnd }
+          : t,
+      ),
+    };
+  }
+
   // ── audio ──────────────────────────────────────────────────────────────────
   let nextStart = d.origStart;
   let nextEnd = d.origEnd;
@@ -293,6 +398,8 @@ export const Timeline = forwardRef<TimelineHandle, Props>(function Timeline(
     onSelectSegment,
     selectedAudioId,
     onSelectAudio,
+    selectedSubtitle,
+    onSelectSubtitle,
     onChange,
     playheadMs,
     onScrub,
@@ -479,6 +586,7 @@ export const Timeline = forwardRef<TimelineHandle, Props>(function Timeline(
       lockSelection();
       onSelectSegment(seg.id);
       onSelectAudio(null);
+      onSelectSubtitle(null);
       dragRef.current = {
         kind: "segment",
         id: seg.id,
@@ -488,7 +596,7 @@ export const Timeline = forwardRef<TimelineHandle, Props>(function Timeline(
         origEnd: seg.end_ms,
       };
     },
-    [onSelectSegment, onSelectAudio],
+    [onSelectSegment, onSelectAudio, onSelectSubtitle],
   );
 
   const onAudioMouseDown = useCallback(
@@ -498,6 +606,7 @@ export const Timeline = forwardRef<TimelineHandle, Props>(function Timeline(
       lockSelection();
       onSelectAudio(track.id);
       onSelectSegment(null);
+      onSelectSubtitle(null);
       const totalMs = totalDurationFromSegments(edlRef.current);
       const start = track.start_ms ?? 0;
       const end = track.end_ms ?? totalMs;
@@ -512,7 +621,48 @@ export const Timeline = forwardRef<TimelineHandle, Props>(function Timeline(
         origTrimOut: track.trim_out_ms ?? end,
       };
     },
-    [onSelectAudio, onSelectSegment],
+    [onSelectAudio, onSelectSegment, onSelectSubtitle],
+  );
+
+  const onCaptionMouseDown = useCallback(
+    (e: React.MouseEvent, group: SubtitleGroup, mode: DragMode) => {
+      e.stopPropagation();
+      e.preventDefault();
+      lockSelection();
+      onSelectSubtitle({ kind: "group", index: group.index });
+      onSelectSegment(null);
+      onSelectAudio(null);
+      dragRef.current = {
+        kind: "caption",
+        id: `cap-${group.index}`,
+        groupIndex: group.index,
+        mode,
+        startX: e.clientX,
+        origStart: group.startMs,
+        origEnd: group.endMs,
+      };
+    },
+    [onSelectSubtitle, onSelectSegment, onSelectAudio],
+  );
+
+  const onOverlayMouseDown = useCallback(
+    (e: React.MouseEvent, overlay: EdlTextOverlay, id: string, mode: DragMode) => {
+      e.stopPropagation();
+      e.preventDefault();
+      lockSelection();
+      onSelectSubtitle({ kind: "overlay", id });
+      onSelectSegment(null);
+      onSelectAudio(null);
+      dragRef.current = {
+        kind: "overlay",
+        id,
+        mode,
+        startX: e.clientX,
+        origStart: overlay.start_ms,
+        origEnd: overlay.end_ms,
+      };
+    },
+    [onSelectSubtitle, onSelectSegment, onSelectAudio],
   );
 
   // ── Ruler drag-scrub ───────────────────────────────────────────────────────
@@ -570,14 +720,37 @@ export const Timeline = forwardRef<TimelineHandle, Props>(function Timeline(
         ),
       });
       onSelectAudio(null);
+      return;
+    }
+    if (selectedSubtitle?.kind === "group") {
+      onChange({
+        ...edl,
+        whisper_words: deleteGroup(
+          edl.whisper_words ?? [],
+          selectedSubtitle.index,
+        ),
+      });
+      onSelectSubtitle(null);
+      return;
+    }
+    if (selectedSubtitle?.kind === "overlay") {
+      onChange({
+        ...edl,
+        text_overlays: (edl.text_overlays ?? []).filter(
+          (t, i) => (t.id ?? `ovl-${i}`) !== selectedSubtitle.id,
+        ),
+      });
+      onSelectSubtitle(null);
     }
   }, [
     selectedSegmentId,
     selectedAudioId,
+    selectedSubtitle,
     edl,
     onChange,
     onSelectSegment,
     onSelectAudio,
+    onSelectSubtitle,
   ]);
 
   // ── Derived layout — all from displayEdl ──────────────────────────────────
@@ -605,10 +778,19 @@ export const Timeline = forwardRef<TimelineHandle, Props>(function Timeline(
   }, [displayEdl.audio_tracks]);
 
   const textOverlays = displayEdl.text_overlays ?? [];
+  const captionGroups = useMemo(
+    () => groupWhisperWords(displayEdl.whisper_words),
+    [displayEdl.whisper_words],
+  );
+  const captionsDisabled = displayEdl.subtitle_config?.enabled === false;
   const totalMs = totalDurationFromSegments(displayEdl);
   const totalSeconds = Math.ceil(totalMs / 1000) + 2;
   const widthPx = msToPx(totalSeconds * 1000, pps);
-  const hasSelection = !!selectedSegmentId || !!selectedAudioId;
+  const hasSelection =
+    !!selectedSegmentId ||
+    !!selectedAudioId ||
+    selectedSubtitle?.kind === "group" ||
+    selectedSubtitle?.kind === "overlay";
 
   // ── Render ─────────────────────────────────────────────────────────────────
 
@@ -704,10 +886,36 @@ export const Timeline = forwardRef<TimelineHandle, Props>(function Timeline(
               label={type === "music" ? "Music" : "Voice"}
             />
           ))}
+          {captionGroups.length > 0 && (
+            <TrackLabel
+              icon={<Captions size={12} className="text-amber-500" />}
+              label="Captions"
+              dimmed={captionsDisabled}
+              action={
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onSelectSubtitle({ kind: "settings" });
+                    onSelectSegment(null);
+                    onSelectAudio(null);
+                  }}
+                  className={cn(
+                    "size-5 rounded flex items-center justify-center transition",
+                    selectedSubtitle?.kind === "settings"
+                      ? "bg-primary/20 text-primary"
+                      : "hover:bg-muted text-muted-foreground hover:text-foreground",
+                  )}
+                  title="Caption settings (position, style, words per line)"
+                >
+                  <Settings2 size={11} />
+                </button>
+              }
+            />
+          )}
           {textOverlays.length > 0 && (
             <TrackLabel
               icon={<Type size={12} className="text-chart-4" />}
-              label="Subs"
+              label="Text"
             />
           )}
         </div>
@@ -765,21 +973,52 @@ export const Timeline = forwardRef<TimelineHandle, Props>(function Timeline(
               </div>
             ))}
 
-            {/* subtitle strip */}
+            {/* captions track — whisper word groups, draggable + trimmable */}
+            {captionGroups.length > 0 && (
+              <div
+                className={cn(
+                  "relative border-b border-border/60",
+                  captionsDisabled && "opacity-40",
+                )}
+                style={{ height: LAYER_HEIGHT }}
+              >
+                {captionGroups.map((group) => (
+                  <CaptionBlock
+                    key={`cap-${group.index}`}
+                    group={group}
+                    pps={pps}
+                    selected={
+                      selectedSubtitle?.kind === "group" &&
+                      selectedSubtitle.index === group.index
+                    }
+                    onMouseDown={onCaptionMouseDown}
+                  />
+                ))}
+              </div>
+            )}
+
+            {/* text overlay track */}
             {textOverlays.length > 0 && (
               <div
                 className="relative border-b border-border/60"
                 style={{ height: LAYER_HEIGHT }}
               >
-                {textOverlays.map((to, i) => (
-                  <SubBlock
-                    key={to.id ?? i}
-                    startMs={to.start_ms}
-                    endMs={to.end_ms}
-                    text={to.text}
-                    pps={pps}
-                  />
-                ))}
+                {textOverlays.map((to, i) => {
+                  const id = to.id ?? `ovl-${i}`;
+                  return (
+                    <OverlayBlock
+                      key={id}
+                      overlay={to}
+                      overlayId={id}
+                      pps={pps}
+                      selected={
+                        selectedSubtitle?.kind === "overlay" &&
+                        selectedSubtitle.id === id
+                      }
+                      onMouseDown={onOverlayMouseDown}
+                    />
+                  );
+                })}
               </div>
             )}
 
@@ -817,13 +1056,27 @@ export const Timeline = forwardRef<TimelineHandle, Props>(function Timeline(
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
 const TrackLabel = memo(
-  ({ icon, label }: { icon: React.ReactNode; label: string }) => (
+  ({
+    icon,
+    label,
+    action,
+    dimmed,
+  }: {
+    icon: React.ReactNode;
+    label: string;
+    action?: React.ReactNode;
+    dimmed?: boolean;
+  }) => (
     <div
-      className="border-b border-border/60 flex items-center gap-2 px-3 text-xs text-muted-foreground select-none"
+      className={cn(
+        "border-b border-border/60 flex items-center gap-2 px-3 text-xs text-muted-foreground select-none",
+        dimmed && "opacity-50",
+      )}
       style={{ height: LAYER_HEIGHT }}
     >
       {icon}
-      <span className="font-medium">{label}</span>
+      <span className="font-medium flex-1 truncate">{label}</span>
+      {action}
     </div>
   ),
 );
@@ -997,27 +1250,95 @@ const AudioBlock = memo(
 );
 AudioBlock.displayName = "AudioBlock";
 
-const SubBlock = memo(
+const CaptionBlock = memo(
   ({
-    startMs,
-    endMs,
-    text,
+    group,
     pps,
+    selected,
+    onMouseDown,
   }: {
-    startMs: number;
-    endMs: number;
-    text: string;
+    group: SubtitleGroup;
     pps: number;
+    selected: boolean;
+    onMouseDown: (
+      e: React.MouseEvent,
+      group: SubtitleGroup,
+      mode: DragMode,
+    ) => void;
   }) => (
     <div
-      className="absolute top-2 bottom-2 rounded-md bg-amber-500/15 border border-amber-500/30 px-2 flex items-center text-[10px] truncate text-amber-700 dark:text-amber-300 select-none pointer-events-none"
+      onMouseDown={(e) => onMouseDown(e, group, "move")}
+      className={cn(
+        "absolute top-2 bottom-2 rounded-md border bg-amber-500/15 cursor-grab active:cursor-grabbing overflow-hidden select-none",
+        selected
+          ? "border-amber-500 shadow-glow z-10"
+          : "border-amber-500/30 hover:border-amber-500/70",
+      )}
       style={{
-        left: msToPx(startMs, pps),
-        width: Math.max(20, msToPx(endMs - startMs, pps)),
+        left: msToPx(group.startMs, pps),
+        width: Math.max(20, msToPx(group.endMs - group.startMs, pps)),
       }}
     >
-      {text}
+      <div className="absolute inset-0 px-2 flex items-center text-[10px] truncate text-amber-700 dark:text-amber-300 pointer-events-none select-none">
+        {group.text}
+      </div>
+      <div
+        onMouseDown={(e) => onMouseDown(e, group, "trim-left")}
+        className="absolute left-0 top-0 bottom-0 w-2 cursor-w-resize hover:bg-amber-400/40 z-10"
+      />
+      <div
+        onMouseDown={(e) => onMouseDown(e, group, "trim-right")}
+        className="absolute right-0 top-0 bottom-0 w-2 cursor-e-resize hover:bg-amber-400/40 z-10"
+      />
     </div>
   ),
 );
-SubBlock.displayName = "SubBlock";
+CaptionBlock.displayName = "CaptionBlock";
+
+const OverlayBlock = memo(
+  ({
+    overlay,
+    overlayId,
+    pps,
+    selected,
+    onMouseDown,
+  }: {
+    overlay: EdlTextOverlay;
+    overlayId: string;
+    pps: number;
+    selected: boolean;
+    onMouseDown: (
+      e: React.MouseEvent,
+      overlay: EdlTextOverlay,
+      id: string,
+      mode: DragMode,
+    ) => void;
+  }) => (
+    <div
+      onMouseDown={(e) => onMouseDown(e, overlay, overlayId, "move")}
+      className={cn(
+        "absolute top-2 bottom-2 rounded-md border bg-sky-500/15 cursor-grab active:cursor-grabbing overflow-hidden select-none",
+        selected
+          ? "border-sky-500 shadow-glow z-10"
+          : "border-sky-500/30 hover:border-sky-500/70",
+      )}
+      style={{
+        left: msToPx(overlay.start_ms, pps),
+        width: Math.max(20, msToPx(overlay.end_ms - overlay.start_ms, pps)),
+      }}
+    >
+      <div className="absolute inset-0 px-2 flex items-center text-[10px] truncate text-sky-700 dark:text-sky-300 pointer-events-none select-none">
+        {overlay.text}
+      </div>
+      <div
+        onMouseDown={(e) => onMouseDown(e, overlay, overlayId, "trim-left")}
+        className="absolute left-0 top-0 bottom-0 w-2 cursor-w-resize hover:bg-sky-400/40 z-10"
+      />
+      <div
+        onMouseDown={(e) => onMouseDown(e, overlay, overlayId, "trim-right")}
+        className="absolute right-0 top-0 bottom-0 w-2 cursor-e-resize hover:bg-sky-400/40 z-10"
+      />
+    </div>
+  ),
+);
+OverlayBlock.displayName = "OverlayBlock";

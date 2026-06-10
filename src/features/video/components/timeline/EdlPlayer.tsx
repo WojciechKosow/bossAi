@@ -9,9 +9,24 @@ import {
 } from "react";
 import { useQuery } from "@tanstack/react-query";
 import axiosInstance from "@/lib/axios";
-import type { EdlAudioTrack, EdlDto, EdlSegment } from "../../types";
+import type {
+  EdlAudioTrack,
+  EdlDto,
+  EdlSegment,
+  EdlTextOverlay,
+  SubtitlePosition,
+} from "../../types";
 import { absoluteUrl } from "../../api";
 import { totalDurationFromSegments } from "./timelineUtils";
+import {
+  SUBTITLE_ZONE_Y,
+  activeGroupAt,
+  groupWhisperWords,
+  highlightColorFor,
+  subtitlesEnabled,
+  toSubtitlePosition,
+  withSubtitleConfig,
+} from "./subtitleUtils";
 
 /**
  * Fetches any API-relative URL (e.g. "/api/assets/file/...") with the JWT
@@ -75,6 +90,11 @@ interface Props {
   className?: string;
   /** 0–1, default 1. Multiplied with per-track volumes. */
   masterVolume?: number;
+  /**
+   * When provided, subtitles and text overlays become draggable in the
+   * preview — dragging commits position changes back into the EDL.
+   */
+  onEdlChange?: (next: EdlDto) => void;
 }
 
 // ─── Audio track player ───────────────────────────────────────────────────────
@@ -240,7 +260,14 @@ const SegmentView = ({
 
 export const EdlPlayer = forwardRef<EdlPlayerHandle, Props>(
   (
-    { edl, onTimeUpdate, onPlayStateChange, className, masterVolume = 1 },
+    {
+      edl,
+      onTimeUpdate,
+      onPlayStateChange,
+      className,
+      masterVolume = 1,
+      onEdlChange,
+    },
     ref,
   ) => {
     const [currentMs, setCurrentMs] = useState(0);
@@ -422,8 +449,12 @@ export const EdlPlayer = forwardRef<EdlPlayerHandle, Props>(
           </div>
         )}
 
-        {/* Subtitle overlay */}
-        <SubtitleOverlay edl={edl} currentMs={currentMs} />
+        {/* Text overlays + karaoke captions — mirrors the Remotion renderer */}
+        <TextAndCaptionLayer
+          edl={edl}
+          currentMs={currentMs}
+          onEdlChange={onEdlChange}
+        />
       </div>
     );
   },
@@ -431,36 +462,345 @@ export const EdlPlayer = forwardRef<EdlPlayerHandle, Props>(
 
 EdlPlayer.displayName = "EdlPlayer";
 
-// ─── Subtitle overlay ─────────────────────────────────────────────────────────
+// ─── Text overlays + captions preview ────────────────────────────────────────
+//
+// Faithful (light) port of what Remotion renders on top of the video:
+//  1. every active `text_overlay` at its own position/style, and
+//  2. the karaoke caption track from `whisper_words` + `subtitle_config`.
+// Both are draggable when `onEdlChange` is provided: overlays move freely
+// (x/y %), captions snap to the renderer's five named vertical zones.
 
-const SubtitleOverlay = ({
+/** Track the rendered size of the preview so EDL px values scale correctly. */
+const useFrameScale = (
+  edl: EdlDto,
+): { ref: React.RefObject<HTMLDivElement | null>; scale: number } => {
+  const ref = useRef<HTMLDivElement>(null);
+  const [scale, setScale] = useState(0.3);
+  const frameWidth = edl.metadata?.width || 1080;
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const update = () => setScale(el.clientWidth / frameWidth);
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [frameWidth]);
+
+  return { ref, scale };
+};
+
+const TextAndCaptionLayer = ({
   edl,
   currentMs,
+  onEdlChange,
 }: {
   edl: EdlDto;
   currentMs: number;
+  onEdlChange?: (next: EdlDto) => void;
 }) => {
-  const active = (edl.text_overlays ?? []).find(
+  const { ref, scale } = useFrameScale(edl);
+
+  const activeOverlays = (edl.text_overlays ?? []).filter(
     (t) => currentMs >= t.start_ms && currentMs < t.end_ms,
   );
 
-  if (!active) return null;
+  return (
+    <div
+      ref={ref}
+      className="absolute inset-0 overflow-hidden"
+      style={{ zIndex: 10, pointerEvents: "none" }}
+    >
+      {activeOverlays.map((overlay, i) => (
+        <OverlayView
+          key={overlay.id ?? i}
+          edl={edl}
+          overlay={overlay}
+          scale={scale}
+          containerRef={ref}
+          onEdlChange={onEdlChange}
+        />
+      ))}
+      <CaptionView
+        edl={edl}
+        currentMs={currentMs}
+        scale={scale}
+        containerRef={ref}
+        onEdlChange={onEdlChange}
+      />
+    </div>
+  );
+};
+
+// ─── Positioned text overlay ──────────────────────────────────────────────────
+
+const OverlayView = ({
+  edl,
+  overlay,
+  scale,
+  containerRef,
+  onEdlChange,
+}: {
+  edl: EdlDto;
+  overlay: EdlTextOverlay;
+  scale: number;
+  containerRef: React.RefObject<HTMLDivElement | null>;
+  onEdlChange?: (next: EdlDto) => void;
+}) => {
+  const pos = overlay.position ?? {};
+  const style = overlay.style ?? {};
+  const x = pos.x ?? "center";
+  const y = pos.y ?? "75%";
+
+  const wrapperStyle: React.CSSProperties = {
+    position: "absolute",
+    top: y,
+    maxWidth: pos.max_width ?? "85%",
+    textAlign: (pos.text_align ?? "center") as React.CSSProperties["textAlign"],
+    pointerEvents: onEdlChange ? "auto" : "none",
+    cursor: onEdlChange ? "grab" : undefined,
+  };
+  if (x === "center") {
+    wrapperStyle.left = "50%";
+    wrapperStyle.transform = "translateX(-50%)";
+  } else {
+    wrapperStyle.left = x;
+  }
+
+  const textStyle: React.CSSProperties = {
+    fontFamily: `${style.font_family ?? "Inter"}, sans-serif`,
+    fontSize: (style.font_size ?? 60) * scale,
+    fontWeight: (style.font_weight ??
+      "bold") as React.CSSProperties["fontWeight"],
+    color: style.color ?? "#FFFFFF",
+    lineHeight: 1.3,
+    wordWrap: "break-word",
+    textShadow: "0 2px 8px rgba(0,0,0,0.7)",
+  };
+  if (style.stroke_color && style.stroke_width) {
+    textStyle.WebkitTextStroke = `${style.stroke_width * scale}px ${style.stroke_color}`;
+    textStyle.paintOrder = "stroke fill";
+  }
+  if (style.background_color) {
+    textStyle.backgroundColor = style.background_color;
+    textStyle.padding = (style.background_padding ?? 8) * scale;
+    textStyle.borderRadius = 8 * scale;
+  }
+
+  const onPointerDown = (e: React.PointerEvent) => {
+    if (!onEdlChange) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const container = containerRef.current;
+    if (!container) return;
+    const rect = container.getBoundingClientRect();
+
+    const move = (ev: PointerEvent) => {
+      const xPct = ((ev.clientX - rect.left) / rect.width) * 100;
+      const yPct = ((ev.clientY - rect.top) / rect.height) * 100;
+      const clamped = (v: number) => Math.max(0, Math.min(100, v)).toFixed(1);
+      onEdlChange({
+        ...edl,
+        text_overlays: (edl.text_overlays ?? []).map((t) =>
+          t === overlay || (t.id && t.id === overlay.id)
+            ? {
+                ...t,
+                position: {
+                  ...(t.position ?? {}),
+                  x:
+                    Math.abs(xPct - 50) < 4 ? "center" : `${clamped(xPct)}%`,
+                  y: `${clamped(yPct)}%`,
+                },
+              }
+            : t,
+        ),
+      });
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
 
   return (
     <div
-      className="absolute bottom-6 left-0 right-0 flex items-center justify-center pointer-events-none px-4"
-      style={{ zIndex: 10 }}
+      style={wrapperStyle}
+      onPointerDown={onPointerDown}
+      onClick={(e) => e.stopPropagation()}
+    >
+      <span style={textStyle}>{overlay.text}</span>
+    </div>
+  );
+};
+
+// ─── Karaoke captions (whisper words) ─────────────────────────────────────────
+
+const CaptionView = ({
+  edl,
+  currentMs,
+  scale,
+  containerRef,
+  onEdlChange,
+}: {
+  edl: EdlDto;
+  currentMs: number;
+  scale: number;
+  containerRef: React.RefObject<HTMLDivElement | null>;
+  onEdlChange?: (next: EdlDto) => void;
+}) => {
+  const [dragZone, setDragZone] = useState<SubtitlePosition | null>(null);
+
+  const groups = useMemo(
+    () => groupWhisperWords(edl.whisper_words),
+    [edl.whisper_words],
+  );
+
+  if (!subtitlesEnabled(edl)) return null;
+
+  const config = edl.subtitle_config ?? {};
+  const group = activeGroupAt(groups, currentMs);
+  if (!group) return null;
+
+  const position = dragZone ?? toSubtitlePosition(config.position);
+  const highlightMode = config.highlight_mode ?? "word";
+  const highlight = highlightColorFor(config, group.index);
+
+  // Adaptive font size — same thresholds as the Remotion SubtitleTrack
+  const totalChars = group.words.reduce((sum, w) => sum + w.word.length, 0);
+  const base = config.font_size ?? 42;
+  const sizeMult =
+    totalChars <= 10 ? 1.4 : totalChars <= 18 ? 1.2 : totalChars <= 30 ? 1 : 0.85;
+  // Same px the renderer would use at 1080w, scaled down to the preview width
+  const fontSize = base * sizeMult * scale;
+
+  const zoneStyle: React.CSSProperties = {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    display: "flex",
+    justifyContent: "center",
+    textAlign: "center",
+    padding: "0 4%",
+    flexWrap: "wrap",
+    pointerEvents: onEdlChange ? "auto" : "none",
+    cursor: onEdlChange ? "grab" : undefined,
+  };
+  switch (position) {
+    case "top":
+      zoneStyle.top = "5%";
+      break;
+    case "top_third":
+      zoneStyle.top = "20%";
+      break;
+    case "center":
+      zoneStyle.top = "50%";
+      zoneStyle.transform = "translateY(-50%)";
+      break;
+    case "bottom":
+      zoneStyle.bottom = "5%";
+      break;
+    default:
+      zoneStyle.bottom = "20%";
+  }
+
+  const onPointerDown = (e: React.PointerEvent) => {
+    if (!onEdlChange) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const container = containerRef.current;
+    if (!container) return;
+    const rect = container.getBoundingClientRect();
+
+    let lastZone: SubtitlePosition | null = null;
+    const zoneFromY = (clientY: number): SubtitlePosition => {
+      const frac = Math.max(0, Math.min(1, (clientY - rect.top) / rect.height));
+      let best: SubtitlePosition = "bottom_third";
+      let bestDist = Infinity;
+      for (const [zone, anchor] of Object.entries(SUBTITLE_ZONE_Y)) {
+        const dist = Math.abs(frac - anchor);
+        if (dist < bestDist) {
+          bestDist = dist;
+          best = zone as SubtitlePosition;
+        }
+      }
+      return best;
+    };
+
+    const move = (ev: PointerEvent) => {
+      lastZone = zoneFromY(ev.clientY);
+      setDragZone(lastZone);
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      setDragZone(null);
+      if (lastZone) onEdlChange(withSubtitleConfig(edl, { position: lastZone }));
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
+
+  return (
+    <div
+      style={zoneStyle}
+      onPointerDown={onPointerDown}
+      onClick={(e) => e.stopPropagation()}
+      title="Drag to reposition captions"
     >
       <span
-        className="text-white text-sm font-semibold text-center leading-snug px-3 py-1.5 rounded-lg"
         style={{
-          background: "rgba(0,0,0,0.65)",
-          backdropFilter: "blur(4px)",
-          textShadow: "0 1px 3px rgba(0,0,0,0.8)",
-          maxWidth: "90%",
+          fontSize,
+          fontFamily: `${config.font_family ?? "Inter"}, sans-serif`,
+          fontWeight: 800,
+          WebkitTextStroke: `${(config.stroke_width ?? 3) * scale}px ${config.stroke_color ?? "#000000"}`,
+          paintOrder: "stroke fill",
+          lineHeight: 1.4,
+          textShadow: "0 2px 10px rgba(0, 0, 0, 0.8)",
         }}
       >
-        {active.text}
+        {group.words.map((w, i) => {
+          if (highlightMode === "sentence") {
+            return (
+              <span
+                key={i}
+                style={{
+                  color: highlight,
+                  display: "inline-block",
+                  marginRight: "0.3em",
+                }}
+              >
+                {w.word}
+              </span>
+            );
+          }
+          const isActive = currentMs >= w.start_ms - 30 && currentMs <= w.end_ms;
+          const isPast = currentMs > w.end_ms;
+          const color = isActive
+            ? highlight
+            : isPast
+              ? "#FFFFFF"
+              : "rgba(255,255,255,0.35)";
+          return (
+            <span
+              key={i}
+              style={{
+                color,
+                opacity: !isActive && !isPast ? 0.5 : 1,
+                transform: isActive ? "scale(1.15)" : "scale(1)",
+                display: "inline-block",
+                marginRight: "0.3em",
+                textShadow: isActive
+                  ? `0 0 14px ${highlight}80, 0 2px 10px rgba(0,0,0,0.8)`
+                  : undefined,
+              }}
+            >
+              {w.word}
+            </span>
+          );
+        })}
       </span>
     </div>
   );

@@ -113,18 +113,30 @@ export const useGenerationProgress = (
   const [progress, setProgress] = useState<ProgressPayload | null>(null);
   const [error, setError] = useState<unknown>(null);
   const [done, setDone] = useState(false);
+  /** Backend sent step=FAILED — holds the failure message. */
+  const [failed, setFailed] = useState<string | null>(null);
+  /** Every distinct step event received, in order — drives the step checklist. */
+  const [events, setEvents] = useState<ProgressPayload[]>([]);
   const closeRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     if (!generationId || !enabled) return;
     setDone(false);
     setError(null);
+    setFailed(null);
     setProgress(null);
+    setEvents([]);
 
     closeRef.current = streamGenerationProgress(generationId, {
       onEvent: (p) => {
         setProgress(p);
+        setEvents((prev) =>
+          prev.length && prev[prev.length - 1].step === p.step
+            ? [...prev.slice(0, -1), p]
+            : [...prev.slice(-49), p],
+        );
         if (p.step === "DONE") setDone(true);
+        if (p.step === "FAILED") setFailed(p.message || "Generation failed");
       },
       onError: (err) => setError(err),
       onClose: () => {},
@@ -133,7 +145,7 @@ export const useGenerationProgress = (
     return () => closeRef.current?.();
   }, [generationId, enabled]);
 
-  return { progress, error, done };
+  return { progress, error, done, failed, events };
 };
 
 /* ---------- generations history ---------- */

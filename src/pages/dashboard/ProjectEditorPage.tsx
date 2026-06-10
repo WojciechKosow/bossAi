@@ -37,6 +37,10 @@ import type { EdlDto } from "@/features/video/types";
 import { absoluteUrl } from "@/features/video/api";
 import { cn } from "@/lib/utils";
 import { formatTime } from "@/features/video/components/timeline/timelineUtils";
+import {
+  type SubtitleSelection,
+  ensureOverlayIds,
+} from "@/features/video/components/timeline/subtitleUtils";
 
 const ProjectEditorPage = () => {
   const { id } = useParams<{ id: string }>();
@@ -57,6 +61,8 @@ const ProjectEditorPage = () => {
   const originalRef = useRef<EdlDto | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selectedAudioId, setSelectedAudioId] = useState<string | null>(null);
+  const [selectedSubtitle, setSelectedSubtitle] =
+    useState<SubtitleSelection | null>(null);
   const [playing, setPlaying] = useState(false);
 
   // playheadMs is used ONLY for the transport bar display and for syncing the
@@ -75,8 +81,9 @@ const ProjectEditorPage = () => {
   /* hydrate edl from API once */
   useEffect(() => {
     if (timeline && !originalRef.current) {
-      originalRef.current = timeline;
-      setEdl(timeline);
+      const normalized = ensureOverlayIds(timeline);
+      originalRef.current = normalized;
+      setEdl(normalized);
     }
   }, [timeline]);
 
@@ -85,8 +92,9 @@ const ProjectEditorPage = () => {
     if (!timeline) return;
     const baseline = originalRef.current;
     if (baseline && baseline.version !== timeline.version && !dirty) {
-      originalRef.current = timeline;
-      setEdl(timeline);
+      const normalized = ensureOverlayIds(timeline);
+      originalRef.current = normalized;
+      setEdl(normalized);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [timeline?.version]);
@@ -239,11 +247,15 @@ const ProjectEditorPage = () => {
           layout
           className="rounded-xl border border-border bg-black overflow-hidden flex flex-col"
         >
-          <div className="aspect-[9/16] bg-black relative">
+          <div
+            className="aspect-[9/16] bg-black relative cursor-pointer"
+            onClick={togglePlay}
+          >
             <EdlPlayer
               ref={playerRef}
               edl={edl}
               className="size-full"
+              onEdlChange={setEdl}
               onTimeUpdate={(ms) => {
                 // 1. Update timeline playhead imperatively — no React re-render,
                 //    runs at full RAF speed (60 fps).
@@ -261,11 +273,9 @@ const ProjectEditorPage = () => {
               masterVolume={masterVolume}
             />
 
-            {/* Big play button overlay */}
-            <button
-              onClick={togglePlay}
-              className="absolute inset-0 flex items-center justify-center group"
-            >
+            {/* Big play indicator — visual only; clicks land on the container
+                so subtitles/overlays stay draggable above the video */}
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
               <AnimatePresence>
                 {!playing && (
                   <motion.div
@@ -279,7 +289,7 @@ const ProjectEditorPage = () => {
                   </motion.div>
                 )}
               </AnimatePresence>
-            </button>
+            </div>
           </div>
 
           {/* Transport bar */}
@@ -352,6 +362,8 @@ const ProjectEditorPage = () => {
             onSelectSegment={setSelectedId}
             selectedAudioId={selectedAudioId}
             onSelectAudio={setSelectedAudioId}
+            selectedSubtitle={selectedSubtitle}
+            onSelectSubtitle={setSelectedSubtitle}
             onChange={setEdl}
             playheadMs={playheadMs}
             onScrub={onScrub}
@@ -360,6 +372,8 @@ const ProjectEditorPage = () => {
             edl={edl}
             segment={selectedSegment}
             audioTrack={selectedAudioTrack}
+            subtitle={selectedSubtitle}
+            onSelectSubtitle={setSelectedSubtitle}
             onChange={setEdl}
           />
         </div>
