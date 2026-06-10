@@ -57,6 +57,9 @@ public class EdlGeneratorService {
     /** Characters that signal enumeration boundaries (comma-separated lists). */
     private static final Set<Character> ENUM_BREAKS = Set.of(',', ';');
 
+    /** Minimum time an overlay segment stays on screen — shorter reads as a glitch. */
+    private static final int MIN_OVERLAY_DISPLAY_MS = 1500;
+
     private final OpenAiService openAiService;
     private final ObjectMapper objectMapper;
     private final EffectRegistry effectRegistry;
@@ -621,11 +624,13 @@ public class EdlGeneratorService {
      * URL is built using the /internal/assets/raw/{assetId}/file endpoint which
      * serves plain Asset entities (not ProjectAssets) to the Remotion renderer.
      *
-     * IMPORTANT: endMs is clamped to the actual primary segment boundary that contains
+     * IMPORTANT: endMs is CAPPED at the actual primary segment boundary that contains
      * startMs. This is the only place where correct segment boundaries are known (after
      * EdlGeneratorService builds them from real TTS clip durations). OverlayPlacementEngine
      * calculates boundaries from GPT-estimated scene durations which may be inaccurate,
      * especially for custom TTS where clip durations differ from script estimates.
+     * The engine's sentence-level end (overlay disappears when the narration moves on)
+     * is preserved — we never extend it forward to the scene end.
      */
     private void appendOverlaySegments(EdlDto edl, GenerationContext context) {
         List<OverlayPlacement> placements = context.getOverlayPlacements();
@@ -642,12 +647,12 @@ public class EdlGeneratorService {
         List<EdlSegment> overlaySegments = new ArrayList<>();
 
         for (OverlayPlacement placement : placements) {
-            // Snap endMs to the actual rendered scene boundary so the overlay ends exactly
-            // when its scene (background + subtitles + TTS) ends, correcting any drift in
-            // the placement engine's estimated boundaries.
+            // Cap endMs at the actual rendered scene boundary (engine boundaries are
+            // estimates and can drift) while keeping the engine's sentence-level end —
+            // the overlay disappears when the narration moves on, possibly mid-scene.
             int endMs = clampOverlayEnd(placement.getStartMs(), placement.getEndMs(), primarySegments);
             if (endMs != placement.getEndMs()) {
-                log.info("[EdlGenerator] Overlay endMs snapped {} → {}ms (scene boundary) asset={}",
+                log.info("[EdlGenerator] Overlay endMs adjusted {} → {}ms (scene cap / min display) asset={}",
                         placement.getEndMs(), endMs, placement.getOverlayAssetId());
             }
 
@@ -694,16 +699,20 @@ public class EdlGeneratorService {
     }
 
     /**
-     * Snaps endMs to the END of the primary segment (layer=0) that contains startMs.
-     * An overlay belongs to exactly one scene/TTS clip — it appears at its trigger and
-     * disappears together with that scene's background and subtitles, regardless of any
-     * (possibly inaccurate) estimated end the placement engine computed.
+     * Caps endMs at the END of the primary segment (layer=0) that contains startMs.
+     * The placement engine decides the sentence-level end (overlay disappears when the
+     * narration moves to the next topic — possibly mid-scene); here we only guarantee
+     * it never spills past the rendered scene boundary, and never flashes for less
+     * than MIN_OVERLAY_DISPLAY_MS (the engine's estimated boundaries can drift from
+     * the real probed TTS clip durations used to build the EDL).
      * If no segment contains startMs, returns the original endMs unchanged.
      */
     private int clampOverlayEnd(int startMs, int endMs, List<EdlSegment> primarySegments) {
         for (EdlSegment seg : primarySegments) {
             if (startMs >= seg.getStartMs() && startMs < seg.getEndMs()) {
-                return seg.getEndMs();
+                int capped = Math.min(endMs, seg.getEndMs());
+                int minEnd = Math.min(startMs + MIN_OVERLAY_DISPLAY_MS, seg.getEndMs());
+                return Math.max(capped, minEnd);
             }
         }
         return endMs;

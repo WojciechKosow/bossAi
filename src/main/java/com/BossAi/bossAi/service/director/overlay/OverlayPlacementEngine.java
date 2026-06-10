@@ -1,6 +1,7 @@
 package com.BossAi.bossAi.service.director.overlay;
 
 import com.BossAi.bossAi.entity.Asset;
+import com.BossAi.bossAi.entity.AssetType;
 import com.BossAi.bossAi.service.OpenAiService;
 import com.BossAi.bossAi.service.StorageService;
 import com.BossAi.bossAi.service.SubtitleService;
@@ -62,6 +63,15 @@ public class OverlayPlacementEngine {
             "decoration", "fade_in"
     );
 
+    /** Minimum time an overlay stays on screen — anything shorter reads as a glitch. */
+    private static final int MIN_DISPLAY_MS = 1500;
+
+    /** How long the overlay lingers after the last word of its clause before disappearing. */
+    private static final int HOLD_AFTER_CLAUSE_MS = 400;
+
+    /** A pause between words longer than this marks a sentence/topic boundary in TTS. */
+    private static final int SENTENCE_GAP_MS = 600;
+
     /**
      * Clause boundary for BACKWARD scan (finding clause start).
      * Comma included — stops us from pulling in the preceding unrelated clause.
@@ -70,6 +80,16 @@ public class OverlayPlacementEngine {
         if (word == null || word.isEmpty()) return false;
         char last = word.charAt(word.length() - 1);
         return last == '.' || last == ',' || last == '!' || last == '?' || last == ';';
+    }
+
+    /**
+     * Sentence boundary for FORWARD scan (finding where the overlay's clause ends).
+     * Comma excluded — "dołącz na discord, gdzie codziennie..." is still the same topic.
+     */
+    private static boolean endsWithSentenceMarker(String word) {
+        if (word == null || word.isEmpty()) return false;
+        char last = word.charAt(word.length() - 1);
+        return last == '.' || last == '!' || last == '?' || last == ';';
     }
 
     // =========================================================================
@@ -87,6 +107,20 @@ public class OverlayPlacementEngine {
         if (overlays == null || overlays.isEmpty()) {
             log.debug("[OverlayEngine] No overlay assets — skipping");
             return;
+        }
+
+        // Renderer composites overlays with <Img> — only static images (and GIFs) work.
+        List<Asset> unsupported = overlays.stream()
+                .filter(a -> a.getType() != AssetType.IMAGE && a.getType() != AssetType.GIF)
+                .toList();
+        if (!unsupported.isEmpty()) {
+            unsupported.forEach(a -> log.warn(
+                    "[OverlayEngine] Skipping overlay asset {} — type {} not supported as overlay (only IMAGE/GIF)",
+                    a.getId(), a.getType()));
+            overlays = overlays.stream()
+                    .filter(a -> a.getType() == AssetType.IMAGE || a.getType() == AssetType.GIF)
+                    .toList();
+            if (overlays.isEmpty()) return;
         }
 
         log.info("[OverlayEngine] Processing {} overlay asset(s)", overlays.size());
@@ -330,6 +364,46 @@ public class OverlayPlacementEngine {
         return 0;
     }
 
+    /**
+     * Scans FORWARD from the matched keyword to find the end of the sentence/clause
+     * that mentions the overlay's subject. The overlay must disappear when the
+     * narration moves on — "join our discord server. [logo gone] Okay, let's start".
+     *
+     * Stop conditions (whichever comes first):
+     *   a) a word ending with sentence punctuation (. ! ? ;) — comma does NOT stop us
+     *   b) a pause >SENTENCE_GAP_MS before the next word
+     *   c) the scene end — never extend past the keyword's scene
+     *
+     * Returns the stop word's endMs + a short hold (never bleeding into the next word
+     * beyond the actual gap), capped at sceneEndMs. Falls back to sceneEndMs when no
+     * sentence boundary is found within the scene.
+     */
+    private int clauseEndAfter(int keywordIdx,
+                               List<SubtitleService.WordTiming> wordTimings,
+                               int sceneEndMs) {
+        for (int fwd = keywordIdx; fwd < wordTimings.size(); fwd++) {
+            SubtitleService.WordTiming w = wordTimings.get(fwd);
+            if (w.endMs() >= sceneEndMs) return sceneEndMs;
+
+            long gapToNext = (fwd + 1 < wordTimings.size())
+                    ? wordTimings.get(fwd + 1).startMs() - w.endMs()
+                    : Long.MAX_VALUE;
+
+            if (endsWithSentenceMarker(w.word()) || gapToNext > SENTENCE_GAP_MS) {
+                int hold = (int) Math.min(HOLD_AFTER_CLAUSE_MS, gapToNext);
+                return Math.min(w.endMs() + hold, sceneEndMs);
+            }
+        }
+        return sceneEndMs;
+    }
+
+    /**
+     * Enforces MIN_DISPLAY_MS (so the overlay never flashes) while capping at sceneEndMs.
+     */
+    private int enforceMinDisplay(int startMs, int endMs, int sceneEndMs) {
+        return Math.max(endMs, Math.min(startMs + MIN_DISPLAY_MS, sceneEndMs));
+    }
+
     /** Returns the last word timing's endMs + 300ms — the furthest point TTS audio plays. */
     private int estimateTtsEnd(GenerationContext context) {
         List<SubtitleService.WordTiming> wordTimings = context.getWordTimings();
@@ -437,12 +511,23 @@ public class OverlayPlacementEngine {
                    start_ms = timestamp of the first word AFTER that stop point − 100ms.
                    Example: "zanim zaczniemy [2s pause] dołącz na serwer discord" → keyword "discord" →
                    scan back: gap found before "dołącz" → start_ms = timestamp of "dołącz" − 100ms.
-                4. end_ms = the END of the SCENE that contains the keyword (from SCENE BOUNDARIES).
-                   The overlay disappears together with that scene — its background clip,
-                   subtitles and TTS all end at the scene boundary, so the overlay does too.
-                   Do NOT extend it past the keyword's scene, and do NOT cut it short mid-scene.
-                5. If no keyword match: place at 80%% of video duration, end at that scene's end.
-                6. Subtitles occupy y > 0.78 — never place overlays there.
+                4. end_ms: scan FORWARD from the matched keyword to find where its sentence ends.
+                   Go word by word forward and STOP at whichever comes first:
+                     a) A word ending with sentence punctuation (period, exclamation, question mark, semicolon)
+                        — a comma does NOT stop you, the clause continues.
+                     b) A pause >600ms between two consecutive words.
+                     c) The END of the containing scene (from SCENE BOUNDARIES) — NEVER go past it.
+                   end_ms = timestamp where that stop word ENDS + 400ms.
+                   The overlay must DISAPPEAR when the narration moves to the next topic.
+                   Example: "dołącz na nasz serwer discord. okej, to zaczynamy" → the Discord logo
+                   ends right after "discord." — it must be GONE when "okej" is spoken.
+                   EXCEPTION: if the NEXT sentence still talks about the same subject as the overlay
+                   (e.g. "join our discord. we post all signals there daily"), extend end_ms to the
+                   end of that sentence too — but never past the keyword's scene end.
+                5. Minimum display time: 1500ms. If the sentence ends sooner, extend end_ms to
+                   start_ms + 1500ms (still capped at the scene end).
+                6. If no keyword match: place at 80%% of video duration, end at that scene's end.
+                7. Subtitles occupy y > 0.78 — never place overlays there.
 
                 Return ONLY a JSON array (no markdown, no wrapper object):
                 [
@@ -493,11 +578,18 @@ public class OverlayPlacementEngine {
             float[] pos = POSITION_PRESETS.getOrDefault(desc.getCategory(),
                     POSITION_PRESETS.get("decoration"));
 
+            // GPT decides the sentence-level end; we only sanity-bound it:
+            // never past the start scene's end, never shorter than MIN_DISPLAY_MS.
+            int startMs = p.path("start_ms").asInt();
+            int sceneEnd = sceneEndForTime(startMs, sceneBoundaries, totalDurationMs);
+            int endMs = Math.min(p.path("end_ms").asInt(), sceneEnd);
+            endMs = enforceMinDisplay(startMs, endMs, sceneEnd);
+
             result.add(OverlayPlacement.builder()
                     .overlayAssetId(desc.getAssetId())
                     .overlayAssetUrl(desc.getAssetUrl())
-                    .startMs(p.path("start_ms").asInt())
-                    .endMs(p.path("end_ms").asInt())
+                    .startMs(startMs)
+                    .endMs(endMs)
                     .x((float) p.path("x").asDouble(pos[0]))
                     .y((float) p.path("y").asDouble(pos[1]))
                     .width((float) p.path("width").asDouble(pos[2]))
@@ -560,12 +652,13 @@ public class OverlayPlacementEngine {
                     // overlay to that clip's end and it would flash for ~100ms.
                     startMs = Math.max(keywordSceneStart, wordTimings.get(clauseStartIdx).startMs() - 100);
 
-                    // The overlay stays visible until the END of the keyword's scene — it
-                    // disappears together with that scene's TTS, subtitles and background clip.
-                    // (Per-sentence forward scans ended too early: WhisperX emits punctuation
-                    // mid-clip and TTS has intra-sentence pauses.) clampOverlayEnd in
-                    // EdlGeneratorService snaps this to the exact rendered segment boundary.
-                    endMs = sceneEndForTime(wt.startMs(), sceneBoundaries, totalDurationMs);
+                    // The overlay disappears when its SENTENCE ends — not when the scene ends.
+                    // "dołącz na nasz discord. [logo gone] okej, zaczynamy" — the logo must not
+                    // linger into the next topic. Scene end is only a hard cap; MIN_DISPLAY_MS
+                    // guards against a flash when the keyword sits at the end of its sentence.
+                    int sceneEnd = sceneEndForTime(wt.startMs(), sceneBoundaries, totalDurationMs);
+                    endMs = enforceMinDisplay(startMs,
+                            clauseEndAfter(wtIdx, wordTimings, sceneEnd), sceneEnd);
                     break;
                 }
             }
