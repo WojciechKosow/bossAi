@@ -239,15 +239,67 @@ export interface EdlAudioTrack {
   trim_out_ms?: number | null;
 }
 
+export interface EdlTextStyle {
+  font_family?: string;
+  font_size?: number;
+  font_weight?: string;
+  color?: string;
+  stroke_color?: string;
+  stroke_width?: number;
+  background_color?: string;
+  background_padding?: number;
+}
+
+export interface EdlTextPosition {
+  /** "center" | "<n>%" */
+  x?: string;
+  /** "<n>%" from the top */
+  y?: string;
+  max_width?: string;
+  text_align?: string;
+}
+
+export type TextAnimation =
+  | "fade_in"
+  | "slide_up"
+  | "typewriter"
+  | "bounce"
+  | "word_by_word"
+  | "karaoke";
+
 export interface EdlTextOverlay {
   id?: string;
   text: string;
   type?: string;
   start_ms: number;
   end_ms: number;
-  style?: Record<string, unknown>;
-  position?: Record<string, unknown>;
-  animation?: string;
+  style?: EdlTextStyle;
+  position?: EdlTextPosition;
+  animation?: TextAnimation | string;
+}
+
+/** Named vertical zones understood by the Remotion SubtitleTrack. */
+export type SubtitlePosition =
+  | "top"
+  | "top_third"
+  | "center"
+  | "bottom_third"
+  | "bottom";
+
+export interface EdlSubtitleConfig {
+  enabled?: boolean;
+  position?: SubtitlePosition | string;
+  highlight_color?: string;
+  /** Rotated per subtitle group for visual variety. */
+  highlight_colors?: string[];
+  /** "word" = karaoke per-word highlight, "sentence" = whole group at once. */
+  highlight_mode?: "word" | "sentence" | string;
+  /** Desired words per on-screen group; 1 = one word at a time. */
+  max_words_per_group?: number;
+  font_size?: number;
+  font_family?: string;
+  stroke_color?: string;
+  stroke_width?: number;
 }
 
 export interface EdlWhisperWord {
@@ -276,7 +328,7 @@ export interface EdlDto {
   audio_tracks?: EdlAudioTrack[];
   text_overlays?: EdlTextOverlay[];
   whisper_words?: EdlWhisperWord[];
-  subtitle_config?: Record<string, unknown>;
+  subtitle_config?: EdlSubtitleConfig;
 }
 
 export interface EdlVersionDTO {
