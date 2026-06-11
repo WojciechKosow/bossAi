@@ -7,6 +7,8 @@ import com.BossAi.bossAi.service.director.JustifiedCut;
 import com.BossAi.bossAi.service.director.NarrationAnalysis;
 import com.BossAi.bossAi.service.director.SceneDirective;
 import com.BossAi.bossAi.service.dna.DnaPreset;
+import com.BossAi.bossAi.service.dna.DnaPresetConfig;
+import com.BossAi.bossAi.service.dna.DnaPresetService;
 import com.BossAi.bossAi.service.generation.GenerationContext;
 import com.BossAi.bossAi.service.generation.context.SceneAsset;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -45,8 +47,9 @@ public class AutonomousCompositionDecider {
 
     private final OpenAiService openAiService;
     private final ObjectMapper objectMapper;
+    private final DnaPresetService dnaPresetService;
 
-    private static final int MAX_LAYERED_SCENES_PCT = 40; // max 40% scen może mieć warstwy
+    private static final int DEFAULT_MAX_LAYERED_SCENES_PCT = 40; // max 40% scen może mieć warstwy
 
     /**
      * Główna metoda — decyduje o kompozycji i wypełnia SceneAsset.layerAssetIds.
@@ -63,21 +66,27 @@ public class AutonomousCompositionDecider {
             return;
         }
 
-        DnaPreset preset = context.getDnaPreset();
-        if (preset != DnaPreset.PROBLEM_PAYOFF) {
-            log.info("[Composition] DNA preset {} — composition rules not yet implemented for this preset",
-                    preset != null ? preset.name() : "none");
+        // Composition rules come from the style's config — any preset that
+        // declares a composition_rules section participates, no Java changes.
+        DnaPresetConfig dnaConfig = resolveDnaConfig(context.getDnaPreset(), context);
+        DnaPresetConfig.CompositionRules rules =
+                dnaConfig != null ? dnaConfig.getCompositionRules() : null;
+        if (rules == null || !rules.isEnabled()
+                || rules.getRules() == null || rules.getRules().isEmpty()) {
+            log.info("[Composition] DNA preset {} declares no composition rules — skipping",
+                    context.getDnaPreset() != null ? context.getDnaPreset().name() : "none");
             return;
         }
 
-        log.info("[Composition] Starting autonomous composition for PROBLEM_PAYOFF — {} assets, {} cuts",
-                context.getAssetProfiles().size(), context.getJustifiedCuts().size());
+        log.info("[Composition] Starting autonomous composition for {} — {} assets, {} cuts, {} rules",
+                dnaConfig.getId(), context.getAssetProfiles().size(),
+                context.getJustifiedCuts().size(), rules.getRules().size());
 
         // Build sceneIndex → ProjectAsset map (same 1:1 ordering as EdlGeneratorService)
         Map<Integer, ProjectAsset> sceneAssets = buildSceneAssetMap(projectAssets);
 
         // Phase 1: generate candidates via deterministic rules
-        List<CompositionCandidate> candidates = generateCandidates(context, sceneAssets);
+        List<CompositionCandidate> candidates = generateCandidates(context, sceneAssets, dnaConfig);
         if (candidates.isEmpty()) {
             log.info("[Composition] No composition candidates generated");
             return;
@@ -85,7 +94,7 @@ public class AutonomousCompositionDecider {
         log.info("[Composition] Generated {} candidates via rules", candidates.size());
 
         // Phase 2: GPT verification — accept/reject each candidate
-        List<CompositionCandidate> accepted = verifyWithGpt(candidates, context);
+        List<CompositionCandidate> accepted = verifyWithGpt(candidates, context, dnaConfig);
         if (accepted.isEmpty()) {
             log.info("[Composition] GPT rejected all candidates");
             return;
@@ -101,13 +110,17 @@ public class AutonomousCompositionDecider {
     // =========================================================================
 
     private List<CompositionCandidate> generateCandidates(GenerationContext context,
-                                                           Map<Integer, ProjectAsset> sceneAssets) {
+                                                           Map<Integer, ProjectAsset> sceneAssets,
+                                                           DnaPresetConfig dnaConfig) {
         List<AssetProfile> profiles = context.getAssetProfiles();
         List<JustifiedCut> cuts = context.getJustifiedCuts();
         NarrationAnalysis narration = context.getNarrationAnalysis();
+        DnaPresetConfig.CompositionRules rules = dnaConfig.getCompositionRules();
 
         int totalDurationMs = cuts.get(cuts.size() - 1).getEndMs();
-        int maxLayered = Math.max(1, cuts.size() * MAX_LAYERED_SCENES_PCT / 100);
+        int maxLayeredPct = rules.getMaxLayeredScenesPct() != null
+                ? rules.getMaxLayeredScenesPct() : DEFAULT_MAX_LAYERED_SCENES_PCT;
+        int maxLayered = Math.max(1, cuts.size() * maxLayeredPct / 100);
 
         // Pre-compute asset pools for each role
         List<Integer> backgroundPool = buildBackgroundPool(profiles);
@@ -124,14 +137,15 @@ public class AutonomousCompositionDecider {
 
             AssetProfile primary = profiles.get(assetIdx);
             NarrationAnalysis.NarrationSegment segment = findSegment(narration, cut.getStartMs());
-            String beat = determineBeat(cut, totalDurationMs);
+            String beat = determineBeat(cut, totalDurationMs, dnaConfig);
             String segType = segment != null ? segment.getType() : "point";
 
             // ── Rule 1: TalkingHeadBg ──────────────────────────────────────────
-            // Talking head (testimonial/person) on blurred b-roll background
-            // Phases: B (problem), C (tension), E (transform)
+            // Talking head (testimonial/person) on blurred b-roll background.
+            // Beats scoped by the style's composition_rules.
             if (isTalkingHead(primary) && !backgroundPool.isEmpty()
-                    && isPhaseForTalkingHeadBg(beat, segType)) {
+                    && ruleApplies(rules, "TalkingHeadBg", beat, segType)
+                    && !("hook".equals(segType) || "cta".equals(segType))) {
 
                 int bgIdx = findBestBackground(backgroundPool, assetIdx, profiles, usedAsBg);
                 if (bgIdx >= 0) {
@@ -154,9 +168,9 @@ public class AutonomousCompositionDecider {
             }
 
             // ── Rule 2: ProductReveal ──────────────────────────────────────────
-            // Product-shot overlay during reveal/climax phase
-            // Phase: D (reveal), triggered by climax/emphasis segments
-            if (isRevealPhase(beat, segType) && !overlayPool.isEmpty()) {
+            // Product-shot overlay during the style's reveal beats or on
+            // climax/emphasis narration (trigger_segment_types).
+            if (ruleApplies(rules, "ProductReveal", beat, segType) && !overlayPool.isEmpty()) {
                 int productIdx = findProductShot(overlayPool, profiles, assetIdx);
                 if (productIdx >= 0) {
                     candidates.add(CompositionCandidate.builder()
@@ -177,9 +191,10 @@ public class AutonomousCompositionDecider {
             }
 
             // ── Rule 3: CtaOverlay ────────────────────────────────────────────
-            // CTA asset overlay on final scenes
-            // Phase: F (cta) or last 2 scenes
-            if (!ctaPlaced && isCtaPhase(beat, segType, i, cuts.size()) && !overlayPool.isEmpty()) {
+            // CTA asset overlay on the style's closing beats or last 2 scenes
+            if (!ctaPlaced && !overlayPool.isEmpty()
+                    && (ruleApplies(rules, "CtaOverlay", beat, segType)
+                        || i >= cuts.size() - 2)) {
                 int ctaIdx = findCtaAsset(overlayPool, profiles, assetIdx);
                 if (ctaIdx >= 0) {
                     ctaPlaced = true;
@@ -208,9 +223,10 @@ public class AutonomousCompositionDecider {
     // =========================================================================
 
     private List<CompositionCandidate> verifyWithGpt(List<CompositionCandidate> candidates,
-                                                      GenerationContext context) {
+                                                      GenerationContext context,
+                                                      DnaPresetConfig dnaConfig) {
         try {
-            String prompt = buildVerificationPrompt(candidates, context);
+            String prompt = buildVerificationPrompt(candidates, context, dnaConfig);
             String rawJson = openAiService.generateDirectorPlan(prompt);
 
             JsonNode root = objectMapper.readTree(rawJson);
@@ -246,15 +262,26 @@ public class AutonomousCompositionDecider {
     }
 
     private String buildVerificationPrompt(List<CompositionCandidate> candidates,
-                                            GenerationContext context) {
+                                            GenerationContext context,
+                                            DnaPresetConfig dnaConfig) {
         StringBuilder sb = new StringBuilder();
         sb.append("""
                 You are a professional TikTok video editor reviewing proposed multi-layer scene compositions.
                 Your job: decide which compositions genuinely improve the video and which would look weird or forced.
 
-                DNA Template: PROBLEM_PAYOFF
-                Structure: Hook → Problem escalation → Tension → Product reveal → Transformation → CTA
+                """);
 
+        sb.append("DNA Template: ").append(dnaConfig.getId()).append("\n");
+        if (dnaConfig.getBeats() != null && !dnaConfig.getBeats().isEmpty()) {
+            String structure = dnaConfig.getBeats().entrySet().stream()
+                    .sorted(Map.Entry.comparingByKey())
+                    .map(e -> e.getValue().getName())
+                    .collect(Collectors.joining(" → "));
+            sb.append("Structure: ").append(structure).append("\n");
+        }
+        sb.append("\n");
+
+        sb.append("""
                 ACCEPT a composition when:
                 - It makes creative sense for TikTok at this exact moment in the video
                 - The background/overlay asset visually complements the primary without distraction
@@ -357,20 +384,24 @@ public class AutonomousCompositionDecider {
                 || profile.getVisualWeight() >= 0.85;
     }
 
-    private boolean isPhaseForTalkingHeadBg(String beat, String segType) {
-        // Apply in problem (B), tension (C), transform (E) phases — NOT hook (A) or cta (F)
-        if (beat != null && (beat.equals("A") || beat.equals("F"))) return false;
-        return !("hook".equals(segType) || "cta".equals(segType));
-    }
+    /**
+     * Whether a named composition rule fires for this beat/segment per the
+     * style's config. A rule with neither beats nor trigger types declared
+     * applies everywhere; otherwise either scope matching is enough (mirrors
+     * the original beat-OR-segment-type semantics).
+     */
+    private boolean ruleApplies(DnaPresetConfig.CompositionRules rules, String ruleName,
+                                String beat, String segType) {
+        DnaPresetConfig.CompositionRule rule = rules.getRules().get(ruleName);
+        if (rule == null || !rule.isEnabled()) return false;
 
-    private boolean isRevealPhase(String beat, String segType) {
-        return "D".equals(beat) || "E".equals(beat)
-                || "climax".equals(segType) || "emphasis".equals(segType);
-    }
+        List<String> beats = rule.getApplicableBeats();
+        List<String> segTypes = rule.getTriggerSegmentTypes();
+        if (beats == null && segTypes == null) return true;
 
-    private boolean isCtaPhase(String beat, String segType, int sceneIndex, int totalScenes) {
-        return "F".equals(beat) || "cta".equals(segType)
-                || sceneIndex >= totalScenes - 2;
+        boolean beatMatch = beats != null && beat != null && beats.contains(beat);
+        boolean segMatch = segTypes != null && segType != null && segTypes.contains(segType);
+        return beatMatch || segMatch;
     }
 
     private List<Integer> buildBackgroundPool(List<AssetProfile> profiles) {
@@ -445,32 +476,33 @@ public class AutonomousCompositionDecider {
     // =========================================================================
 
     /**
-     * Maps a JustifiedCut to a Problem/Payoff beat letter (A-F) based on
-     * its position in the total video duration.
-     *
-     * Percentages derived from problem_payoff.json beat time ranges (30s nominal):
-     *   A: 0-10%   (hook)
-     *   B: 10-27%  (problem escalation)
-     *   C: 27-50%  (tension/sync)
-     *   D: 50-73%  (reveal/product)
-     *   E: 73-90%  (transformation)
-     *   F: 90-100% (cta)
+     * Maps a JustifiedCut to the style's beat letter by proportional position —
+     * beat ranges come from the preset config (30s nominal baseline), so any
+     * style's beat structure works without Java changes.
      */
-    private String determineBeat(JustifiedCut cut, int totalDurationMs) {
-        if (totalDurationMs <= 0) return "C";
+    private String determineBeat(JustifiedCut cut, int totalDurationMs, DnaPresetConfig dnaConfig) {
+        Map<String, DnaPresetConfig.BeatConfig> beats = dnaConfig.getBeats();
+        if (beats == null || beats.isEmpty()) return "C";
+
+        List<String> sortedKeys = beats.keySet().stream().sorted().toList();
+        String firstBeat = sortedKeys.get(0);
+        String lastBeat = sortedKeys.get(sortedKeys.size() - 1);
+
+        // editingPhase from CutEngine wins for the extremes
+        String phase = cut.getEditingPhase();
+        if ("opening".equals(phase)) return firstBeat;
+        if ("resolution".equals(phase) || "outro".equals(phase)) return lastBeat;
+
+        if (totalDurationMs <= 0) return sortedKeys.get(sortedKeys.size() / 2);
         double pct = (double) cut.getStartMs() / totalDurationMs;
 
-        // Also consider editingPhase from CutEngine
-        String phase = cut.getEditingPhase();
-        if ("opening".equals(phase)) return "A";
-        if ("resolution".equals(phase) || "outro".equals(phase)) return "F";
-
-        if (pct < 0.10) return "A";
-        if (pct < 0.27) return "B";
-        if (pct < 0.50) return "C";
-        if (pct < 0.73) return "D";
-        if (pct < 0.90) return "E";
-        return "F";
+        for (String key : sortedKeys) {
+            DnaPresetConfig.BeatConfig beat = beats.get(key);
+            double start = beat.getStartMs() / 30_000.0;
+            double end = beat.getEndMs() / 30_000.0;
+            if (pct >= start && pct < end) return key;
+        }
+        return lastBeat;
     }
 
     private NarrationAnalysis.NarrationSegment findSegment(NarrationAnalysis narration, int startMs) {
@@ -489,6 +521,18 @@ public class AutonomousCompositionDecider {
     // =========================================================================
     // UTILITIES
     // =========================================================================
+
+    /** Resolves the style config (with user overrides); null = no composition. */
+    private DnaPresetConfig resolveDnaConfig(DnaPreset preset, GenerationContext context) {
+        if (preset == null || !dnaPresetService.isAvailable(preset)) return null;
+        try {
+            return dnaPresetService.resolve(preset, context.getUserDnaInput());
+        } catch (Exception e) {
+            log.warn("[Composition] Failed to resolve DNA config for {} — skipping composition: {}",
+                    preset, e.getMessage());
+            return null;
+        }
+    }
 
     private boolean canDecide(GenerationContext context) {
         return context.getAssetProfiles() != null && !context.getAssetProfiles().isEmpty()

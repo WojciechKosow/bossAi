@@ -50,6 +50,7 @@ public class GenerationServiceImpl implements GenerationService {
     private final AssetService assetService;
     private final FfmpegProperties ffmpegProperties;
     private final StyleService styleService;
+    private final com.BossAi.bossAi.service.dna.DnaPresetService dnaPresetService;
 
     private static final int MAX_ACTIVE_GENERATIONS = 1;
     private static final int GENERATION_COOLDOWN_SECONDS = 5;
@@ -631,14 +632,31 @@ public class GenerationServiceImpl implements GenerationService {
         return java.util.Arrays.asList(slots);
     }
 
-    /** Parses dnaPreset string from request to enum. Returns null for unknown/blank values. */
+    /**
+     * Parses dnaPreset string from request to enum. Blank/null = no preset
+     * requested (auto-default logic applies). An explicitly requested preset
+     * that is unknown or not yet implemented fails fast with a clear 400 —
+     * silently ignoring the user's style choice is worse than an error.
+     */
     private DnaPreset parseDnaPreset(String value) {
         if (value == null || value.isBlank()) return null;
+
+        String available = dnaPresetService.availablePresets().stream()
+                .map(Enum::name)
+                .reduce((a, b) -> a + ", " + b)
+                .orElse("none");
+
+        DnaPreset preset;
         try {
-            return DnaPreset.valueOf(value.toUpperCase().trim());
+            preset = DnaPreset.valueOf(value.toUpperCase().trim());
         } catch (IllegalArgumentException e) {
-            log.warn("[GenerationService] Unknown dnaPreset value '{}' — ignoring", value);
-            return null;
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Unknown dnaPreset '" + value + "'. Available presets: " + available);
         }
+        if (!dnaPresetService.isAvailable(preset)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "dnaPreset '" + preset.name() + "' is not implemented yet. Available presets: " + available);
+        }
+        return preset;
     }
 }

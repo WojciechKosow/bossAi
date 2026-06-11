@@ -1,0 +1,60 @@
+=== DNA PRESET: BEFORE → AFTER ===
+Narrative structure: Hook (before state) → Struggle → Turning point → After reveal → Proof → CTA
+Pacing: MODERATE — deliberate holds in the "before" half (2.5–3s), energetic in the reveal (2–3s)
+Color arc: cold/desaturated "before" (beats A–B) → warming at the turning point (C) → vivid, bright "after" (beats D–E)
+The core of this style is CONTRAST: the viewer must FEEL the difference between before and after.
+
+--- BEAT DEFINITIONS ---
+Beat A (HOOK/BEFORE):   the raw "before" state — the problem made visible. Effect: fast_zoom or zoom_out (pull back to show reality). Transition: cut.
+Beat B (STRUGGLE):      pain of the before state, failed attempts. Effect: zoom_in_offset, slow pans. Transition: cut.
+Beat C (TURNING POINT): discovery of the solution — lean in. Effect: zoom_in. Transition: fade (180ms).
+Beat D (AFTER/REVEAL):  THE contrast moment — bright, saturated "after". Effect: brightness_burst or color_pop. Transition: fade_white (150ms) into this beat.
+Beat E (PROOF):         results, numbers, social proof. Effect: ken_burns, gentle zoom_in. Transition: fade.
+Beat F (CTA):           clean professional close. Effect: subtle ken_burns. Transition: fade (400ms).
+
+--- ASSET CLASSIFICATION ---
+Classify each segment by visual content:
+  "Before" visuals (problem, mess, old state)       → beat A or B
+  Discovery / product being introduced              → beat C
+  "After" visuals (result, transformation, new state) → beat D
+  Proof / testimonials / numbers                    → beat E
+  Clean / logo / call-to-action                     → beat F
+  Unclassifiable                                    → beat C (safe default)
+
+--- REQUIRED SEGMENT FIELDS ---
+Add to every segment in the EDL:
+  "beat": "A" | "B" | "C" | "D" | "E" | "F"
+  "color_grade_override": {
+    A: {"saturation":0.55, "contrast_boost":1.3,  "brightness":0.9,  "vignette":0.25}
+    B: {"saturation":0.6,  "contrast_boost":1.25, "brightness":0.88, "vignette":0.22}
+    C: {"saturation":0.85, "contrast_boost":1.2,  "brightness":0.96, "vignette":0.15}
+    D: {"saturation":1.2,  "contrast_boost":1.15, "brightness":1.05, "vignette":0.05}
+    E: {"saturation":1.15, "contrast_boost":1.15, "brightness":1.03, "vignette":0.08}
+    F: {"saturation":1.05, "contrast_boost":1.1,  "brightness":1.0,  "vignette":0.05}
+  }
+
+--- REQUIRED TEXT OVERLAYS ---
+Generate these text overlays IN ADDITION to subtitles (whisper_words handle subtitles separately):
+  1. HOOK overlay (beat A, layer 2):
+     - "content": <3-6 word "before" framing, e.g. "Tak wyglądało moje życie" / "This was me 30 days ago">
+     - "type": "TEXT_OVERLAY", "animation": "fade_in"
+     - style: font_size 56, font_weight "bold", color "#FFFFFF", stroke_color "#000000", stroke_width 4
+     - position: "center"
+
+  2. RESULT overlay (beat D, layer 2):
+     - "content": <the after, with a concrete number/timeframe, e.g. "30 dni później" / "+12kg muscle in 90 days">
+     - "type": "TEXT_OVERLAY", "animation": "slide_up"
+     - style: font_size 52, color "#4ECDC4", stroke_color "#000000", stroke_width 3
+     - position: "bottom_third"
+
+  3. CTA overlay (beat F, layer 2):
+     - "content": <single CTA action, e.g. "Zacznij dziś" / "Link w bio" / "Start now">
+     - "type": "TEXT_OVERLAY", "animation": "fade_in"
+     - style: font_size 46, color "#FFFFFF", background_color "#1D7A74", background_padding 20, border_radius 8
+     - position: "bottom_quarter"
+
+--- CRITICAL RULES ---
+- NEVER change the number of segments to be different from the number of visual assets provided
+- The beat field is a HINT — do not let it override asset count or 1:1 scene-to-asset mapping
+- Each segment must still use the asset assigned to that scene position
+- Order "before" content ahead of "after" content ONLY by beat tagging — never reorder the user's assets
