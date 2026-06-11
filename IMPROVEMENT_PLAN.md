@@ -107,6 +107,15 @@ Acceptance: same 5 assets rendered twice with different narrations produce visib
 
 ### Phase C — Editor hardening (ship the edit → re-render loop)
 
+> **STATUS: DONE (C1–C3)** — commit on this branch after Phase B.
+> Delivered: EdlValidator strict/lenient split with structured issues (scope/index/field/message) —
+> strict PUT /timeline rejects unknown asset_ids, out-of-range trims, segments playing past trimmed
+> source, >500ms primary-layer gaps, untransitioned overlaps, unknown effects, broken whisper words;
+> structured 400 body { message, errors[], warnings[] } via EdlValidationException + handler;
+> whisper_words validated as user-editable (C2); GET /api/v1/projects/{id}/render/progress SSE
+> (RenderProgressService + RemotionRenderClient progress callback + orchestrator broadcasts) (C3).
+> C4 (frontend wiring: version-restore picker, draft-save toggle, asset swap UI) remains — backend ready.
+
 - **C1. Validation that fails fast, not at render** — `service/edl/EdlValidator.java`
   - Reject unknown `asset_id` (exists in ProjectAsset + owned by project); reject `trim_in_ms/trim_out_ms` outside asset duration; gaps >500ms and same-layer overlaps without transition become errors, not warnings.
   - Structured error response: `{segments: [{index, field, error}], audio_tracks: [...]}` instead of concatenated strings.
