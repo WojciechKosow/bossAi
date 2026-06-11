@@ -125,6 +125,15 @@ Acceptance: same 5 assets rendered twice with different narrations produce visib
 
 ### Phase D — Style system generalization (only after PROBLEM_PAYOFF is excellent)
 
+> **STATUS: DONE** — commit on this branch after Phase C.
+> D1: composition gate + rule scoping + beat boundaries + GPT header are config-driven (the JSON's
+> composition_rules section is finally parsed). D2: a style = grammar JSON + prompt txt, zero Java —
+> enforced by DnaPresetLintTest which lints every implemented preset (beat coverage, valid effects,
+> intensity ranges, rule scopes, prompt file presence). D3: BEFORE_AFTER shipped end-to-end
+> (contrast arc: muted before → fade_white → vivid after, own grammar/music curve/overlays/prompt);
+> proven different edit vs PROBLEM_PAYOFF on identical content. D4: unknown/unimplemented dnaPreset
+> → clear 400 listing available presets instead of silent fallback.
+
 - **D1.** Remove the PROBLEM_PAYOFF hard-gate in `AutonomousCompositionDecider.java:66–71`; composition rules read from the style grammar.
 - **D2.** A new style = one grammar JSON + one prompt file, zero Java changes (B2 makes this true).
 - **D3.** Ship a second style end-to-end as proof (suggest `BEFORE_AFTER` — closest to existing footage patterns).
