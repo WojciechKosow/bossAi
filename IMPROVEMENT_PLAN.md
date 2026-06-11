@@ -79,6 +79,17 @@ Acceptance: a video from 3 landscape clips + 1 photo + voiceover + music has no 
 
 ### Phase B — The editor brain (Spring backend — the core of "human editor")
 
+> **STATUS: DONE** — backend commit `a106c9c` (this branch) + renderer commit `d408f6a` (`claude/dazzling-shannon-hd6eeu-remotion`).
+> Delivered: EffectDirector (deterministic content-aware scoring: narration type/energy/importance ×
+> asset profile × music energy/on-beat × style grammar × variety/restraint rules, per-segment justification
+> logs); problem_payoff.json restructured from fixed scene_patterns into a style grammar (palette + weights +
+> intensity ranges + content prefs — legacy presets fall back to round-robin); MusicDynamicsPlanner emits
+> `volume_points` (style curve × real music energy, beat-boundary ramps, drop swells) consumed by the renderer
+> (replaces dead `volume_by_beat`); B4 minimal: continuous source timecode for re-used VIDEO assets
+> (no more restart-at-0:00). Scene-count/1:1 invariant untouched. 16 backend unit tests (incl. against the
+> real preset JSON) + 5 renderer tests; full-suite green except the pre-existing `BossAiApplicationTests`
+> context test (needs a DB — environmental, fails identically without these changes).
+
 - **B1. EffectDirector: content-aware effect/transition selection** (replaces round-robin)
   - New `service/director/EffectDirector.java`, called from `EdlGeneratorService.applyDnaToEdl()` instead of the rotation at lines 2644–2648.
   - Inputs per segment: AssetProfile (person/product/scenery, motion, mood), narration segment (type hook/emphasis/climax/cta, energy, importance), music context (section type, local energy, beat proximity), DNA beat role, previous segment's choice (variety + rhythm constraint).
