@@ -58,9 +58,35 @@ public class EdlAudioTrack {
     @JsonProperty("trim_out_ms")
     private Integer trimOutMs;
 
+    /** @deprecated never consumed by the renderer — superseded by volumePoints. */
+    @Deprecated
     @JsonProperty("volume_by_beat")
     private Map<String, Double> volumeByBeat;
 
     @JsonProperty("music_style")
     private String musicStyle;
+
+    /**
+     * Volume automation envelope — absolute volume values at timeline positions.
+     * The renderer interpolates linearly between points and holds the last value.
+     * When present, supersedes the static {@code volume} for this track.
+     * Computed by MusicDynamicsPlanner from the style's per-beat curve modulated
+     * by the actual music energy.
+     */
+    @JsonProperty("volume_points")
+    private java.util.List<VolumePoint> volumePoints;
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public static class VolumePoint {
+
+        @JsonProperty("ms")
+        private int ms;
+
+        @JsonProperty("volume")
+        private double volume;
+    }
 }
