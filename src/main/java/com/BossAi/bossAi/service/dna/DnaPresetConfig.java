@@ -59,6 +59,15 @@ public class DnaPresetConfig {
     @JsonProperty("text_overlay_templates")
     private List<TextOverlayTemplate> textOverlayTemplates;
 
+    /**
+     * Multi-layer composition rules — which named rules (TalkingHeadBg,
+     * ProductReveal, CtaOverlay) apply in which beats. Read by
+     * AutonomousCompositionDecider; a preset without this section gets no
+     * layered composition.
+     */
+    @JsonProperty("composition_rules")
+    private CompositionRules compositionRules;
+
     // ─── Nested types ─────────────────────────────────────────────────────────
 
     /**
@@ -331,5 +340,52 @@ public class DnaPresetConfig {
 
         @JsonProperty("animation_duration_ms")
         private int animationDurationMs;
+    }
+
+    /** Composition rules section — gates and scopes the layered composition. */
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public static class CompositionRules {
+
+        @JsonProperty("enabled")
+        private boolean enabled;
+
+        @JsonProperty("max_layered_scenes_pct")
+        private Integer maxLayeredScenesPct;
+
+        /** Rule name (TalkingHeadBg, ProductReveal, CtaOverlay) → its scope. */
+        @JsonProperty("rules")
+        private Map<String, CompositionRule> rules;
+    }
+
+    /**
+     * Scope of one named composition rule. Layout params (opacity, scale,
+     * position) stay in the JSON for the renderer; the decider only needs
+     * the applicability scope.
+     */
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public static class CompositionRule {
+
+        @JsonProperty("enabled")
+        private boolean enabled;
+
+        /** Beat letters where the rule may fire. Null = any beat. */
+        @JsonProperty("applicable_beats")
+        private List<String> applicableBeats;
+
+        /** "pip" (background behind primary) or "overlay" (on top). */
+        @JsonProperty("composition")
+        private String composition;
+
+        /** Narration segment types that also trigger the rule. Null = beat-only. */
+        @JsonProperty("trigger_segment_types")
+        private List<String> triggerSegmentTypes;
     }
 }

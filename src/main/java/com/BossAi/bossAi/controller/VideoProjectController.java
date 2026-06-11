@@ -3,6 +3,7 @@ package com.BossAi.bossAi.controller;
 import com.BossAi.bossAi.dto.*;
 import com.BossAi.bossAi.dto.edl.EdlDto;
 import com.BossAi.bossAi.entity.*;
+import com.BossAi.bossAi.exceptions.EdlValidationException;
 import com.BossAi.bossAi.service.*;
 import com.BossAi.bossAi.service.edl.EdlValidator;
 import com.BossAi.bossAi.service.edl.VideoProductionOrchestrator;
@@ -29,6 +30,7 @@ public class VideoProjectController {
     private final ProjectAssetService assetService;
     private final EdlService edlService;
     private final RenderJobService renderJobService;
+    private final RenderProgressService renderProgressService;
     private final EdlValidator edlValidator;
     private final VideoProductionOrchestrator videoProductionOrchestrator;
     private final ObjectMapper objectMapper;
@@ -119,12 +121,14 @@ public class VideoProjectController {
     ) {
         projectService.getProject(id, auth.getName()); // verify ownership
 
-        EdlValidator.ValidationResult validation = edlValidator.validate(edl);
+        // Strict, asset-aware validation: user edits must fail fast at save time
+        // (unknown assets, out-of-range trims, timeline holes), not at render time.
+        List<ProjectAsset> projectAssets = assetService.getProjectAssetEntities(id);
+        EdlValidator.ValidationResult validation = edlValidator.validate(edl, projectAssets, true);
         if (!validation.valid()) {
             log.warn("[VideoProjectController] PUT /timeline EDL invalid for project {}: {}",
                     id, validation.errors());
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                    "EDL validation failed: " + String.join("; ", validation.errors()));
+            throw new EdlValidationException(validation);
         }
         if (!validation.warnings().isEmpty()) {
             log.info("[VideoProjectController] PUT /timeline EDL warnings for project {}: {}",
@@ -249,5 +253,24 @@ public class VideoProjectController {
     ) {
         projectService.getProject(id, auth.getName()); // verify ownership
         return ResponseEntity.ok(renderJobService.getLatestRenderStatus(id));
+    }
+
+    /**
+     * GET /api/v1/projects/{id}/render/progress — SSE stream postępu renderu.
+     *
+     * Frontend (timeline editor) otwiera EventSource po "Save & re-render":
+     *   const es = new EventSource('/api/v1/projects/{id}/render/progress');
+     *   es.addEventListener('render-progress', (e) => {
+     *     const d = JSON.parse(e.data); // { status, percent, outputUrl, projectId }
+     *     if (d.status === 'COMPLETE' || d.status === 'FAILED') es.close();
+     *   });
+     */
+    @GetMapping(value = "/{id}/render/progress", produces = org.springframework.http.MediaType.TEXT_EVENT_STREAM_VALUE)
+    public org.springframework.web.servlet.mvc.method.annotation.SseEmitter streamRenderProgress(
+            @PathVariable UUID id,
+            Authentication auth
+    ) {
+        projectService.getProject(id, auth.getName()); // verify ownership
+        return renderProgressService.subscribe(id);
     }
 }

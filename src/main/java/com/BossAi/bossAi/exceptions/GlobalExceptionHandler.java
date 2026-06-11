@@ -46,6 +46,19 @@ public class GlobalExceptionHandler {
                 .body(Map.of("message", e.getMessage()));
     }
 
+    /**
+     * Structured EDL validation errors for the timeline editor — each issue is
+     * addressable: { scope: "segments", index: 3, field: "trim_in_ms", message: ... }.
+     */
+    @ExceptionHandler(EdlValidationException.class)
+    public ResponseEntity<?> handleEdlValidation(EdlValidationException e) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of(
+                "message", "EDL validation failed",
+                "errors", e.getResult().errorIssues(),
+                "warnings", e.getResult().warningIssues()
+        ));
+    }
+
     @ExceptionHandler(RuntimeException.class)
     public ResponseEntity<?> handleGeneric(RuntimeException ex) {
         return ResponseEntity

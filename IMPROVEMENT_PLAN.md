@@ -107,6 +107,15 @@ Acceptance: same 5 assets rendered twice with different narrations produce visib
 
 ### Phase C — Editor hardening (ship the edit → re-render loop)
 
+> **STATUS: DONE (C1–C3)** — commit on this branch after Phase B.
+> Delivered: EdlValidator strict/lenient split with structured issues (scope/index/field/message) —
+> strict PUT /timeline rejects unknown asset_ids, out-of-range trims, segments playing past trimmed
+> source, >500ms primary-layer gaps, untransitioned overlaps, unknown effects, broken whisper words;
+> structured 400 body { message, errors[], warnings[] } via EdlValidationException + handler;
+> whisper_words validated as user-editable (C2); GET /api/v1/projects/{id}/render/progress SSE
+> (RenderProgressService + RemotionRenderClient progress callback + orchestrator broadcasts) (C3).
+> C4 (frontend wiring: version-restore picker, draft-save toggle, asset swap UI) remains — backend ready.
+
 - **C1. Validation that fails fast, not at render** — `service/edl/EdlValidator.java`
   - Reject unknown `asset_id` (exists in ProjectAsset + owned by project); reject `trim_in_ms/trim_out_ms` outside asset duration; gaps >500ms and same-layer overlaps without transition become errors, not warnings.
   - Structured error response: `{segments: [{index, field, error}], audio_tracks: [...]}` instead of concatenated strings.
@@ -115,6 +124,15 @@ Acceptance: same 5 assets rendered twice with different narrations produce visib
 - **C4. Frontend wiring (backend already ready)** — version restore picker (GET `/versions`, `/versions/{v}`), draft save toggle (`?triggerRender=false`), asset-swap on segment (PUT already accepts it once C1 validates it).
 
 ### Phase D — Style system generalization (only after PROBLEM_PAYOFF is excellent)
+
+> **STATUS: DONE** — commit on this branch after Phase C.
+> D1: composition gate + rule scoping + beat boundaries + GPT header are config-driven (the JSON's
+> composition_rules section is finally parsed). D2: a style = grammar JSON + prompt txt, zero Java —
+> enforced by DnaPresetLintTest which lints every implemented preset (beat coverage, valid effects,
+> intensity ranges, rule scopes, prompt file presence). D3: BEFORE_AFTER shipped end-to-end
+> (contrast arc: muted before → fade_white → vivid after, own grammar/music curve/overlays/prompt);
+> proven different edit vs PROBLEM_PAYOFF on identical content. D4: unknown/unimplemented dnaPreset
+> → clear 400 listing available presets instead of silent fallback.
 
 - **D1.** Remove the PROBLEM_PAYOFF hard-gate in `AutonomousCompositionDecider.java:66–71`; composition rules read from the style grammar.
 - **D2.** A new style = one grammar JSON + one prompt file, zero Java changes (B2 makes this true).

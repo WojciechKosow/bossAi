@@ -99,6 +99,15 @@ public class RemotionRenderClient {
      * @throws RenderFailedException gdy render zakończył się błędem
      */
     public RemotionRenderStatusResponse pollUntilComplete(String renderId) {
+        return pollUntilComplete(renderId, null);
+    }
+
+    /**
+     * Wariant z callbackiem postępu — wywoływany po każdym odczycie statusu
+     * "in progress" (wartość 0.0–1.0). Pozwala streamować postęp do edytora.
+     */
+    public RemotionRenderStatusResponse pollUntilComplete(
+            String renderId, java.util.function.DoubleConsumer onProgress) {
         log.info("[RemotionRenderClient] Polling render status — renderId: {}", renderId);
 
         int maxAttempts = properties.getPolling().getMaxAttempts();
@@ -135,6 +144,14 @@ public class RemotionRenderClient {
 
                 log.debug("[RemotionRenderClient] Render in progress — renderId: {}, progress: {}%, attempt: {}/{}",
                         renderId, String.format("%.1f", status.progress() * 100), attempt, maxAttempts);
+
+                if (onProgress != null) {
+                    try {
+                        onProgress.accept(status.progress());
+                    } catch (Exception e) {
+                        log.debug("[RemotionRenderClient] Progress callback error (ignored): {}", e.getMessage());
+                    }
+                }
             }
 
             try {

@@ -1,0 +1,443 @@
+{
+  "id": "BEFORE_AFTER",
+  "display_name": "Before → After",
+  "pacing": "MODERATE",
+
+  "color_grade": {
+    "preset": "before_after",
+    "contrast_boost": 1.2,
+    "saturation": 0.85,
+    "brightness": 0.97,
+    "vignette": 0.15
+  },
+
+  "beats": {
+    "A": {
+      "name": "HOOK / BEFORE",
+      "start_ms": 0,
+      "end_ms": 3000,
+      "min_duration_ms": 1500,
+      "max_duration_ms": 2500,
+      "color_grade_override": {
+        "saturation": 0.55,
+        "contrast_boost": 1.3,
+        "brightness": 0.9,
+        "vignette": 0.25
+      },
+      "grammar": {
+        "restraint_weight": 0.5,
+        "effects": [
+          {
+            "type": "fast_zoom",
+            "weight": 1.5,
+            "intensity_range": [0.7, 0.95],
+            "max_per_beat": 1,
+            "params": { "scale_from": 1.0, "scale_to": 1.5, "easing": "easeOut", "duration_ms": 150 },
+            "prefers": { "segment_types": ["hook"], "min_energy": 0.4 }
+          },
+          {
+            "type": "zoom_out",
+            "weight": 1.2,
+            "intensity_range": [0.5, 0.75],
+            "params": { "scale_from": 1.25, "scale_to": 1.0, "easing": "easeInOut" },
+            "prefers": { "segment_types": ["setup", "hook"], "max_energy": 0.7 }
+          },
+          {
+            "type": "shake",
+            "weight": 0.6,
+            "intensity_range": [0.4, 0.7],
+            "params": { "amplitude": 7, "frequency": 16 },
+            "prefers": { "on_beat": true, "min_music_energy": 0.5 }
+          }
+        ],
+        "transitions": [
+          {
+            "type": "cut",
+            "weight": 1.8,
+            "duration_ms": 0,
+            "prefers": { "classifications": ["HARD", "MICRO"] }
+          },
+          { "type": "fade", "weight": 0.5, "duration_ms": 180 }
+        ]
+      }
+    },
+
+    "B": {
+      "name": "STRUGGLE",
+      "start_ms": 3000,
+      "end_ms": 9000,
+      "min_duration_ms": 1800,
+      "max_duration_ms": 3000,
+      "color_grade_override": {
+        "saturation": 0.6,
+        "contrast_boost": 1.25,
+        "brightness": 0.88,
+        "vignette": 0.22
+      },
+      "grammar": {
+        "restraint_weight": 1.0,
+        "effects": [
+          {
+            "type": "zoom_in_offset",
+            "weight": 1.3,
+            "intensity_range": [0.55, 0.85],
+            "params": { "scale_from": 1.0, "scale_to": 1.28, "offset_x": 0.35, "offset_y": 0.4, "easing": "easeOut" },
+            "prefers": { "segment_types": ["emphasis", "point"], "min_importance": 0.5 }
+          },
+          {
+            "type": "pan_left",
+            "weight": 1.0,
+            "intensity_range": [0.45, 0.7],
+            "params": { "direction": "left", "distance_percent": 12, "easing": "linear" },
+            "prefers": { "segment_types": ["point", "setup"], "max_energy": 0.7 }
+          },
+          {
+            "type": "pan_right",
+            "weight": 1.0,
+            "intensity_range": [0.45, 0.7],
+            "params": { "direction": "right", "distance_percent": 12, "easing": "linear" },
+            "prefers": { "segment_types": ["point", "setup"], "max_energy": 0.7 }
+          },
+          {
+            "type": "drift",
+            "weight": 0.8,
+            "intensity_range": [0.4, 0.6],
+            "params": { "direction": "diagonal", "distance_percent": 10, "easing": "linear" },
+            "prefers": { "segment_types": ["setup", "cooldown"], "max_energy": 0.6 }
+          }
+        ],
+        "transitions": [
+          {
+            "type": "cut",
+            "weight": 1.2,
+            "duration_ms": 0,
+            "prefers": { "classifications": ["HARD", "MICRO"] }
+          },
+          { "type": "fade", "weight": 0.8, "duration_ms": 180 }
+        ]
+      }
+    },
+
+    "C": {
+      "name": "TURNING POINT",
+      "start_ms": 9000,
+      "end_ms": 14000,
+      "min_duration_ms": 1500,
+      "max_duration_ms": 2800,
+      "color_grade_override": {
+        "saturation": 0.85,
+        "contrast_boost": 1.2,
+        "brightness": 0.96,
+        "vignette": 0.15
+      },
+      "grammar": {
+        "restraint_weight": 0.8,
+        "effects": [
+          {
+            "type": "zoom_in",
+            "weight": 1.4,
+            "intensity_range": [0.55, 0.85],
+            "params": { "scale_from": 1.0, "scale_to": 1.25, "easing": "easeInOut" },
+            "prefers": { "segment_types": ["point", "emphasis"], "min_importance": 0.4 }
+          },
+          {
+            "type": "blur_transition",
+            "weight": 1.0,
+            "intensity_range": [0.5, 0.75],
+            "params": { "blur_amount": 16, "duration_ms": 220, "phase": "outro" },
+            "prefers": { "segment_types": ["transition", "cooldown"] }
+          },
+          {
+            "type": "zoom_pulse",
+            "weight": 0.6,
+            "intensity_range": [0.5, 0.75],
+            "params": { "scale": 1.06, "frequency_bpm": 110 },
+            "prefers": { "on_beat": true, "min_music_energy": 0.55 }
+          }
+        ],
+        "transitions": [
+          {
+            "type": "fade",
+            "weight": 1.2,
+            "duration_ms": 180,
+            "prefers": { "classifications": ["SOFT"] }
+          },
+          {
+            "type": "cut",
+            "weight": 0.9,
+            "duration_ms": 0,
+            "prefers": { "classifications": ["HARD", "MICRO"] }
+          }
+        ]
+      }
+    },
+
+    "D": {
+      "name": "AFTER / REVEAL",
+      "start_ms": 14000,
+      "end_ms": 21000,
+      "min_duration_ms": 2500,
+      "max_duration_ms": 4000,
+      "color_grade_override": {
+        "saturation": 1.2,
+        "contrast_boost": 1.15,
+        "brightness": 1.05,
+        "vignette": 0.05
+      },
+      "grammar": {
+        "restraint_weight": 0.6,
+        "effects": [
+          {
+            "type": "brightness_burst",
+            "weight": 2.0,
+            "intensity_range": [0.8, 1.0],
+            "max_per_beat": 1,
+            "params": { "brightness_delta": 0.5, "duration_ms": 140, "easing": "easeOut" },
+            "prefers": { "segment_types": ["climax", "emphasis"], "min_importance": 0.55 }
+          },
+          {
+            "type": "color_pop",
+            "weight": 1.5,
+            "intensity_range": [0.65, 0.95],
+            "params": { "saturation_boost": 0.4, "duration_ms": 220, "easing": "easeOut" },
+            "prefers": { "segment_types": ["climax", "emphasis", "point"] }
+          },
+          {
+            "type": "ken_burns",
+            "weight": 1.0,
+            "intensity_range": [0.4, 0.6],
+            "params": { "scale_from": 1.0, "scale_to": 1.22, "pan_direction": "right" },
+            "prefers": { "asset_kinds": ["IMAGE"] }
+          }
+        ],
+        "transitions": [
+          {
+            "type": "fade_white",
+            "weight": 1.5,
+            "duration_ms": 150,
+            "prefers": { "segment_types": ["climax", "emphasis"] }
+          },
+          { "type": "fade", "weight": 0.8, "duration_ms": 200 }
+        ]
+      }
+    },
+
+    "E": {
+      "name": "PROOF",
+      "start_ms": 21000,
+      "end_ms": 27000,
+      "min_duration_ms": 2200,
+      "max_duration_ms": 3500,
+      "color_grade_override": {
+        "saturation": 1.15,
+        "contrast_boost": 1.15,
+        "brightness": 1.03,
+        "vignette": 0.08
+      },
+      "grammar": {
+        "restraint_weight": 1.1,
+        "effects": [
+          {
+            "type": "ken_burns",
+            "weight": 1.2,
+            "intensity_range": [0.4, 0.6],
+            "params": { "scale_from": 1.0, "scale_to": 1.18, "pan_direction": "left" },
+            "prefers": { "asset_kinds": ["IMAGE"] }
+          },
+          {
+            "type": "zoom_in",
+            "weight": 1.0,
+            "intensity_range": [0.5, 0.75],
+            "params": { "scale_from": 1.0, "scale_to": 1.18, "easing": "easeInOut" }
+          },
+          {
+            "type": "color_pop",
+            "weight": 0.8,
+            "intensity_range": [0.55, 0.8],
+            "params": { "saturation_boost": 0.3, "duration_ms": 200, "easing": "easeOut" },
+            "prefers": { "segment_types": ["emphasis"] }
+          }
+        ],
+        "transitions": [
+          { "type": "fade", "weight": 1.2, "duration_ms": 200 },
+          {
+            "type": "cut",
+            "weight": 0.6,
+            "duration_ms": 0,
+            "prefers": { "classifications": ["MICRO"] }
+          }
+        ]
+      }
+    },
+
+    "F": {
+      "name": "CTA",
+      "start_ms": 27000,
+      "end_ms": 30000,
+      "min_duration_ms": 2500,
+      "max_duration_ms": 3000,
+      "color_grade_override": {
+        "saturation": 1.05,
+        "contrast_boost": 1.1,
+        "brightness": 1.0,
+        "vignette": 0.05
+      },
+      "grammar": {
+        "restraint_weight": 1.2,
+        "effects": [
+          {
+            "type": "ken_burns",
+            "weight": 1.4,
+            "intensity_range": [0.3, 0.5],
+            "params": { "scale_from": 1.0, "scale_to": 1.1, "pan_direction": "right" },
+            "prefers": { "segment_types": ["cta"] }
+          },
+          {
+            "type": "zoom_in",
+            "weight": 0.8,
+            "intensity_range": [0.35, 0.55],
+            "params": { "scale_from": 1.0, "scale_to": 1.12, "easing": "easeInOut" }
+          }
+        ],
+        "transitions": [
+          { "type": "fade", "weight": 1.5, "duration_ms": 400 }
+        ]
+      }
+    }
+  },
+
+  "subtitle_config": {
+    "enabled": true,
+    "position": "bottom_third",
+    "font_family": "Inter",
+    "font_size": 44,
+    "font_weight": "bold",
+    "highlight_color": "#4ECDC4",
+    "stroke_color": "#000000",
+    "stroke_width": 3,
+    "highlight_mode": "word",
+    "max_words_per_group": 3,
+    "animation": "karaoke"
+  },
+
+  "audio_config": {
+    "voiceover_volume": 1.0,
+    "voiceover_fade_out_ms": 300,
+    "volume_by_beat": {
+      "A": 0.05,
+      "B": 0.07,
+      "C": 0.10,
+      "D": 0.18,
+      "E": 0.16,
+      "F": 0.20
+    },
+    "energy_modulation": 0.25,
+    "ramp_ms": 250,
+    "music_fade_in_ms": 400,
+    "music_fade_out_ms": 700,
+    "music_style": "emotional_build"
+  },
+
+  "composition_rules": {
+    "enabled": true,
+    "max_layered_scenes_pct": 35,
+    "rules": {
+      "TalkingHeadBg": {
+        "enabled": true,
+        "applicable_beats": ["B", "C", "E"],
+        "composition": "pip",
+        "background_opacity": 0.65,
+        "background_blur": true,
+        "primary_scale": 0.85,
+        "primary_position": "center"
+      },
+      "ProductReveal": {
+        "enabled": true,
+        "applicable_beats": ["D"],
+        "composition": "overlay",
+        "overlay_scale": 0.45,
+        "overlay_position": "center",
+        "overlay_opacity": 1.0,
+        "trigger_segment_types": ["climax", "emphasis"]
+      },
+      "CtaOverlay": {
+        "enabled": true,
+        "applicable_beats": ["F"],
+        "composition": "overlay",
+        "overlay_scale": 0.6,
+        "overlay_position": "bottom_center",
+        "overlay_opacity": 1.0,
+        "trigger_segment_types": ["cta"]
+      }
+    }
+  },
+
+  "text_overlay_templates": [
+    {
+      "beat": "A",
+      "placeholder": "{HOOK_TEXT}",
+      "type": "TEXT_OVERLAY",
+      "start_ms": 0,
+      "end_ms": 2500,
+      "layer": 2,
+      "position": "center",
+      "animation": "fade_in",
+      "animation_duration_ms": 200,
+      "style": {
+        "font_family": "Inter",
+        "font_size": 56,
+        "font_weight": "bold",
+        "color": "#FFFFFF",
+        "stroke_color": "#000000",
+        "stroke_width": 4,
+        "background_color": null,
+        "background_padding": 0,
+        "border_radius": null
+      }
+    },
+    {
+      "beat": "D",
+      "placeholder": "{RESULT_TEXT}",
+      "type": "TEXT_OVERLAY",
+      "start_ms": 14000,
+      "end_ms": 19000,
+      "layer": 2,
+      "position": "bottom_third",
+      "animation": "slide_up",
+      "animation_duration_ms": 250,
+      "style": {
+        "font_family": "Inter",
+        "font_size": 52,
+        "font_weight": "bold",
+        "color": "#4ECDC4",
+        "stroke_color": "#000000",
+        "stroke_width": 3,
+        "background_color": null,
+        "background_padding": 0,
+        "border_radius": null
+      }
+    },
+    {
+      "beat": "F",
+      "placeholder": "{CTA_TEXT}",
+      "type": "TEXT_OVERLAY",
+      "start_ms": 27000,
+      "end_ms": 30000,
+      "layer": 2,
+      "position": "bottom_quarter",
+      "animation": "fade_in",
+      "animation_duration_ms": 200,
+      "style": {
+        "font_family": "Inter",
+        "font_size": 46,
+        "font_weight": "bold",
+        "color": "#FFFFFF",
+        "stroke_color": null,
+        "stroke_width": 0,
+        "background_color": "#1D7A74",
+        "background_padding": 20,
+        "border_radius": 8
+      }
+    }
+  ]
+}

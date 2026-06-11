@@ -49,6 +49,21 @@ public class DnaPresetService {
         return cache.computeIfAbsent(preset, this::readFromClasspath);
     }
 
+    /** True when the preset has a config file on the classpath (= implemented). */
+    public boolean isAvailable(DnaPreset preset) {
+        if (preset == null) return false;
+        if (cache.containsKey(preset)) return true;
+        String path = "dna-presets/" + preset.name().toLowerCase() + ".json";
+        return getClass().getClassLoader().getResource(path) != null;
+    }
+
+    /** All presets that are actually implemented (have a config file). */
+    public java.util.List<DnaPreset> availablePresets() {
+        return java.util.Arrays.stream(DnaPreset.values())
+                .filter(this::isAvailable)
+                .toList();
+    }
+
     // ─── Private ──────────────────────────────────────────────────────────────
 
     private DnaPresetConfig readFromClasspath(DnaPreset preset) {
