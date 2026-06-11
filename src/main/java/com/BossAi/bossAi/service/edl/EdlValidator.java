@@ -170,8 +170,18 @@ public class EdlValidator {
             if (seg.getAssetId() == null || seg.getAssetId().isBlank()) {
                 issues.error("segments", i, "asset_id", "asset_id is required");
             } else if (assetById != null && !assetById.containsKey(seg.getAssetId())) {
-                issues.error("segments", i, "asset_id",
-                        "asset does not exist in this project: " + seg.getAssetId());
+                if (seg.getLayer() == 0) {
+                    // Primary timeline always references ProjectAssets
+                    issues.error("segments", i, "asset_id",
+                            "asset does not exist in this project: " + seg.getAssetId());
+                } else {
+                    // Overlay/background layers may reference raw Asset entities
+                    // (OverlayPlacementEngine serves them via /internal/assets/raw/)
+                    // — outside the ProjectAsset table by design, so only warn.
+                    issues.warn("segments", i, "asset_id",
+                            "layer " + seg.getLayer() + " segment references an asset outside "
+                                    + "the project's assets: " + seg.getAssetId());
+                }
             }
 
             if (seg.getStartMs() < 0) {
