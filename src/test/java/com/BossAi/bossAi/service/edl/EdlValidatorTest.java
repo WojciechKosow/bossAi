@@ -107,6 +107,33 @@ class EdlValidatorTest {
         assertTrue(hasError(result, "audio_tracks", "asset_id"));
     }
 
+    /**
+     * Regression: OverlayPlacementEngine emits layer-2 segments referencing raw
+     * Asset entities (served via /internal/assets/raw/), which are NOT in the
+     * ProjectAsset table. Rejecting them failed whole productions — they must
+     * pass with a warning in both modes.
+     */
+    @Test
+    void overlayLayerMayReferenceAssetsOutsideTheProject() {
+        EdlDto edl = validEdl();
+        EdlSegment overlay = EdlSegment.builder()
+                .id("ov0").assetId(UUID.randomUUID().toString())
+                .assetUrl("http://x/internal/assets/raw/ov0/file")
+                .assetType("IMAGE").startMs(4200).endMs(5700).layer(2)
+                .x(0.25f).y(0.3f).width(0.5f).height(0.28f)
+                .build();
+        edl.getSegments().add(overlay);
+
+        EdlValidator.ValidationResult lenient = validator.validate(edl, assets(), false);
+        EdlValidator.ValidationResult strict = validator.validate(edl, assets(), true);
+
+        assertTrue(lenient.valid(), () -> "lenient rejected overlay: " + lenient.errors());
+        assertTrue(strict.valid(), () -> "strict rejected overlay: " + strict.errors());
+        assertTrue(lenient.warningIssues().stream()
+                        .anyMatch(i -> "segments".equals(i.scope()) && "asset_id".equals(i.field())),
+                "unknown overlay asset should still surface as a warning");
+    }
+
     // ─── trim bounds ─────────────────────────────────────────────────────
 
     @Test
