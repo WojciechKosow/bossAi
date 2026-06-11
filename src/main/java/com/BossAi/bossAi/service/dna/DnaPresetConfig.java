@@ -92,9 +92,140 @@ public class DnaPresetConfig {
         @JsonProperty("scene_patterns")
         private List<ScenePattern> scenePatterns;
 
+        /**
+         * Style grammar for this beat — what the EffectDirector may choose from
+         * and how it should feel. When present, supersedes scenePatterns
+         * (which rotate blindly regardless of content).
+         */
+        @JsonProperty("grammar")
+        private BeatGrammar grammar;
+
         /** Default color grade override for all scenes in this beat. */
         @JsonProperty("color_grade_override")
         private EdlColorGrade colorGradeOverride;
+    }
+
+    /**
+     * Beat-level style grammar. The style declares what is ALLOWED and what it
+     * should FEEL like; the EffectDirector decides what actually happens based
+     * on the content (narration, asset, music) of each segment.
+     */
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public static class BeatGrammar {
+
+        /**
+         * Base score for choosing NO effect. Restraint is a decision —
+         * calm segments in a calm beat should often stay clean.
+         */
+        @JsonProperty("restraint_weight")
+        private Double restraintWeight;
+
+        @JsonProperty("effects")
+        private List<EffectOption> effects;
+
+        @JsonProperty("transitions")
+        private List<TransitionOption> transitions;
+    }
+
+    /** One effect the style allows in a beat, with its selection preferences. */
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public static class EffectOption {
+
+        @JsonProperty("type")
+        private String type;
+
+        /** Style prior — how characteristic this effect is for the beat. */
+        @JsonProperty("weight")
+        @Builder.Default
+        private double weight = 1.0;
+
+        /** [min, max] — actual intensity is driven by narration energy/importance. */
+        @JsonProperty("intensity_range")
+        private List<Double> intensityRange;
+
+        /** Effect params (merged over EffectRegistry defaults). */
+        @JsonProperty("params")
+        private Map<String, Object> params;
+
+        /** Hard cap on uses of this effect within one beat (e.g. smash_zoom once). */
+        @JsonProperty("max_per_beat")
+        private Integer maxPerBeat;
+
+        @JsonProperty("prefers")
+        private GrammarPrefs prefers;
+    }
+
+    /** One transition the style allows in a beat. */
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public static class TransitionOption {
+
+        @JsonProperty("type")
+        private String type;
+
+        @JsonProperty("weight")
+        @Builder.Default
+        private double weight = 1.0;
+
+        @JsonProperty("duration_ms")
+        private Integer durationMs;
+
+        @JsonProperty("prefers")
+        private GrammarPrefs prefers;
+    }
+
+    /**
+     * Content preferences for a grammar option — when does this choice fit?
+     * All fields optional; absent = indifferent.
+     */
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public static class GrammarPrefs {
+
+        /** Narration segment types this option fits (hook, point, emphasis, climax, cta…). */
+        @JsonProperty("segment_types")
+        private List<String> segmentTypes;
+
+        /** Narration energy bounds (0–1). */
+        @JsonProperty("min_energy")
+        private Double minEnergy;
+
+        @JsonProperty("max_energy")
+        private Double maxEnergy;
+
+        /** Narration importance floor (0–1). */
+        @JsonProperty("min_importance")
+        private Double minImportance;
+
+        /** Asset kinds this option suits: VIDEO, IMAGE. Hard filter. */
+        @JsonProperty("asset_kinds")
+        private List<String> assetKinds;
+
+        /** True = this option wants the cut to land on a music beat. */
+        @JsonProperty("on_beat")
+        private Boolean onBeat;
+
+        /** Local music energy floor (0–1) — for punchy, beat-driven effects. */
+        @JsonProperty("min_music_energy")
+        private Double minMusicEnergy;
+
+        /** Cut classifications this option fits: HARD, SOFT, MICRO (transitions). */
+        @JsonProperty("classifications")
+        private List<String> classifications;
     }
 
     /**
@@ -144,6 +275,18 @@ public class DnaPresetConfig {
 
         @JsonProperty("music_style")
         private String musicStyle;
+
+        /**
+         * How strongly the actual music energy modulates the per-beat volume
+         * curve (0 = pure style curve, 0.25 = ±25% swing). Used by
+         * MusicDynamicsPlanner to build volume_points.
+         */
+        @JsonProperty("energy_modulation")
+        private Double energyModulation;
+
+        /** Ramp duration between volume levels at beat boundaries. */
+        @JsonProperty("ramp_ms")
+        private Integer rampMs;
     }
 
     /**

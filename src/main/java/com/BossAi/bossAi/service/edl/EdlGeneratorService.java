@@ -7,6 +7,7 @@ import com.BossAi.bossAi.entity.ProjectAsset;
 import com.BossAi.bossAi.service.OpenAiService;
 import com.BossAi.bossAi.service.audio.AudioAnalysisResponse;
 import com.BossAi.bossAi.service.director.AssetProfile;
+import com.BossAi.bossAi.service.director.EffectDirector;
 import com.BossAi.bossAi.service.director.EffectType;
 import com.BossAi.bossAi.service.director.JustifiedCut;
 import com.BossAi.bossAi.service.director.NarrationAnalysis;
@@ -19,6 +20,7 @@ import com.BossAi.bossAi.service.dna.DnaPresetService;
 import com.BossAi.bossAi.service.dna.TextOverlayGeneratorService;
 import com.BossAi.bossAi.service.generation.GenerationContext;
 import com.BossAi.bossAi.service.generation.context.SceneAsset;
+import com.BossAi.bossAi.service.music.MusicDynamicsPlanner;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
@@ -70,6 +72,8 @@ public class EdlGeneratorService {
     private final TextOverlayGeneratorService textOverlayGeneratorService;
     private final ColorGradeInterpolator colorGradeInterpolator;
     private final com.BossAi.bossAi.service.gif.GifOverlayService gifOverlayService;
+    private final EffectDirector effectDirector;
+    private final MusicDynamicsPlanner musicDynamicsPlanner;
 
     @Value("${dna.presets.enabled:false}")
     private boolean dnaPresetsEnabled;
@@ -125,7 +129,7 @@ public class EdlGeneratorService {
             enrichEffectsFromEditDna(edl, editDna);
 
             // Apply DNA preset (overrides EditDna color grade when both present)
-            applyDnaToEdl(edl, dnaConfig, context);
+            applyDnaToEdl(edl, dnaConfig, context, projectAssets);
 
             // Strip effects unknown to Remotion before validation — prevents 400 errors
             stripUnknownEffects(edl);
@@ -164,7 +168,7 @@ public class EdlGeneratorService {
         ensureNestedDefaults(edl);
 
         // Apply DNA preset (overrides EditDna color grade + sets subtitle/audio/overlay config)
-        applyDnaToEdl(edl, dnaConfig, context);
+        applyDnaToEdl(edl, dnaConfig, context, projectAssets);
 
         // Snap segment cuts to nearest beat positions
         beatSnapSegments(edl, audioAnalysis);
@@ -987,6 +991,9 @@ public class EdlGeneratorService {
             }
         }
 
+        // Continuous source timecode per asset (see resolveSourceTrimIn)
+        Map<String, Integer> sourceCursorMs = new HashMap<>();
+
         // Dla każdego cuta → przypisz asset w kolejności priorytetów
         for (int i = 0; i < cuts.size(); i++) {
             JustifiedCut cut = cuts.get(i);
@@ -1047,6 +1054,8 @@ public class EdlGeneratorService {
                         .build();
             }
 
+            int trimInMs = resolveSourceTrimIn(asset, cut.getEndMs() - cut.getStartMs(), sourceCursorMs);
+
             segments.add(EdlSegment.builder()
                     .id(UUID.randomUUID().toString())
                     .assetId(asset.getId().toString())
@@ -1054,6 +1063,7 @@ public class EdlGeneratorService {
                     .assetType(asset.getType().name())
                     .startMs(cut.getStartMs())
                     .endMs(cut.getEndMs())
+                    .trimInMs(trimInMs)
                     .effects(effects)
                     .transition(transition)
                     .build());
@@ -1066,6 +1076,35 @@ public class EdlGeneratorService {
                 segments.size(), cuts.size(), usageCounts);
 
         return segments;
+    }
+
+    /**
+     * Continuous source timecode: when the same VIDEO asset backs several
+     * segments, each one continues where the previous left off instead of
+     * restarting the clip at 0:00 (the jump-back is an instant amateur tell).
+     * Wraps to the start when the remaining footage can't cover the segment;
+     * unknown duration or IMAGE assets keep trim 0.
+     */
+    private int resolveSourceTrimIn(ProjectAsset asset, int segmentDurationMs,
+                                    Map<String, Integer> sourceCursorMs) {
+        if (!"VIDEO".equals(asset.getType().name())) return 0;
+        Double durationSeconds = asset.getDurationSeconds();
+        if (durationSeconds == null || durationSeconds <= 0) return 0;
+
+        int assetDurationMs = (int) (durationSeconds * 1000);
+        String key = asset.getId().toString();
+        int cursor = sourceCursorMs.getOrDefault(key, 0);
+
+        if (cursor + segmentDurationMs > assetDurationMs) {
+            cursor = 0; // source exhausted — wrap to the beginning
+        }
+        if (cursor + segmentDurationMs > assetDurationMs) {
+            // clip shorter than the segment itself — nothing to advance
+            sourceCursorMs.put(key, 0);
+            return 0;
+        }
+        sourceCursorMs.put(key, cursor + segmentDurationMs);
+        return cursor;
     }
 
     /**
@@ -2438,7 +2477,8 @@ public class EdlGeneratorService {
      * Safe to call with dnaConfig=null — does nothing.
      * DNA color grade takes precedence over EditDna color grade when both are present.
      */
-    private void applyDnaToEdl(EdlDto edl, DnaPresetConfig dnaConfig, GenerationContext context) {
+    private void applyDnaToEdl(EdlDto edl, DnaPresetConfig dnaConfig, GenerationContext context,
+                               List<ProjectAsset> projectAssets) {
         if (dnaConfig == null) return;
 
         if (edl.getMetadata() != null) {
@@ -2489,8 +2529,21 @@ public class EdlGeneratorService {
             assignBeatsToSegments(edl, dnaConfig, totalDurationMs);
         }
 
-        // Apply DNA effects/transitions from beat configs to segments that have none
-        applyBeatEffectsToSegments(edl, dnaConfig);
+        // Effect/transition decisions per segment.
+        // Grammar present → EffectDirector decides per content (narration, asset,
+        // music) within the style's palette. No grammar (legacy preset) →
+        // old round-robin pattern fill.
+        boolean hasGrammar = dnaConfig.getBeats() != null && dnaConfig.getBeats().values().stream()
+                .anyMatch(b -> b.getGrammar() != null);
+        if (hasGrammar) {
+            effectDirector.direct(edl, dnaConfig, buildDirectorSignals(context, projectAssets, totalDurationMs));
+        } else {
+            applyBeatEffectsToSegments(edl, dnaConfig);
+        }
+
+        // Music volume automation: style curve modulated by actual music energy.
+        // Needs beats on segments — must run after assignBeatsToSegments.
+        applyMusicDynamics(edl, dnaConfig, context);
 
         // Apply per-segment color grade based on beat assignment or timeline position
         colorGradeInterpolator.interpolate(edl, dnaConfig);
@@ -2516,6 +2569,53 @@ public class EdlGeneratorService {
                 dnaConfig.getId(), dnaConfig.getPacing(),
                 dnaConfig.getColorGrade() != null ? dnaConfig.getColorGrade().getPreset() : "none",
                 dnaOverlays.size());
+    }
+
+    /**
+     * Assembles the content signals the EffectDirector needs. Asset profiles
+     * are keyed by ProjectAsset id — profiles arrive ordered by the user's
+     * asset index, matching the insertion order of visual ProjectAssets.
+     */
+    private EffectDirector.DirectorSignals buildDirectorSignals(GenerationContext context,
+                                                                List<ProjectAsset> projectAssets,
+                                                                int totalDurationMs) {
+        Map<String, AssetProfile> profilesByAssetId = new HashMap<>();
+        if (projectAssets != null && context.getAssetProfiles() != null) {
+            List<ProjectAsset> visual = projectAssets.stream()
+                    .filter(a -> "VIDEO".equals(a.getType().name()) || "IMAGE".equals(a.getType().name()))
+                    .toList();
+            List<AssetProfile> profiles = context.getAssetProfiles().stream()
+                    .sorted(Comparator.comparingInt(AssetProfile::getIndex))
+                    .toList();
+            for (int i = 0; i < Math.min(visual.size(), profiles.size()); i++) {
+                profilesByAssetId.put(visual.get(i).getId().toString(), profiles.get(i));
+            }
+        }
+        return new EffectDirector.DirectorSignals(
+                context.getNarrationAnalysis(),
+                context.getJustifiedCuts(),
+                context.getMusicAnalysis(),
+                context.getMusicStartOffsetMs(),
+                profilesByAssetId,
+                totalDurationMs);
+    }
+
+    /**
+     * Replaces the static (never-rendered) volume_by_beat with a computed
+     * volume_points envelope on the music track.
+     */
+    private void applyMusicDynamics(EdlDto edl, DnaPresetConfig dnaConfig, GenerationContext context) {
+        if (edl.getAudioTracks() == null) return;
+        boolean hasVoiceover = context.getWordTimings() != null && !context.getWordTimings().isEmpty();
+        for (EdlAudioTrack track : edl.getAudioTracks()) {
+            if (!"music".equals(track.getType())) continue;
+            List<EdlAudioTrack.VolumePoint> points = musicDynamicsPlanner.plan(
+                    edl, dnaConfig.getAudioConfig(), context.getMusicAnalysis(),
+                    track.getTrimInMs(), hasVoiceover);
+            if (!points.isEmpty()) {
+                track.setVolumePoints(points);
+            }
+        }
     }
 
     /**

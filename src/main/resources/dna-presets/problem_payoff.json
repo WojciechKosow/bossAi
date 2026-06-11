@@ -24,42 +24,42 @@
         "brightness": 0.95,
         "vignette": 0.25
       },
-      "scene_patterns": [
-        {
-          "effect": {
+      "grammar": {
+        "restraint_weight": 0.2,
+        "effects": [
+          {
             "type": "smash_zoom",
-            "intensity": 1.0,
-            "params": { "scale_from": 1.0, "scale_to": 2.2, "easing": "easeOut", "duration_ms": 90 }
+            "weight": 2.0,
+            "intensity_range": [0.85, 1.0],
+            "max_per_beat": 1,
+            "params": { "scale_from": 1.0, "scale_to": 2.2, "easing": "easeOut", "duration_ms": 90 },
+            "prefers": { "segment_types": ["hook", "climax"], "min_energy": 0.4 }
           },
-          "transition": {
-            "type": "cut",
-            "duration_ms": 0
-          },
-          "color_grade_override": {
-            "saturation": 0.6,
-            "contrast_boost": 1.4,
-            "brightness": 0.95,
-            "vignette": 0.25
-          }
-        },
-        {
-          "effect": {
+          {
             "type": "shake",
-            "intensity": 0.8,
-            "params": { "amplitude": 10, "frequency": 20 }
+            "weight": 1.2,
+            "intensity_range": [0.6, 0.9],
+            "params": { "amplitude": 10, "frequency": 20 },
+            "prefers": { "on_beat": true, "min_music_energy": 0.5 }
           },
-          "transition": {
-            "type": "cut",
-            "duration_ms": 0
-          },
-          "color_grade_override": {
-            "saturation": 0.6,
-            "contrast_boost": 1.4,
-            "brightness": 0.92,
-            "vignette": 0.25
+          {
+            "type": "fast_zoom",
+            "weight": 1.0,
+            "intensity_range": [0.7, 1.0],
+            "params": { "scale_from": 1.0, "scale_to": 1.6, "easing": "easeOut", "duration_ms": 150 },
+            "prefers": { "min_energy": 0.35 }
           }
-        }
-      ]
+        ],
+        "transitions": [
+          {
+            "type": "cut",
+            "weight": 2.0,
+            "duration_ms": 0,
+            "prefers": { "classifications": ["HARD", "MICRO"] }
+          },
+          { "type": "fade", "weight": 0.3, "duration_ms": 150 }
+        ]
+      }
     },
 
     "B": {
@@ -74,59 +74,48 @@
         "brightness": 0.9,
         "vignette": 0.2
       },
-      "scene_patterns": [
-        {
-          "effect": {
+      "grammar": {
+        "restraint_weight": 0.8,
+        "effects": [
+          {
             "type": "zoom_in_offset",
-            "intensity": 0.75,
-            "params": { "scale_from": 1.0, "scale_to": 1.3, "offset_x": 0.3, "offset_y": 0.4, "easing": "easeOut" }
+            "weight": 1.5,
+            "intensity_range": [0.6, 0.9],
+            "params": { "scale_from": 1.0, "scale_to": 1.3, "offset_x": 0.3, "offset_y": 0.4, "easing": "easeOut" },
+            "prefers": { "segment_types": ["emphasis", "point"], "min_importance": 0.5 }
           },
-          "transition": {
-            "type": "cut",
-            "duration_ms": 0
-          },
-          "color_grade_override": {
-            "saturation": 0.65,
-            "contrast_boost": 1.35,
-            "brightness": 0.9,
-            "vignette": 0.2
-          }
-        },
-        {
-          "effect": {
+          {
             "type": "pan_left",
-            "intensity": 0.6,
-            "params": { "direction": "left", "distance_percent": 13, "easing": "linear" }
+            "weight": 1.0,
+            "intensity_range": [0.5, 0.75],
+            "params": { "direction": "left", "distance_percent": 13, "easing": "linear" },
+            "prefers": { "segment_types": ["point", "setup"], "max_energy": 0.75 }
           },
-          "transition": {
-            "type": "cut",
-            "duration_ms": 0
-          },
-          "color_grade_override": {
-            "saturation": 0.65,
-            "contrast_boost": 1.3,
-            "brightness": 0.9,
-            "vignette": 0.2
-          }
-        },
-        {
-          "effect": {
+          {
             "type": "pan_right",
-            "intensity": 0.6,
-            "params": { "direction": "right", "distance_percent": 13, "easing": "linear" }
+            "weight": 1.0,
+            "intensity_range": [0.5, 0.75],
+            "params": { "direction": "right", "distance_percent": 13, "easing": "linear" },
+            "prefers": { "segment_types": ["point", "setup"], "max_energy": 0.75 }
           },
-          "transition": {
-            "type": "cut",
-            "duration_ms": 0
-          },
-          "color_grade_override": {
-            "saturation": 0.65,
-            "contrast_boost": 1.3,
-            "brightness": 0.9,
-            "vignette": 0.2
+          {
+            "type": "zoom_in",
+            "weight": 0.8,
+            "intensity_range": [0.5, 0.8],
+            "params": { "scale_from": 1.0, "scale_to": 1.25, "easing": "easeInOut" },
+            "prefers": { "segment_types": ["setup"] }
           }
-        }
-      ]
+        ],
+        "transitions": [
+          {
+            "type": "cut",
+            "weight": 1.5,
+            "duration_ms": 0,
+            "prefers": { "classifications": ["HARD", "MICRO"] }
+          },
+          { "type": "fade", "weight": 0.6, "duration_ms": 150 }
+        ]
+      }
     },
 
     "C": {
@@ -141,42 +130,46 @@
         "brightness": 0.95,
         "vignette": 0.15
       },
-      "scene_patterns": [
-        {
-          "effect": {
+      "grammar": {
+        "restraint_weight": 1.0,
+        "effects": [
+          {
             "type": "blur_transition",
-            "intensity": 0.7,
-            "params": { "blur_amount": 18, "duration_ms": 200, "phase": "outro" }
+            "weight": 1.2,
+            "intensity_range": [0.5, 0.8],
+            "params": { "blur_amount": 18, "duration_ms": 200, "phase": "outro" },
+            "prefers": { "segment_types": ["transition", "cooldown"] }
           },
-          "transition": {
-            "type": "fade",
-            "duration_ms": 150
-          },
-          "color_grade_override": {
-            "saturation": 0.75,
-            "contrast_boost": 1.25,
-            "brightness": 0.95,
-            "vignette": 0.15
-          }
-        },
-        {
-          "effect": {
+          {
             "type": "zoom_in",
-            "intensity": 0.6,
-            "params": { "scale_from": 1.0, "scale_to": 1.25, "easing": "easeInOut" }
+            "weight": 1.0,
+            "intensity_range": [0.5, 0.75],
+            "params": { "scale_from": 1.0, "scale_to": 1.25, "easing": "easeInOut" },
+            "prefers": { "segment_types": ["setup", "point"] }
           },
-          "transition": {
-            "type": "cut",
-            "duration_ms": 0
-          },
-          "color_grade_override": {
-            "saturation": 0.8,
-            "contrast_boost": 1.2,
-            "brightness": 0.95,
-            "vignette": 0.15
+          {
+            "type": "zoom_pulse",
+            "weight": 0.8,
+            "intensity_range": [0.5, 0.8],
+            "params": { "scale": 1.08, "frequency_bpm": 120 },
+            "prefers": { "on_beat": true, "min_music_energy": 0.55 }
           }
-        }
-      ]
+        ],
+        "transitions": [
+          {
+            "type": "fade",
+            "weight": 1.2,
+            "duration_ms": 150,
+            "prefers": { "classifications": ["SOFT"] }
+          },
+          {
+            "type": "cut",
+            "weight": 1.0,
+            "duration_ms": 0,
+            "prefers": { "classifications": ["HARD", "MICRO"] }
+          }
+        ]
+      }
     },
 
     "D": {
@@ -191,42 +184,54 @@
         "brightness": 1.02,
         "vignette": 0.1
       },
-      "scene_patterns": [
-        {
-          "effect": {
+      "grammar": {
+        "restraint_weight": 0.9,
+        "effects": [
+          {
             "type": "brightness_burst",
-            "intensity": 0.85,
-            "params": { "brightness_delta": 0.45, "duration_ms": 120, "easing": "easeOut" }
+            "weight": 1.6,
+            "intensity_range": [0.7, 0.95],
+            "max_per_beat": 1,
+            "params": { "brightness_delta": 0.45, "duration_ms": 120, "easing": "easeOut" },
+            "prefers": { "segment_types": ["climax", "emphasis"], "min_importance": 0.6 }
           },
-          "transition": {
-            "type": "fade_white",
-            "duration_ms": 120
-          },
-          "color_grade_override": {
-            "saturation": 1.15,
-            "contrast_boost": 1.15,
-            "brightness": 1.05,
-            "vignette": 0.05
-          }
-        },
-        {
-          "effect": {
+          {
             "type": "ken_burns",
-            "intensity": 0.5,
-            "params": { "scale_from": 1.0, "scale_to": 1.25, "pan_direction": "left" }
+            "weight": 1.2,
+            "intensity_range": [0.4, 0.6],
+            "params": { "scale_from": 1.0, "scale_to": 1.25, "pan_direction": "left" },
+            "prefers": { "asset_kinds": ["IMAGE"] }
           },
-          "transition": {
-            "type": "fade",
-            "duration_ms": 180
+          {
+            "type": "color_pop",
+            "weight": 1.0,
+            "intensity_range": [0.6, 0.9],
+            "params": { "saturation_boost": 0.35, "duration_ms": 200, "easing": "easeOut" },
+            "prefers": { "segment_types": ["climax", "emphasis"] }
           },
-          "color_grade_override": {
-            "saturation": 1.1,
-            "contrast_boost": 1.1,
-            "brightness": 1.0,
-            "vignette": 0.1
+          {
+            "type": "zoom_in",
+            "weight": 0.8,
+            "intensity_range": [0.5, 0.75],
+            "params": { "scale_from": 1.0, "scale_to": 1.2, "easing": "easeOut" }
           }
-        }
-      ]
+        ],
+        "transitions": [
+          {
+            "type": "fade_white",
+            "weight": 1.2,
+            "duration_ms": 120,
+            "prefers": { "segment_types": ["climax"] }
+          },
+          { "type": "fade", "weight": 1.0, "duration_ms": 180 },
+          {
+            "type": "cut",
+            "weight": 0.6,
+            "duration_ms": 0,
+            "prefers": { "classifications": ["HARD", "MICRO"] }
+          }
+        ]
+      }
     },
 
     "E": {
@@ -241,42 +246,46 @@
         "brightness": 1.05,
         "vignette": 0.05
       },
-      "scene_patterns": [
-        {
-          "effect": {
+      "grammar": {
+        "restraint_weight": 1.0,
+        "effects": [
+          {
             "type": "color_pop",
-            "intensity": 0.9,
-            "params": { "saturation_boost": 0.35, "duration_ms": 200, "easing": "easeOut" }
+            "weight": 1.5,
+            "intensity_range": [0.65, 0.9],
+            "params": { "saturation_boost": 0.35, "duration_ms": 200, "easing": "easeOut" },
+            "prefers": { "segment_types": ["emphasis", "climax"], "min_energy": 0.45 }
           },
-          "transition": {
-            "type": "wipe_right",
-            "duration_ms": 200
-          },
-          "color_grade_override": {
-            "saturation": 1.2,
-            "contrast_boost": 1.2,
-            "brightness": 1.05,
-            "vignette": 0.05
-          }
-        },
-        {
-          "effect": {
+          {
             "type": "zoom_in",
-            "intensity": 0.65,
+            "weight": 1.0,
+            "intensity_range": [0.55, 0.8],
             "params": { "scale_from": 1.0, "scale_to": 1.2, "easing": "easeOut" }
           },
-          "transition": {
-            "type": "fade",
-            "duration_ms": 180
-          },
-          "color_grade_override": {
-            "saturation": 1.15,
-            "contrast_boost": 1.15,
-            "brightness": 1.03,
-            "vignette": 0.05
+          {
+            "type": "ken_burns",
+            "weight": 0.7,
+            "intensity_range": [0.4, 0.6],
+            "params": { "scale_from": 1.0, "scale_to": 1.2, "pan_direction": "right" },
+            "prefers": { "asset_kinds": ["IMAGE"] }
           }
-        }
-      ]
+        ],
+        "transitions": [
+          { "type": "fade", "weight": 1.2, "duration_ms": 180 },
+          {
+            "type": "wipe_right",
+            "weight": 0.6,
+            "duration_ms": 200,
+            "prefers": { "classifications": ["HARD"] }
+          },
+          {
+            "type": "cut",
+            "weight": 0.8,
+            "duration_ms": 0,
+            "prefers": { "classifications": ["MICRO"] }
+          }
+        ]
+      }
     },
 
     "F": {
@@ -291,25 +300,27 @@
         "brightness": 1.0,
         "vignette": 0.05
       },
-      "scene_patterns": [
-        {
-          "effect": {
+      "grammar": {
+        "restraint_weight": 1.2,
+        "effects": [
+          {
             "type": "ken_burns",
-            "intensity": 0.35,
-            "params": { "scale_from": 1.0, "scale_to": 1.1, "pan_direction": "right" }
+            "weight": 1.5,
+            "intensity_range": [0.3, 0.5],
+            "params": { "scale_from": 1.0, "scale_to": 1.1, "pan_direction": "right" },
+            "prefers": { "segment_types": ["cta"] }
           },
-          "transition": {
-            "type": "fade",
-            "duration_ms": 400
-          },
-          "color_grade_override": {
-            "saturation": 1.1,
-            "contrast_boost": 1.1,
-            "brightness": 1.0,
-            "vignette": 0.05
+          {
+            "type": "zoom_in",
+            "weight": 0.8,
+            "intensity_range": [0.4, 0.6],
+            "params": { "scale_from": 1.0, "scale_to": 1.15, "easing": "easeInOut" }
           }
-        }
-      ]
+        ],
+        "transitions": [
+          { "type": "fade", "weight": 1.5, "duration_ms": 400 }
+        ]
+      }
     }
   },
 
@@ -338,6 +349,8 @@
       "E": 0.18,
       "F": 0.22
     },
+    "energy_modulation": 0.25,
+    "ramp_ms": 250,
     "music_fade_in_ms": 300,
     "music_fade_out_ms": 600,
     "music_style": "energetic_upbeat"
