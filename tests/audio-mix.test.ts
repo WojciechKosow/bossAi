@@ -5,6 +5,7 @@ import {
   fadeInGain,
   fadeOutGain,
   shouldDuck,
+  volumeFromPoints,
   DEFAULT_MIX_CONFIG,
   DEFAULT_MUSIC_FADE_IN_MS,
   DEFAULT_MUSIC_FADE_OUT_MS,
@@ -134,6 +135,41 @@ describe("shouldDuck", () => {
   it("respects mix_config.auto_duck = false", () => {
     const mix = MixConfigSchema.parse({ auto_duck: false });
     expect(shouldDuck(musicTrack(), mix)).toBe(false);
+  });
+});
+
+describe("volumeFromPoints", () => {
+  const points = [
+    { ms: 1000, volume: 0.1 },
+    { ms: 2000, volume: 0.3 },
+  ];
+
+  it("returns null without an envelope (caller falls back to static volume)", () => {
+    expect(volumeFromPoints(500, undefined)).toBeNull();
+    expect(volumeFromPoints(500, [])).toBeNull();
+  });
+
+  it("holds the first/last value beyond the ends", () => {
+    expect(volumeFromPoints(0, points)).toBe(0.1);
+    expect(volumeFromPoints(9000, points)).toBe(0.3);
+  });
+
+  it("interpolates linearly between points", () => {
+    expect(volumeFromPoints(1500, points)).toBeCloseTo(0.2);
+  });
+
+  it("accepts unsorted input", () => {
+    expect(volumeFromPoints(1500, [...points].reverse())).toBeCloseTo(0.2);
+  });
+
+  it("schema accepts volume_points on a track", () => {
+    const track = AudioTrackSchema.parse({
+      id: "m",
+      asset_url: "m.mp3",
+      type: "music",
+      volume_points: [{ ms: 0, volume: 0.06 }],
+    });
+    expect(track.volume_points).toHaveLength(1);
   });
 });
 
