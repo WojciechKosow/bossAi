@@ -1,5 +1,5 @@
 import { parseEdlToTimeline, msToFrames } from "../src/utils/edl-parser";
-import type { Edl } from "../src/types/edl";
+import { EdlSchema, type Edl } from "../src/types/edl";
 
 describe("msToFrames", () => {
   it("converts milliseconds to frames at 30fps", () => {
@@ -18,7 +18,8 @@ describe("msToFrames", () => {
 });
 
 describe("parseEdlToTimeline", () => {
-  const baseEdl: Edl = {
+  // Parsed through the schema (like the server does) so zod defaults apply.
+  const baseEdl: Edl = EdlSchema.parse({
     version: "1.0",
     metadata: {
       title: "Test Video",
@@ -75,7 +76,7 @@ describe("parseEdlToTimeline", () => {
         animation: "karaoke",
       },
     ],
-  };
+  });
 
   it("calculates total duration in frames", () => {
     const result = parseEdlToTimeline(baseEdl);
@@ -127,10 +128,10 @@ describe("parseEdlToTimeline", () => {
   });
 
   it("handles empty optional arrays", () => {
-    const edl: Edl = {
+    const edl: Edl = EdlSchema.parse({
       metadata: { total_duration_ms: 5000, width: 1080, height: 1920, fps: 30 },
       segments: [],
-    };
+    });
     const result = parseEdlToTimeline(edl);
     expect(result.audioTracks).toHaveLength(0);
     expect(result.textOverlays).toHaveLength(0);

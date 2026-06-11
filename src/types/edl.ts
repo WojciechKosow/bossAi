@@ -30,6 +30,8 @@ export const EffectSchema = z.object({
     "whip_pan",
     "color_pop",
     "vignette_pulse",
+    "rgb_split",
+    "grain_overlay",
   ]),
   intensity: z.number().optional(),
   start_ms: z.number().nullable().optional(),
@@ -75,6 +77,14 @@ export const SegmentSchema = z.object({
   opacity: z.number().default(1),
   /** Entrance animation: fade_in | slide_up | slide_left | zoom_in | null */
   animation_in: z.string().nullable().optional(),
+  /**
+   * How to fit the asset into the 9:16 frame.
+   * "auto" (default) measures the asset and uses blur_fill for assets much wider
+   * than the frame (e.g. 16:9 footage), cover otherwise.
+   * "cover" = crop to fill (legacy behavior), "contain" = letterbox on black,
+   * "blur_fill" = contained over a blurred, scaled copy of itself.
+   */
+  framing: z.enum(["auto", "cover", "contain", "blur_fill"]).default("auto"),
   effects: z.array(EffectSchema).optional(),
   transition: TransitionSchema.nullable().optional(),
 });
@@ -93,6 +103,23 @@ export const AudioTrackSchema = z.object({
   fade_out_ms: z.number().default(0),
   trim_in_ms: z.number().nullable().optional(),
   trim_out_ms: z.number().nullable().optional(),
+  /** Per-track override for auto-ducking (music only). Defaults to mix_config.auto_duck. */
+  ducking: z.boolean().optional(),
+});
+
+// --- Mix config (audio mixing behavior) ---
+
+export const MixConfigSchema = z.object({
+  /** Automatically lower music volume while the voiceover is speaking. */
+  auto_duck: z.boolean().default(true),
+  /** Music volume multiplier while ducked (relative to the track's own volume). */
+  duck_volume: z.number().default(0.45),
+  /** Ramp-down time before speech starts. */
+  duck_attack_ms: z.number().default(120),
+  /** Ramp-up time after speech ends. */
+  duck_release_ms: z.number().default(250),
+  /** Speech gaps shorter than this stay ducked (avoids pumping between words). */
+  duck_gap_hold_ms: z.number().default(600),
 });
 
 // --- Text overlay style ---
@@ -210,6 +237,7 @@ export const EdlSchema = z.object({
   gif_overlays: z.array(GifOverlaySchema).optional(),
   subtitle_config: SubtitleConfigSchema.optional(),
   whisper_words: z.array(WhisperWordSchema).optional(),
+  mix_config: MixConfigSchema.optional(),
 });
 
 // --- Output config ---
@@ -241,6 +269,7 @@ export type TextPosition = z.infer<typeof TextPositionSchema>;
 export type TextOverlay = z.infer<typeof TextOverlaySchema>;
 export type Metadata = z.infer<typeof MetadataSchema>;
 export type ColorGrade = z.infer<typeof ColorGradeSchema>;
+export type MixConfig = z.infer<typeof MixConfigSchema>;
 export type SubtitleConfig = z.infer<typeof SubtitleConfigSchema>;
 export type WhisperWord = z.infer<typeof WhisperWordSchema>;
 export type GifOverlay = z.infer<typeof GifOverlaySchema>;

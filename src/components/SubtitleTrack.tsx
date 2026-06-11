@@ -78,7 +78,8 @@ function getSubtitlePositionStyle(position: string): React.CSSProperties {
     display: "flex",
     justifyContent: "center",
     textAlign: "center",
-    padding: "0 40px",
+    // Title-safe horizontal padding (5% > the old fixed 40px ≈ 3.7% @1080w)
+    padding: "0 5%",
     flexWrap: "wrap",
   };
 

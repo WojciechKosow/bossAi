@@ -1,5 +1,6 @@
 import React from "react";
 import { useCurrentFrame, useVideoConfig, interpolate, Easing } from "remotion";
+import { maxSafeTranslatePercent } from "../utils/safe-pan";
 
 interface KenBurnsProps {
   children: React.ReactNode;
@@ -24,8 +25,14 @@ export const KenBurns: React.FC<KenBurnsProps> = ({
 
   const scale = scaleFrom + (scaleTo - scaleFrom) * progress;
 
-  // 12% pan gives visible cinematic drift (was 5% — barely noticeable)
-  const panAmount = 12;
+  // 12% pan gives visible cinematic drift (was 5% — barely noticeable),
+  // clamped per-frame to what the current zoom can absorb so the drift never
+  // reveals a black frame edge (0.75% buffer covers the counter-rotation).
+  const desiredPan = 12;
+  const panAmount = Math.min(
+    desiredPan,
+    maxSafeTranslatePercent(scale, 0.75) / Math.max(progress, 0.001)
+  );
   let translateX = 0;
   let translateY = 0;
 

@@ -8,10 +8,16 @@ import { TextOverlayComponent } from "../components/TextOverlay";
 import { AudioTrackComponent } from "../components/AudioTrackComponent";
 import { SubtitleTrack } from "../components/SubtitleTrack";
 import { GifOverlayComponent } from "../components/GifOverlayComponent";
+import {
+  computeSpeechIntervals,
+  resolveMixConfig,
+} from "../utils/audio-mix";
 
-export interface TikTokVideoProps {
+// A type alias (not an interface) so it satisfies Remotion's
+// Record<string, unknown> constraint on composition props.
+export type TikTokVideoProps = {
   edl: Edl;
-}
+};
 
 /**
  * Builds a CSS filter string from EditDna color_grade values.
@@ -114,6 +120,16 @@ export const TikTokVideo: React.FC<TikTokVideoProps> = ({ edl }) => {
   const colorFilter = buildColorGradeFilter(colorGrade);
   const vignetteStyle = buildVignetteStyle(colorGrade);
 
+  // Audio mixing: music ducks under the voiceover (driven by whisper word
+  // timings when available, voiceover track ranges otherwise).
+  const mixConfig = resolveMixConfig(edl);
+  const speechIntervalsMs = computeSpeechIntervals(
+    whisperWords,
+    edl.audio_tracks,
+    edl.metadata.total_duration_ms,
+    mixConfig.duck_gap_hold_ms
+  );
+
   // Sort segments ascending by layer so background renders before primary
   // (DOM order = z-stacking: first in DOM = visually behind).
   const sortedSegments = [...timeline.segments].sort(
@@ -168,6 +184,8 @@ export const TikTokVideo: React.FC<TikTokVideoProps> = ({ edl }) => {
           <AudioTrackComponent
             track={at.track}
             totalDurationInFrames={timeline.durationInFrames}
+            mixConfig={mixConfig}
+            speechIntervalsMs={speechIntervalsMs}
           />
         </Sequence>
       ))}

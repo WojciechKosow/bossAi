@@ -1,6 +1,7 @@
 import React from "react";
 import { useCurrentFrame, useVideoConfig, interpolate, spring } from "remotion";
 import type { TextOverlay, TextStyle, TextPosition } from "../types/edl";
+import { TITLE_SAFE_INSET } from "../utils/safe-area";
 
 interface TextOverlayProps {
   overlay: TextOverlay;
@@ -233,5 +234,19 @@ export const TextOverlayComponent: React.FC<TextOverlayProps> = ({ overlay }) =>
       textElement = <span style={textStyle}>{overlay.text}</span>;
   }
 
-  return <div style={positionStyle}>{textElement}</div>;
+  // Positions resolve inside the title-safe area so overlays never sit in the
+  // device-bezel / TikTok-UI margin, regardless of what the EDL specifies.
+  return (
+    <div
+      style={{
+        position: "absolute",
+        top: TITLE_SAFE_INSET,
+        left: TITLE_SAFE_INSET,
+        right: TITLE_SAFE_INSET,
+        bottom: TITLE_SAFE_INSET,
+      }}
+    >
+      <div style={positionStyle}>{textElement}</div>
+    </div>
+  );
 };
