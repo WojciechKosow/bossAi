@@ -1,5 +1,6 @@
 import React from "react";
 import { useCurrentFrame, useVideoConfig, interpolate, Easing } from "remotion";
+import { scaleForPanDistance } from "../utils/safe-pan";
 
 interface DriftProps {
   children: React.ReactNode;
@@ -41,7 +42,9 @@ export const Drift: React.FC<DriftProps> = ({
       break;
   }
 
-  const scale = 1 + (distancePercent / 100) * 0.5;
+  // Zoom in just enough that the longest axis travel never reveals frame edges
+  const maxAxisTravel = direction === "diagonal" ? d * 0.7 : d;
+  const scale = scaleForPanDistance(maxAxisTravel);
 
   return (
     <div style={{ width: "100%", height: "100%", overflow: "hidden" }}>

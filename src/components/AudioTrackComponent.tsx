@@ -1,59 +1,72 @@
 import React from "react";
-import { Audio, useCurrentFrame, useVideoConfig, interpolate } from "remotion";
-import type { AudioTrack } from "../types/edl";
+import { Audio, useCurrentFrame, useVideoConfig } from "remotion";
+import type { AudioTrack, MixConfig } from "../types/edl";
+import {
+  duckFactorAt,
+  effectiveFadeMs,
+  fadeInGain,
+  fadeOutGain,
+  shouldDuck,
+  type SpeechInterval,
+} from "../utils/audio-mix";
 
 interface AudioTrackComponentProps {
   track: AudioTrack;
   totalDurationInFrames: number;
+  mixConfig: MixConfig;
+  speechIntervalsMs: ReadonlyArray<SpeechInterval>;
 }
 
 export const AudioTrackComponent: React.FC<AudioTrackComponentProps> = ({
   track,
   totalDurationInFrames,
+  mixConfig,
+  speechIntervalsMs,
 }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
 
-  const fadeInFrames = Math.round((track.fade_in_ms / 1000) * fps);
-  const fadeOutFrames = Math.round((track.fade_out_ms / 1000) * fps);
+  const { fadeInMs, fadeOutMs } = effectiveFadeMs(track);
+  const fadeInFrames = Math.round((fadeInMs / 1000) * fps);
+  const fadeOutFrames = Math.round((fadeOutMs / 1000) * fps);
 
   const trackDurationFrames = track.end_ms
     ? Math.round(((track.end_ms - track.start_ms) / 1000) * fps)
     : totalDurationInFrames - Math.round((track.start_ms / 1000) * fps);
 
-  // Calculate volume with fades
   let volume = track.volume;
 
-  // Fade in
   if (fadeInFrames > 0 && frame < fadeInFrames) {
-    volume *= interpolate(frame, [0, fadeInFrames], [0, 1], {
-      extrapolateLeft: "clamp",
-      extrapolateRight: "clamp",
-    });
+    volume *= fadeInGain(frame / fadeInFrames);
   }
 
-  // Fade out
   if (fadeOutFrames > 0) {
     const fadeOutStart = trackDurationFrames - fadeOutFrames;
     if (frame > fadeOutStart) {
-      volume *= interpolate(
-        frame,
-        [fadeOutStart, trackDurationFrames],
-        [1, 0],
-        { extrapolateLeft: "clamp", extrapolateRight: "clamp" }
-      );
+      volume *= fadeOutGain((frame - fadeOutStart) / fadeOutFrames);
     }
+  }
+
+  // Duck music under active voiceover. The component renders inside a Sequence,
+  // so the local frame maps to absolute time via the track's start offset.
+  if (shouldDuck(track, mixConfig) && speechIntervalsMs.length > 0) {
+    const absoluteMs = track.start_ms + (frame / fps) * 1000;
+    volume *= duckFactorAt(absoluteMs, speechIntervalsMs, mixConfig);
   }
 
   const trimInFrames = track.trim_in_ms
     ? Math.round((track.trim_in_ms / 1000) * fps)
     : 0;
+  const trimOutFrames = track.trim_out_ms
+    ? Math.round((track.trim_out_ms / 1000) * fps)
+    : undefined;
 
   return (
     <Audio
       src={track.asset_url}
-      volume={volume}
+      volume={Math.max(volume, 0)}
       startFrom={trimInFrames}
+      endAt={trimOutFrames}
     />
   );
 };

@@ -1,5 +1,6 @@
 import React from "react";
 import { useCurrentFrame, useVideoConfig, interpolate, Easing } from "remotion";
+import { scaleForPanDistance } from "../utils/safe-pan";
 
 interface PanProps {
   children: React.ReactNode;
@@ -43,8 +44,9 @@ export const Pan: React.FC<PanProps> = ({
       break;
   }
 
-  // Slight zoom to avoid edges
-  const scale = 1 + (distancePercent / 100) * 0.5;
+  // Zoom in far enough that the full pan distance never reveals frame edges
+  // (a 15% pan needs ~1.47x — a real camera pan travels over zoomed content).
+  const scale = scaleForPanDistance(distancePercent);
 
   return (
     <div style={{ width: "100%", height: "100%", overflow: "hidden" }}>

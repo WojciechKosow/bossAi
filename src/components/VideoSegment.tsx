@@ -1,12 +1,18 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import {
   useCurrentFrame,
   useVideoConfig,
-  Video,
+  OffthreadVideo,
   Img,
+  Sequence,
   interpolate,
+  delayRender,
+  continueRender,
 } from "remotion";
+import { getVideoMetadata, getImageDimensions } from "@remotion/media-utils";
 import type { Segment, Effect, Transition } from "../types/edl";
+import { resolveFraming } from "../utils/framing";
+import { autoKenBurnsParams } from "../utils/deterministic";
 import { ZoomIn } from "../effects/ZoomIn";
 import { ZoomOut } from "../effects/ZoomOut";
 import { FastZoom } from "../effects/FastZoom";
@@ -261,6 +267,14 @@ function wrapWithEffect(
           {element}
         </RGBSplit>
       );
+    case "grain_overlay":
+      // GrainOverlay renders on top of the element rather than wrapping it
+      return (
+        <>
+          {element}
+          <GrainOverlay intensity={effect.intensity ?? (p.intensity as number)} />
+        </>
+      );
     default:
       return element;
   }
@@ -275,6 +289,68 @@ function getPlaybackRate(effects?: Effect[]): number {
     }
   }
   return 1;
+}
+
+/**
+ * Measures the source asset's dimensions so "auto" framing can decide between
+ * cover and blur_fill. Blocks the render (delayRender) until measured; on
+ * failure resolves to null and framing falls back to cover.
+ */
+function useAssetDimensions(
+  src: string,
+  assetType: Segment["asset_type"],
+  enabled: boolean
+): { width: number; height: number } | null {
+  const [dims, setDims] = useState<{ width: number; height: number } | null>(
+    null
+  );
+  const [handle] = useState(() =>
+    enabled ? delayRender(`Measuring asset dimensions: ${src}`) : null
+  );
+
+  useEffect(() => {
+    if (!enabled || handle === null) return;
+    let cancelled = false;
+    const measured =
+      assetType === "VIDEO"
+        ? getVideoMetadata(src).then((m) => ({ width: m.width, height: m.height }))
+        : getImageDimensions(src).then((d) => ({ width: d.width, height: d.height }));
+    measured
+      .then((d) => {
+        if (!cancelled) setDims(d);
+      })
+      .catch(() => {
+        // Fall back to cover framing rather than failing the render.
+      })
+      .finally(() => continueRender(handle));
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [src, assetType, enabled, handle]);
+
+  return dims;
+}
+
+const MEDIA_FILL_STYLE: React.CSSProperties = {
+  width: "100%",
+  height: "100%",
+};
+
+/** Linear speed ramp: integrated source-frame offset at the given output frame. */
+function speedRampSourceOffset(
+  frame: number,
+  durationInFrames: number,
+  speedFrom: number,
+  speedTo: number
+): number {
+  const span = Math.max(durationInFrames - 1, 1);
+  return frame * speedFrom + ((speedTo - speedFrom) * frame * frame) / (2 * span);
+}
+
+function clampSpeed(value: unknown, fallback: number): number {
+  const n = typeof value === "number" && Number.isFinite(value) ? value : fallback;
+  return Math.min(Math.max(n, 0.1), 8);
 }
 
 function applyTransition(
@@ -377,33 +453,129 @@ export const VideoSegment: React.FC<VideoSegmentProps> = ({
   const trimIn = segment.trim_in_ms
     ? Math.round((segment.trim_in_ms / 1000) * fps)
     : 0;
+  const trimOut = segment.trim_out_ms
+    ? Math.round((segment.trim_out_ms / 1000) * fps)
+    : undefined;
 
-  let content: React.ReactNode;
+  // "auto" framing measures the asset and blur-fills wide (e.g. 16:9) sources
+  // instead of silently center-cropping them into the 9:16 frame.
+  const { width: frameWidth, height: frameHeight } = useVideoConfig();
+  const needsMeasure = segment.framing === "auto";
+  const dims = useAssetDimensions(
+    segment.asset_url,
+    segment.asset_type,
+    needsMeasure
+  );
+  const framing = resolveFraming(
+    segment.framing,
+    dims?.width ?? null,
+    dims?.height ?? null,
+    frameWidth,
+    frameHeight
+  );
 
-  if (segment.asset_type === "VIDEO") {
-    content = (
-      <Video
+  const speedRamp = segment.effects?.find((e) => e.type === "speed_ramp");
+
+  const renderMedia = (
+    objectFit: "cover" | "contain",
+    muted: boolean,
+    extraStyle?: React.CSSProperties
+  ): React.ReactNode => {
+    const style: React.CSSProperties = {
+      ...MEDIA_FILL_STYLE,
+      objectFit,
+      ...extraStyle,
+    };
+    if (segment.asset_type === "IMAGE") {
+      return <Img src={segment.asset_url} style={style} />;
+    }
+    if (segment.asset_type !== "VIDEO") return null;
+
+    if (speedRamp) {
+      const p = (speedRamp.params ?? {}) as Record<string, unknown>;
+      const speedFrom = clampSpeed(p.speed_from, 1);
+      const speedTo = clampSpeed(p.speed_to, 1);
+      const srcOffset = speedRampSourceOffset(
+        frame,
+        durationInFrames,
+        speedFrom,
+        speedTo
+      );
+      // Frame-remap technique: the Sequence restarts at the current frame so
+      // startFrom selects the retimed source frame. Always muted — retimed
+      // audio would stutter (segment audio belongs in audio_tracks anyway).
+      return (
+        <Sequence
+          from={frame}
+          durationInFrames={Math.max(durationInFrames - frame, 1)}
+          layout="none"
+        >
+          <OffthreadVideo
+            src={segment.asset_url}
+            startFrom={trimIn + Math.round(srcOffset)}
+            endAt={trimOut}
+            muted
+            style={style}
+          />
+        </Sequence>
+      );
+    }
+
+    // OffthreadVideo decodes via the native compositor — frame-accurate and
+    // independent of the headless browser's codec support.
+    return (
+      <OffthreadVideo
         src={segment.asset_url}
         startFrom={trimIn}
-        style={{ width: "100%", height: "100%", objectFit: "cover" }}
+        endAt={trimOut}
+        muted={muted}
+        style={style}
         playbackRate={playbackRate}
       />
     );
-  } else if (segment.asset_type === "IMAGE") {
+  };
+
+  let content: React.ReactNode;
+  if (framing === "blur_fill") {
     content = (
-      <Img
-        src={segment.asset_url}
-        style={{ width: "100%", height: "100%", objectFit: "cover" }}
-      />
+      <div style={{ position: "absolute", inset: 0, overflow: "hidden" }}>
+        <div
+          style={{
+            position: "absolute",
+            inset: 0,
+            transform: "scale(1.2)",
+            filter: "blur(30px) brightness(0.65)",
+          }}
+        >
+          {renderMedia("cover", true)}
+        </div>
+        <div style={{ position: "absolute", inset: 0 }}>
+          {renderMedia("contain", false)}
+        </div>
+      </div>
     );
   } else {
-    content = null;
+    content = renderMedia(framing, false);
   }
 
-  if (segment.effects) {
-    for (const effect of segment.effects) {
-      content = wrapWithEffect(content, effect, bpm);
-    }
+  // A static image with no effect is a dead frame — give it a subtle,
+  // deterministic Ken Burns drift instead.
+  const effects = segment.effects ?? [];
+  if (segment.asset_type === "IMAGE" && effects.length === 0) {
+    const kb = autoKenBurnsParams(segment.id);
+    content = (
+      <KenBurns
+        scaleFrom={kb.scaleFrom}
+        scaleTo={kb.scaleTo}
+        panDirection={kb.panDirection}
+      >
+        {content}
+      </KenBurns>
+    );
+  }
+
+  for (const effect of effects) {
+    content = wrapWithEffect(content, effect, bpm);
   }
 
   return (
