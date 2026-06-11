@@ -53,6 +53,14 @@ Ordering rationale: Phase A is small and lifts **every** video immediately (incl
 
 ### Phase A — Render quality floor (Remotion, small + high ROI)
 
+> **STATUS: DONE** — branch `claude/dazzling-shannon-hd6eeu-remotion` (based on `remotion-branch`), commit `bcd5a59`.
+> Delivered: auto-ducking (+ mix_config), blur-fill auto-framing, title-safe areas, auto Ken Burns on stills,
+> trim_out_ms + speed_ramp implemented, rgb_split/grain_overlay schema fix, OffthreadVideo switch,
+> edge-reveal fixes in Pan/Drift/KenBurns (all three slid black bands into frame — found during verification).
+> GIF aspect was a false alarm (fit="contain" already preserves it). 72 tests green; verified with a real
+> end-to-end smoke render (`scripts/smoke-render.ts`), ducking measured at 0.448× vs configured 0.45.
+> Backend follow-up for Phase B: EDL may now emit `framing` per segment and `mix_config`/`ducking` knobs.
+
 > No new effects. Fix the things that make output look amateur regardless of editing decisions.
 
 - **A1. Audio ducking + eased fades** — `src/components/AudioTrackComponent.tsx`
