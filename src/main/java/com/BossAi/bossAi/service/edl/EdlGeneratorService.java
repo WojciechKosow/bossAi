@@ -135,7 +135,7 @@ public class EdlGeneratorService {
             stripUnknownEffects(edl);
             sanitizeTransitions(edl);
 
-            EdlValidator.ValidationResult result = edlValidator.validate(edl);
+            EdlValidator.ValidationResult result = edlValidator.validate(edl, projectAssets, false);
             if (result.valid()) {
                 log.info("[EdlGenerator] CutEngine EDL valid — {} segments, {} audio tracks, {} whisper words",
                         edl.getSegments().size(),
@@ -190,7 +190,7 @@ public class EdlGeneratorService {
         stripUnknownEffects(edl);
         sanitizeTransitions(edl);
 
-        EdlValidator.ValidationResult result = edlValidator.validate(edl);
+        EdlValidator.ValidationResult result = edlValidator.validate(edl, projectAssets, false);
         if (!result.valid()) {
             log.warn("[EdlGenerator] GPT EDL also invalid — last resort deterministic: {}", result.errors());
             return buildDeterministicEdl(context, audioAnalysis, projectAssets);

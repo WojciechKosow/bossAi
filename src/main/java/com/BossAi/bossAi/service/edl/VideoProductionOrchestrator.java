@@ -54,6 +54,7 @@ public class VideoProductionOrchestrator {
     private final VideoProjectService videoProjectService;
     private final ProjectAssetService projectAssetService;
     private final RenderJobService renderJobService;
+    private final com.BossAi.bossAi.service.RenderProgressService renderProgressService;
     private final EditDnaGenerator editDnaGenerator;
     private final NarrationAnalyzer narrationAnalyzer;
     private final SpeechAnalyzer speechAnalyzer;
@@ -133,8 +134,8 @@ public class VideoProductionOrchestrator {
             // 7. Generuj EDL z edit_dna + justified cuts
             EdlDto edl = edlGeneratorService.generateEdl(context, audioAnalysis, projectAssets, editDna);
 
-            // 8. Waliduj
-            EdlValidator.ValidationResult validation = edlValidator.validate(edl);
+            // 8. Waliduj (lenient pipeline mode, asset-aware)
+            EdlValidator.ValidationResult validation = edlValidator.validate(edl, projectAssets, false);
             if (!validation.valid()) {
                 log.error("[Orchestrator] EDL validation failed: {}", validation.errors());
                 videoProjectService.updateStatus(projectId, ProjectStatus.FAILED);
@@ -471,6 +472,7 @@ public class VideoProductionOrchestrator {
         // Utworz RenderJob
         RenderJob renderJob = renderJobService.createRenderJob(projectId, edlEntity, "high");
         String renderId = renderJob.getId().toString();
+        renderProgressService.broadcast(projectId, RenderStatus.QUEUED, 0.0, null);
 
         try {
             // Serializuj EDL do Map (Remotion oczekuje raw JSON object)
@@ -494,25 +496,35 @@ public class VideoProductionOrchestrator {
                     renderResponse.renderId(), renderResponse.status());
 
             renderJobService.updateProgress(renderJob.getId(), 0.01);
+            renderProgressService.broadcast(projectId, RenderStatus.RENDERING, 0.01, null);
 
-            // Poll until complete
-            RemotionRenderStatusResponse status = remotionRenderClient.pollUntilComplete(renderId);
+            // Poll until complete — stream progress to the editor's SSE channel
+            RemotionRenderStatusResponse status = remotionRenderClient.pollUntilComplete(
+                    renderId,
+                    progress -> {
+                        renderJobService.updateProgress(renderJob.getId(), progress);
+                        renderProgressService.broadcast(projectId, RenderStatus.RENDERING, progress, null);
+                    });
 
             // Mark complete
             renderJobService.markComplete(renderJob.getId(), status.outputUrl());
+            renderProgressService.broadcast(projectId, RenderStatus.COMPLETE, 1.0, status.outputUrl());
             log.info("[Orchestrator] Render complete for project {} — output: {}", projectId, status.outputUrl());
 
         } catch (RemotionRenderClient.RenderFailedException e) {
             log.error("[Orchestrator] Render failed for project {}", projectId, e);
             renderJobService.markFailed(renderJob.getId());
+            renderProgressService.broadcast(projectId, RenderStatus.FAILED, 0.0, null);
 
         } catch (RemotionRenderClient.RenderTimeoutException e) {
             log.error("[Orchestrator] Render timed out for project {}", projectId, e);
             renderJobService.markFailed(renderJob.getId());
+            renderProgressService.broadcast(projectId, RenderStatus.FAILED, 0.0, null);
 
         } catch (Exception e) {
             log.error("[Orchestrator] Unexpected error during render for project {}", projectId, e);
             renderJobService.markFailed(renderJob.getId());
+            renderProgressService.broadcast(projectId, RenderStatus.FAILED, 0.0, null);
         }
     }
 }
