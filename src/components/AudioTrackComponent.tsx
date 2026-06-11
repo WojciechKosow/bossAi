@@ -7,6 +7,7 @@ import {
   fadeInGain,
   fadeOutGain,
   shouldDuck,
+  volumeFromPoints,
   type SpeechInterval,
 } from "../utils/audio-mix";
 
@@ -34,7 +35,10 @@ export const AudioTrackComponent: React.FC<AudioTrackComponentProps> = ({
     ? Math.round(((track.end_ms - track.start_ms) / 1000) * fps)
     : totalDurationInFrames - Math.round((track.start_ms / 1000) * fps);
 
-  let volume = track.volume;
+  // Volume automation envelope (style dynamics) supersedes the static volume;
+  // fades and ducking still multiply on top.
+  const absoluteMs = track.start_ms + (frame / fps) * 1000;
+  let volume = volumeFromPoints(absoluteMs, track.volume_points) ?? track.volume;
 
   if (fadeInFrames > 0 && frame < fadeInFrames) {
     volume *= fadeInGain(frame / fadeInFrames);
@@ -50,7 +54,6 @@ export const AudioTrackComponent: React.FC<AudioTrackComponentProps> = ({
   // Duck music under active voiceover. The component renders inside a Sequence,
   // so the local frame maps to absolute time via the track's start offset.
   if (shouldDuck(track, mixConfig) && speechIntervalsMs.length > 0) {
-    const absoluteMs = track.start_ms + (frame / fps) * 1000;
     volume *= duckFactorAt(absoluteMs, speechIntervalsMs, mixConfig);
   }
 

@@ -1,4 +1,10 @@
-import type { AudioTrack, Edl, MixConfig, WhisperWord } from "../types/edl";
+import type {
+  AudioTrack,
+  Edl,
+  MixConfig,
+  VolumePoint,
+  WhisperWord,
+} from "../types/edl";
 import { MixConfigSchema } from "../types/edl";
 
 export type SpeechInterval = readonly [startMs: number, endMs: number];
@@ -91,6 +97,30 @@ export function fadeInGain(progress: number): number {
 export function fadeOutGain(progress: number): number {
   const p = Math.min(Math.max(progress, 0), 1);
   return Math.cos((p * Math.PI) / 2);
+}
+
+/**
+ * Base volume at an absolute timeline position from the automation envelope:
+ * linear interpolation between points, held flat beyond the ends.
+ * Returns null when the track has no envelope (use the static volume).
+ */
+export function volumeFromPoints(
+  tMs: number,
+  points: VolumePoint[] | undefined
+): number | null {
+  if (!points || points.length === 0) return null;
+  const sorted = [...points].sort((a, b) => a.ms - b.ms);
+  if (tMs <= sorted[0].ms) return sorted[0].volume;
+  for (let i = 1; i < sorted.length; i++) {
+    const a = sorted[i - 1];
+    const b = sorted[i];
+    if (tMs <= b.ms) {
+      if (b.ms === a.ms) return b.volume;
+      const t = (tMs - a.ms) / (b.ms - a.ms);
+      return a.volume + (b.volume - a.volume) * t;
+    }
+  }
+  return sorted[sorted.length - 1].volume;
 }
 
 /** Whether ducking applies to this track. Only music ducks, never the voiceover. */

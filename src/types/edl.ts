@@ -91,6 +91,11 @@ export const SegmentSchema = z.object({
 
 // --- Audio track ---
 
+export const VolumePointSchema = z.object({
+  ms: z.number(),
+  volume: z.number(),
+});
+
 export const AudioTrackSchema = z.object({
   id: z.string(),
   asset_id: z.string().optional(),
@@ -105,6 +110,12 @@ export const AudioTrackSchema = z.object({
   trim_out_ms: z.number().nullable().optional(),
   /** Per-track override for auto-ducking (music only). Defaults to mix_config.auto_duck. */
   ducking: z.boolean().optional(),
+  /**
+   * Volume automation envelope (absolute timeline ms → volume). Linearly
+   * interpolated, held beyond the ends. Supersedes the static `volume`.
+   * Fades and auto-ducking still apply on top.
+   */
+  volume_points: z.array(VolumePointSchema).optional(),
 });
 
 // --- Mix config (audio mixing behavior) ---
@@ -264,6 +275,7 @@ export type Effect = z.infer<typeof EffectSchema>;
 export type Transition = z.infer<typeof TransitionSchema>;
 export type Segment = z.infer<typeof SegmentSchema>;
 export type AudioTrack = z.infer<typeof AudioTrackSchema>;
+export type VolumePoint = z.infer<typeof VolumePointSchema>;
 export type TextStyle = z.infer<typeof TextStyleSchema>;
 export type TextPosition = z.infer<typeof TextPositionSchema>;
 export type TextOverlay = z.infer<typeof TextOverlaySchema>;
