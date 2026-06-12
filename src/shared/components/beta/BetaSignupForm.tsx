@@ -10,10 +10,22 @@ const PUBLIC_KEY = import.meta.env.VITE_EMAILJS_PUBLIC_KEY ?? "";
 const inputClass =
   "w-full px-4 py-3 rounded-xl border border-border bg-background text-sm outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/40 placeholder:text-muted-foreground disabled:opacity-50 transition";
 
-type State = "idle" | "loading" | "success" | "error";
+const STORAGE_KEY = "toucan_beta_submitted";
+
+function hasAlreadySubmitted() {
+  return !!localStorage.getItem(STORAGE_KEY);
+}
+
+function markAsSubmitted(email: string) {
+  localStorage.setItem(STORAGE_KEY, email);
+}
+
+type State = "idle" | "loading" | "success" | "error" | "already_submitted";
 
 const BetaSignupForm = () => {
-  const [state, setState] = useState<State>("idle");
+  const [state, setState] = useState<State>(() =>
+    hasAlreadySubmitted() ? "already_submitted" : "idle"
+  );
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [message, setMessage] = useState("");
@@ -41,6 +53,7 @@ const BetaSignupForm = () => {
         },
         PUBLIC_KEY
       );
+      markAsSubmitted(email.trim());
       setState("success");
     } catch (err) {
       console.error("[BetaSignupForm] EmailJS error:", err);
@@ -50,7 +63,21 @@ const BetaSignupForm = () => {
 
   return (
     <AnimatePresence mode="wait">
-      {state === "success" ? (
+      {state === "already_submitted" ? (
+        <motion.div
+          key="already"
+          initial={{ opacity: 0, scale: 0.95 }}
+          animate={{ opacity: 1, scale: 1 }}
+          className="flex flex-col items-center gap-4 py-6 text-center"
+        >
+          <CheckCircle2 className="size-14 text-primary" />
+          <h3 className="text-xl font-semibold">Already signed up!</h3>
+          <p className="text-muted-foreground text-sm max-w-xs">
+            You're already on the waitlist. We'll reach out when your spot is
+            ready.
+          </p>
+        </motion.div>
+      ) : state === "success" ? (
         <motion.div
           key="success"
           initial={{ opacity: 0, scale: 0.95 }}
