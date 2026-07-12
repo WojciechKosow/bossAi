@@ -10,7 +10,33 @@ import {
 import { useAssetBlobUrl, useDeleteAsset, useUploadAsset } from "../hooks";
 import { AssetMedia } from "./AssetMedia";
 import type { AssetDTO, AssetType } from "../types";
+import { useToast } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
+
+/** Does this file belong in a zone whose fixed upload type is `uploadType`? */
+const acceptsFile = (uploadType: AssetType, file: File): boolean =>
+  uploadType === "IMAGE"
+    ? file.type.startsWith("image/") || file.type.startsWith("video/")
+    : file.type.startsWith("audio/");
+
+/**
+ * The media zone (uploadType IMAGE) carries both images and videos, so the
+ * concrete asset type is resolved per file. Voice/music zones are fixed.
+ */
+const typeForFile = (uploadType: AssetType, file: File): AssetType =>
+  uploadType === "IMAGE"
+    ? file.type.startsWith("video/")
+      ? "VIDEO"
+      : "IMAGE"
+    : uploadType;
+
+const errorMessage = (e: any, fallback: string): string => {
+  const data = e?.response?.data;
+  if (typeof data === "string" && data.trim()) return data;
+  if (typeof data?.message === "string" && data.message.trim()) return data.message;
+  const status = e?.response?.status;
+  return status ? `${fallback} (${status})` : fallback;
+};
 
 interface Props {
   /** Assets currently in this zone, in the order the user wants them used. */
@@ -41,6 +67,7 @@ export const OrderedAssetZone = ({
   const inputRef = useRef<HTMLInputElement>(null);
   const upload = useUploadAsset();
   const remove = useDeleteAsset();
+  const toast = useToast();
   const [dragOver, setDragOver] = useState(false);
   const [pending, setPending] = useState<string[]>([]);
 
@@ -49,8 +76,17 @@ export const OrderedAssetZone = ({
 
   const handleFiles = useCallback(
     async (files: FileList | File[]) => {
+      const incoming = Array.from(files);
+      const valid = incoming.filter((f) => acceptsFile(uploadType, f));
+      const rejected = incoming.length - valid.length;
+      if (rejected > 0) {
+        toast.error(
+          `${rejected} file${rejected > 1 ? "s" : ""} skipped — wrong type for this slot.`,
+        );
+      }
+
       const room = single ? 1 : Math.max(0, limit - assets.length);
-      const arr = Array.from(files).slice(0, room);
+      const arr = valid.slice(0, room);
       if (!arr.length) return;
 
       const startOrder = single ? 0 : assets.length;
@@ -58,16 +94,18 @@ export const OrderedAssetZone = ({
       setPending((p) => [...p, ...tempIds]);
 
       const uploaded: AssetDTO[] = [];
+      let failure: string | null = null;
       for (let i = 0; i < arr.length; i++) {
         try {
           uploaded.push(
             await upload.mutateAsync({
               file: arr[i],
-              type: uploadType,
+              type: typeForFile(uploadType, arr[i]),
               orderIndex: startOrder + i,
             }),
           );
         } catch (e) {
+          failure = errorMessage(e, "Upload failed");
           console.error("upload failed", e);
         }
       }
@@ -76,8 +114,9 @@ export const OrderedAssetZone = ({
       if (uploaded.length) {
         onChange(single ? uploaded.slice(0, 1) : [...assets, ...uploaded]);
       }
+      if (failure) toast.error(failure);
     },
-    [assets, limit, onChange, single, upload, uploadType],
+    [assets, limit, onChange, single, upload, uploadType, toast],
   );
 
   const onDrop = (e: React.DragEvent) => {
