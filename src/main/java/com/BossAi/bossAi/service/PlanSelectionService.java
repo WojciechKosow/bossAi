@@ -53,11 +53,23 @@ public class PlanSelectionService {
                     ));
         }
 
-        return PLAN_PRIORITY.stream()
+//        return PLAN_PRIORITY.stream()
+//                .flatMap(priority ->
+//                        userPlans.stream()
+//                                .filter(p -> p.getPlanType() == priority)
+//                                .filter(UserPlan::isActive)
+//                )
+//                .findFirst()
+//                .orElseThrow(() -> new ResponseStatusException(
+//                        HttpStatus.PAYMENT_REQUIRED,
+//                        "No active plan"
+//                ));
+
+//        beta test only
+                return PLAN_PRIORITY.stream()
                 .flatMap(priority ->
                         userPlans.stream()
                                 .filter(p -> p.getPlanType() == priority)
-                                .filter(UserPlan::isActive)
                 )
                 .findFirst()
                 .orElseThrow(() -> new ResponseStatusException(
