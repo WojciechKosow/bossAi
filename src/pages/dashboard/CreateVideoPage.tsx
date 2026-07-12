@@ -7,64 +7,66 @@ import {
   ChevronRight,
   Loader2,
   Wand2,
-  Lock,
   Check,
   AlertTriangle,
   RotateCcw,
+  Film,
+  Mic,
+  Music,
+  Trash2,
+  GraduationCap,
 } from "lucide-react";
-import { AssetUploader } from "@/features/video/components/AssetUploader";
-import { StylePicker } from "@/features/video/components/StylePicker";
-import { SceneAssignmentBoard } from "@/features/video/components/SceneAssignmentBoard";
+import { OrderedAssetZone } from "@/features/video/components/OrderedAssetZone";
 import {
-  useActivePlan,
-  useAnalyzePrompt,
+  useAssets,
   useGenerationProgress,
   useProjects,
   useStartGeneration,
 } from "@/features/video/hooks";
+import {
+  clearDraft,
+  loadDraft,
+  pickInOrder,
+  saveDraft,
+} from "@/features/video/draft";
 import type {
   AssetDTO,
   ProgressEvent as ProgressPayload,
-  PromptAnalysisResponse,
   UUID,
   VideoStyle,
 } from "@/features/video/types";
+import { useAuth } from "@/features/auth/context/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
-import { BETA_MODE } from "@/lib/betaMode";
 
-type Step = "compose" | "review" | "generating";
+type Step = "compose" | "generating";
 
 const stepLabels: Record<Step, string> = {
   compose: "Compose",
-  review: "Review scenes",
   generating: "Generating",
 };
 
-const PRO_PLANS = new Set(["PRO", "PREMIUM", "ULTIMATE"]);
+/** The single v0.1 preset — no style picker, this is baked into every request. */
+const FIXED_STYLE: VideoStyle = "EDUCATIONAL";
+const DNA_PRESET = "PROBLEM_PAYOFF";
+const MIN_PROMPT = 10;
 
 const CreateVideoPage = () => {
   const navigate = useNavigate();
   const toast = useToast();
-
-  const { data: plan } = useActivePlan();
-  const isPro = useMemo(
-    () => BETA_MODE || (plan?.type ? PRO_PLANS.has(plan.type) : false),
-    [plan],
-  );
+  const userId = useAuth().user?.id ?? null;
 
   const [step, setStep] = useState<Step>("compose");
   const [prompt, setPrompt] = useState("");
-  const [style, setStyle] = useState<VideoStyle | null>("CINEMATIC");
-  const [assets, setAssets] = useState<AssetDTO[]>([]);
-  const [analysis, setAnalysis] = useState<PromptAnalysisResponse | null>(null);
-  const [assignments, setAssignments] = useState<Map<number, UUID>>(new Map());
+  const [media, setMedia] = useState<AssetDTO[]>([]);
+  const [tts, setTts] = useState<AssetDTO[]>([]);
+  const [music, setMusic] = useState<AssetDTO | null>(null);
   const [generationId, setGenerationId] = useState<UUID | null>(null);
 
-  const analyzeMut = useAnalyzePrompt();
+  const { data: allAssets } = useAssets();
   const startMut = useStartGeneration();
   const { progress, done, error, failed } = useGenerationProgress(
     generationId,
@@ -72,18 +74,46 @@ const CreateVideoPage = () => {
   );
   const { data: projects } = useProjects();
 
-  /* hydrate suggested assignments after analyze */
-  useEffect(() => {
-    if (!analysis) return;
-    const next = new Map<number, UUID>();
-    analysis.scenes.forEach((s) => {
-      if (s.suggestedAssetId) next.set(s.index, s.suggestedAssetId);
-    });
-    setAssignments(next);
-  }, [analysis]);
+  /* ---- draft: hydrate once, then autosave ---- */
+  const hydratedRef = useRef(false);
+  const [hydrated, setHydrated] = useState(false);
 
   useEffect(() => {
+    if (hydratedRef.current) return;
+    const draft = loadDraft(userId);
+    if (!draft) {
+      hydratedRef.current = true;
+      setHydrated(true);
+      return;
+    }
+    // Need the server asset list to turn stored ids back into assets.
+    if (!allAssets) return;
+    setPrompt(draft.prompt);
+    setMedia(pickInOrder(allAssets, draft.mediaIds));
+    setTts(pickInOrder(allAssets, draft.ttsIds));
+    setMusic(
+      draft.musicId
+        ? (allAssets.find((a) => a.id === draft.musicId) ?? null)
+        : null,
+    );
+    hydratedRef.current = true;
+    setHydrated(true);
+  }, [userId, allAssets]);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    saveDraft(userId, {
+      prompt,
+      mediaIds: media.map((a) => a.id),
+      ttsIds: tts.map((a) => a.id),
+      musicId: music?.id ?? null,
+    });
+  }, [hydrated, userId, prompt, media, tts, music]);
+
+  /* ---- redirect when the finished project appears ---- */
+  useEffect(() => {
     if (!done || !generationId) return;
+    clearDraft(userId);
     const project = (projects ?? []).find(
       (p) => p.generationId === generationId,
     );
@@ -97,49 +127,43 @@ const CreateVideoPage = () => {
       navigate(`/dashboard/library/preview/${generationId}`);
     }, 4000);
     return () => window.clearTimeout(fallback);
-  }, [done, generationId, projects, navigate, toast]);
+  }, [done, generationId, projects, navigate, toast, userId]);
 
   useEffect(() => {
     if (error) toast.error("Lost connection to progress stream");
   }, [error, toast]);
 
   /* ---- actions ---- */
+  const promptOk =
+    prompt.trim().length >= MIN_PROMPT && prompt.length <= 2000;
+  const canGenerate = promptOk && media.length >= 1 && !startMut.isPending;
 
-  const canAnalyze =
-    prompt.trim().length >= 10 &&
-    prompt.length <= 2000 &&
-    !analyzeMut.isPending;
-
-  const onAnalyze = async () => {
-    if (!canAnalyze) return;
-    try {
-      const result = await analyzeMut.mutateAsync({
-        prompt,
-        style,
-        customMediaAssetIds: assets.map((a) => a.id),
-        analyzeAssets: true,
-      });
-      setAnalysis(result);
-      setStep("review");
-    } catch (e: any) {
-      toast.error(e?.response?.data?.message ?? "Failed to analyze prompt");
-    }
+  const onClear = () => {
+    setPrompt("");
+    setMedia([]);
+    setTts([]);
+    setMusic(null);
+    clearDraft(userId);
+    toast.success("Draft cleared");
   };
 
+  const hasDraft =
+    prompt.trim().length > 0 || media.length > 0 || tts.length > 0 || !!music;
+
   const onGenerate = async () => {
-    if (!analysis) return;
+    if (!canGenerate) return;
     try {
-      const sceneAssignments = Array.from(assignments.entries()).map(
-        ([sceneIndex, assetId]) => ({ sceneIndex, assetId }),
-      );
       const res = await startMut.mutateAsync({
         prompt,
-        style,
-        customMediaAssetIds: assets.map((a) => a.id),
-        sceneAssignments,
+        style: FIXED_STYLE,
+        dnaPreset: DNA_PRESET,
+        customMediaAssetIds: media.map((a) => a.id),
+        customTtsAssetIds: tts.map((a) => a.id),
+        musicAssetId: music?.id ?? null,
         useGptOrdering: false,
         reuseAssets: false,
         forceReuseForTesting: false,
+        gifOverlaysEnabled: false,
       });
       setGenerationId(res.generationId);
       setStep("generating");
@@ -149,7 +173,6 @@ const CreateVideoPage = () => {
   };
 
   /* ---- UI ---- */
-
   return (
     <div className="max-w-6xl mx-auto space-y-8">
       {/* HERO */}
@@ -167,8 +190,8 @@ const CreateVideoPage = () => {
               Create your <span className="gradient-text">TikTok video</span>
             </h1>
             <p className="text-sm text-muted-foreground mt-2 max-w-lg">
-              Describe what you want, drop in your media, and let the AI
-              choreograph cuts, voiceover and motion in seconds.
+              Drop in your clips, voice-over and music in the order you want,
+              add a prompt, and we choreograph the edit for you.
             </p>
           </div>
           <Stepper current={step} />
@@ -183,8 +206,9 @@ const CreateVideoPage = () => {
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -10 }}
             transition={{ duration: 0.25 }}
-            className="grid grid-cols-1 xl:grid-cols-[1fr_360px] gap-6"
+            className="grid grid-cols-1 xl:grid-cols-[1fr_340px] gap-6 items-start"
           >
+            {/* left — inputs */}
             <div className="space-y-6">
               <Section
                 title="Describe your video"
@@ -194,107 +218,99 @@ const CreateVideoPage = () => {
                   <textarea
                     value={prompt}
                     onChange={(e) => setPrompt(e.target.value)}
-                    placeholder="A 30-second product launch story for a sleek wireless lamp. Hook with a glowing close-up, walk through 3 features, end with a CTA to visit the site."
-                    className="w-full min-h-[160px] rounded-lg bg-transparent p-4 text-sm resize-none outline-none placeholder:text-muted-foreground"
+                    placeholder="A focus supplement TikTok ad. Hook with the problem, walk through how it works, end with a strong call to action."
+                    className="w-full min-h-[140px] rounded-lg bg-transparent p-4 text-sm resize-none outline-none placeholder:text-muted-foreground"
                   />
                   <div className="flex items-center justify-between px-3 py-2 border-t border-border text-xs text-muted-foreground">
                     <span>{prompt.trim().length} / 2000</span>
-                    <span>10 chars minimum</span>
+                    <span>{MIN_PROMPT} chars minimum</span>
                   </div>
                 </div>
               </Section>
 
-              <Section title="Pick a style">
-                <StylePicker value={style} onChange={setStyle} />
+              <Section
+                title="1 · Images & videos"
+                subtitle="Each clip becomes one scene, in this order. Drag to rearrange."
+                icon={Film}
+              >
+                <OrderedAssetZone
+                  assets={media}
+                  onChange={setMedia}
+                  uploadType="IMAGE"
+                  accept="image/*,video/*"
+                  icon={Film}
+                  dropLabel="Drop images or videos, or"
+                  dropHint="Up to 12 files — order top to bottom"
+                  maxFiles={12}
+                />
+              </Section>
+
+              <Section
+                title="2 · Voice-over"
+                subtitle="Your narration clips, played in this order. Leave empty to auto-generate a voice."
+                icon={Mic}
+              >
+                <OrderedAssetZone
+                  assets={tts}
+                  onChange={setTts}
+                  uploadType="VOICE"
+                  accept="audio/*"
+                  icon={Mic}
+                  dropLabel="Drop voice-over audio, or"
+                  dropHint="MP3 / WAV — order top to bottom"
+                  maxFiles={12}
+                />
+              </Section>
+
+              <Section
+                title="3 · Music"
+                subtitle="One background track. Optional."
+                icon={Music}
+              >
+                <OrderedAssetZone
+                  assets={music ? [music] : []}
+                  onChange={(a) => setMusic(a[0] ?? null)}
+                  uploadType="MUSIC"
+                  accept="audio/*"
+                  icon={Music}
+                  dropLabel="Drop a music track, or"
+                  dropHint="One MP3 / WAV"
+                  single
+                />
               </Section>
             </div>
 
-            <div className="space-y-6">
-              <Section
-                title="Your media"
-                subtitle={
-                  isPro ? undefined : (
-                    <span className="inline-flex items-center gap-1.5 text-amber-500">
-                      <Lock size={12} /> PRO+ to upload custom media
-                    </span>
-                  )
-                }
-              >
-                <div
-                  className={cn(
-                    !isPro && "opacity-60 pointer-events-none select-none",
-                  )}
-                >
-                  <AssetUploader assets={assets} onChange={setAssets} />
-                </div>
-              </Section>
-
+            {/* right — summary + CTA (sticky) */}
+            <div className="xl:sticky xl:top-6 space-y-4">
               <div className="rounded-xl border border-border bg-card p-5 space-y-4">
                 <div>
                   <p className="text-sm font-semibold flex items-center gap-2">
                     <Wand2 size={14} className="text-primary" />
-                    Ready to draft?
+                    Ready to generate?
                   </p>
                   <p className="text-xs text-muted-foreground mt-1">
-                    We'll outline scenes, voiceover and pacing before any heavy
-                    lifting. Generation is free at this step.
+                    We'll write the script, cut the scenes to your voice-over and
+                    beat-align the music.
                   </p>
                 </div>
-                <Button
-                  onClick={onAnalyze}
-                  disabled={!canAnalyze}
-                  className="w-full gradient-bg hover:opacity-90 text-white shadow-glow"
-                >
-                  {analyzeMut.isPending ? (
-                    <Loader2 className="size-4 animate-spin" />
-                  ) : (
-                    <Sparkles className="size-4" />
-                  )}
-                  Analyze prompt
-                </Button>
-              </div>
-            </div>
-          </motion.div>
-        )}
 
-        {step === "review" && analysis && (
-          <motion.div
-            key="review"
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -10 }}
-            transition={{ duration: 0.25 }}
-            className="space-y-6"
-          >
-            <ReviewSummary analysis={analysis} />
-            <Section
-              title="Scene blueprint"
-              subtitle="Reassign assets via drag & drop. Empty scenes will be AI-generated."
-            >
-              <SceneAssignmentBoard
-                analysis={analysis}
-                assets={assets}
-                assignments={assignments}
-                onChange={setAssignments}
-              />
-            </Section>
+                <div className="rounded-lg border border-border bg-muted/30 divide-y divide-border text-sm">
+                  <SummaryRow label="Scenes" value={String(media.length)} ok={media.length >= 1} />
+                  <SummaryRow
+                    label="Voice-over clips"
+                    value={tts.length ? String(tts.length) : "auto"}
+                  />
+                  <SummaryRow label="Music" value={music ? "1 track" : "none"} />
+                </div>
 
-            <div className="flex items-center justify-between gap-3 sticky bottom-4 z-10 glass rounded-xl border border-border px-4 py-3 shadow-elev">
-              <div className="text-xs text-muted-foreground">
-                {assignments.size}/{analysis.scenes.length} scenes assigned
-              </div>
-              <div className="flex items-center gap-2">
-                <Button
-                  variant="ghost"
-                  onClick={() => setStep("compose")}
-                  disabled={startMut.isPending}
-                >
-                  Back
-                </Button>
+                <Badge variant="secondary" className="w-full justify-center gap-1.5">
+                  <GraduationCap size={12} /> Educational · Problem → Payoff
+                </Badge>
+
                 <Button
                   onClick={onGenerate}
-                  disabled={startMut.isPending}
-                  className="gradient-bg text-white shadow-glow"
+                  disabled={!canGenerate}
+                  className="w-full gradient-bg hover:opacity-90 text-white shadow-glow"
                 >
                   {startMut.isPending ? (
                     <Loader2 className="size-4 animate-spin" />
@@ -303,7 +319,29 @@ const CreateVideoPage = () => {
                   )}
                   Generate video
                 </Button>
+
+                {!canGenerate && (
+                  <p className="text-[11px] text-muted-foreground text-center">
+                    {media.length < 1
+                      ? "Add at least one image or video."
+                      : !promptOk
+                        ? `Prompt needs ${MIN_PROMPT}+ characters.`
+                        : ""}
+                  </p>
+                )}
               </div>
+
+              <Button
+                variant="ghost"
+                onClick={onClear}
+                disabled={!hasDraft}
+                className="w-full text-muted-foreground hover:text-destructive"
+              >
+                <Trash2 size={14} /> Clear everything
+              </Button>
+              <p className="text-[11px] text-muted-foreground text-center px-2">
+                Your inputs are saved automatically on this device.
+              </p>
             </div>
           </motion.div>
         )}
@@ -321,7 +359,7 @@ const CreateVideoPage = () => {
                 message={failed}
                 onRetry={() => {
                   setGenerationId(null);
-                  setStep("review");
+                  setStep("compose");
                 }}
               />
             ) : (
@@ -341,15 +379,20 @@ export default CreateVideoPage;
 const Section = ({
   title,
   subtitle,
+  icon: Icon,
   children,
 }: {
   title: string;
   subtitle?: React.ReactNode;
+  icon?: typeof Film;
   children: React.ReactNode;
 }) => (
   <div className="space-y-3">
     <div>
-      <h2 className="text-sm font-semibold tracking-tight">{title}</h2>
+      <h2 className="text-sm font-semibold tracking-tight flex items-center gap-1.5">
+        {Icon && <Icon size={14} className="text-primary" />}
+        {title}
+      </h2>
       {subtitle && (
         <p className="text-xs text-muted-foreground mt-0.5">{subtitle}</p>
       )}
@@ -358,8 +401,30 @@ const Section = ({
   </div>
 );
 
+const SummaryRow = ({
+  label,
+  value,
+  ok,
+}: {
+  label: string;
+  value: string;
+  ok?: boolean;
+}) => (
+  <div className="flex items-center justify-between px-3 py-2">
+    <span className="text-muted-foreground">{label}</span>
+    <span
+      className={cn(
+        "font-medium tabular-nums",
+        ok === false && "text-muted-foreground/60",
+      )}
+    >
+      {value}
+    </span>
+  </div>
+);
+
 const Stepper = ({ current }: { current: Step }) => {
-  const order: Step[] = ["compose", "review", "generating"];
+  const order: Step[] = ["compose", "generating"];
   const idx = order.indexOf(current);
   return (
     <div className="flex items-center gap-2 text-xs">
@@ -394,30 +459,6 @@ const Stepper = ({ current }: { current: Step }) => {
   );
 };
 
-const ReviewSummary = ({ analysis }: { analysis: PromptAnalysisResponse }) => (
-  <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-    <Stat label="Scenes" value={String(analysis.scenes.length)} />
-    <Stat
-      label="Total length"
-      value={`${(analysis.totalDurationMs / 1000).toFixed(1)}s`}
-    />
-    <Stat label="Type" value={analysis.contentType ?? "—"} />
-    <Stat
-      label="Pacing"
-      value={analysis.userIntent?.pacingPreference ?? "auto"}
-    />
-  </div>
-);
-
-const Stat = ({ label, value }: { label: string; value: string }) => (
-  <div className="rounded-xl border border-border bg-card px-4 py-3">
-    <p className="text-[11px] text-muted-foreground uppercase tracking-wider">
-      {label}
-    </p>
-    <p className="text-base font-semibold mt-1 truncate">{value}</p>
-  </div>
-);
-
 /* ============ generation progress ============ */
 
 /**
@@ -444,8 +485,7 @@ const stepIndexOf = (stepKey: string | undefined): number => {
 /**
  * Smooths the coarse SSE percentages: eases toward the latest real value and
  * creeps slowly while a long step is in flight, but never crosses into the
- * next step's range until the backend confirms it. Lives inside
- * GeneratingPanel so the 60 fps state updates only re-render the panel.
+ * next step's range until the backend confirms it.
  */
 const useSmoothedPercent = (
   progress: ProgressPayload | null,
@@ -468,7 +508,6 @@ const useSmoothedPercent = (
     const tick = () => {
       const s = ref.current;
       const elapsedSec = (performance.now() - s.stepStartedAt) / 1000;
-      // creep ~0.35%/s within the current step's range while waiting
       const target = Math.min(
         Math.max(s.real, s.real + elapsedSec * 0.35),
         Math.max(s.real, s.cap),
@@ -595,7 +634,7 @@ const FailedPanel = ({
       Your credits for this run have been refunded.
     </p>
     <Button onClick={onRetry} className="mt-6 gradient-bg text-white shadow-glow">
-      <RotateCcw size={14} /> Back to review & try again
+      <RotateCcw size={14} /> Back & try again
     </Button>
   </div>
 );

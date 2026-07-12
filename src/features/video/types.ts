@@ -138,6 +138,10 @@ export interface TikTokAdRequest {
   reuseAssets?: boolean;
   forceReuseForTesting?: boolean;
   sceneAssignments?: SceneAssignment[];
+  /** Toucan DNA preset id, e.g. "PROBLEM_PAYOFF". Requires dna.presets.enabled on the backend. */
+  dnaPreset?: string | null;
+  /** Animated GIF sticker overlay on the last scene. Disabled for v0.1. */
+  gifOverlaysEnabled?: boolean;
 }
 
 export interface GenerationStartResponse {
