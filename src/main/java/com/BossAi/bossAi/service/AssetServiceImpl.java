@@ -1,5 +1,6 @@
 package com.BossAi.bossAi.service;
 
+import com.BossAi.bossAi.config.BetaConfig;
 import com.BossAi.bossAi.dto.AssetDTO;
 import com.BossAi.bossAi.entity.*;
 import com.BossAi.bossAi.repository.AssetRepository;
@@ -29,6 +30,7 @@ public class AssetServiceImpl implements AssetService {
     private final GenerationRepository generationRepository;
     private final PlanSelectionService planSelectionService;
     private final StorageService storageService;
+    private final BetaConfig betaConfig;
 
     @Override
     @Transactional
@@ -85,7 +87,10 @@ public class AssetServiceImpl implements AssetService {
 
         UserPlan userPlan = planSelectionService.selectHighestPlan(user);
 
-        if (userPlan.getPlanType().ordinal() < PlanType.PRO.ordinal()) {
+        // During closed beta v0.1 everyone can upload custom assets — the frontend
+        // already treats beta as PRO. Outside beta the PRO+ paywall still applies.
+        if (!betaConfig.isBetaMode()
+                && userPlan.getPlanType().ordinal() < PlanType.PRO.ordinal()) {
             throw new RuntimeException("Custom asset uploads require PRO plan or higher. Please upgrade your plan.");
         }
 
