@@ -16,6 +16,7 @@ import org.springframework.context.annotation.Configuration;
  *   - User cleanup scheduler (UserCleanUpService)
  *   - Asset reuse via GPT    (AssetReuseService)
  *   - Asset deletion endpoint (AssetController)
+ *   - Custom asset uploads   (AssetServiceImpl — PRO+ paywall bypassed)
  *   - Public registration    (AuthController)
  */
 @Getter
