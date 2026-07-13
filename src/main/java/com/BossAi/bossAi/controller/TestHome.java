@@ -10,7 +10,7 @@ public class TestHome {
 
     @GetMapping
     public String sayHello() {
-        return "Hello world";
+        return "Szymon W. 2#(.wO";
     }
 
 }
