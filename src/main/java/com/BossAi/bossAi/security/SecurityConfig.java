@@ -42,7 +42,7 @@ public class SecurityConfig {
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(
-                                "/api/test",
+                                "/api/test/**",
                                 "/api/auth/**",
                                 "/oauth2/**",
                                 "/internal/**",
@@ -58,20 +58,20 @@ public class SecurityConfig {
                 .addFilterBefore(rateLimitFilter, UsernamePasswordAuthenticationFilter.class)
                 .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
 
-        if (!betaConfig.isBetaMode()) {
-            http.oauth2Login(oauth -> oauth
-                    .authorizationEndpoint(authEndpoint -> authEndpoint
-                            .baseUri("/oauth2/authorization")
-                    )
-                    .redirectionEndpoint(redirection -> redirection
-                            .baseUri("/oauth2/callback/*")
-                    )
-                    .userInfoEndpoint(userInfo -> userInfo
-                            .userService(customOAuth2UserService)
-                    )
-                    .successHandler(oAuth2SuccessHandler)
-            );
-        }
+//        if (!betaConfig.isBetaMode()) {
+//            http.oauth2Login(oauth -> oauth
+//                    .authorizationEndpoint(authEndpoint -> authEndpoint
+//                            .baseUri("/oauth2/authorization")
+//                    )
+//                    .redirectionEndpoint(redirection -> redirection
+//                            .baseUri("/oauth2/callback/*")
+//                    )
+//                    .userInfoEndpoint(userInfo -> userInfo
+//                            .userService(customOAuth2UserService)
+//                    )
+//                    .successHandler(oAuth2SuccessHandler)
+//            );
+//        }
 
         return http.build();
     }
