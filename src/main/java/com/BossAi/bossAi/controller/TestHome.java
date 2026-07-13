@@ -8,6 +8,11 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/test")
 public class TestHome {
 
+    @GetMapping("/tadek-dih")
+    public String tadekDih() {
+        return "John McMuscle & Tadek 5 Strong";
+    }
+
     @GetMapping
     public String sayHello() {
         return "Hello Toucan";
