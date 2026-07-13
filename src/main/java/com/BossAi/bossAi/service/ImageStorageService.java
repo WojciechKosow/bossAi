@@ -13,11 +13,11 @@ import java.util.UUID;
 public class ImageStorageService {
 
 
-    @Value("${storage.images.path}")
-    private String imagesPath;
+//    @Value("${storage.images.path}")
+    private String imagesPath = "uploads/images";
 
-    @Value("${storage.images.public-url}")
-    private String publicUrl;
+//    @Value("${storage.images.public-url}")
+    private String publicUrl = "/images";
 
     public String saveImage(byte[] imageBytes, UUID generationId) {
         try {
