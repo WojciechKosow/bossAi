@@ -58,28 +58,23 @@ public class SecurityConfig {
                 .addFilterBefore(rateLimitFilter, UsernamePasswordAuthenticationFilter.class)
                 .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
 
-//        if (!betaConfig.isBetaMode()) {
-//            http.oauth2Login(oauth -> oauth
-//                    .authorizationEndpoint(authEndpoint -> authEndpoint
-//                            .baseUri("/oauth2/authorization")
-//                    )
-//                    .redirectionEndpoint(redirection -> redirection
-//                            .baseUri("/oauth2/callback/*")
-//                    )
-//                    .userInfoEndpoint(userInfo -> userInfo
-//                            .userService(customOAuth2UserService)
-//                    )
-//                    .successHandler(oAuth2SuccessHandler)
-//            );
-//        }
+        if (!betaConfig.isBetaMode()) {
+            http.oauth2Login(oauth -> oauth
+                    .authorizationEndpoint(authEndpoint -> authEndpoint
+                            .baseUri("/oauth2/authorization")
+                    )
+                    .redirectionEndpoint(redirection -> redirection
+                            .baseUri("/oauth2/callback/*")
+                    )
+                    .userInfoEndpoint(userInfo -> userInfo
+                            .userService(customOAuth2UserService)
+                    )
+                    .successHandler(oAuth2SuccessHandler)
+            );
+        }
 
         return http.build();
     }
-
-//    @Bean
-//    public PasswordEncoder passwordEncoder() {
-//        return new BCryptPasswordEncoder();
-//    }
 
     @Bean
     public AuthenticationManager authenticationManager(AuthenticationConfiguration configuration) throws Exception {
