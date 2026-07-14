@@ -56,6 +56,7 @@ public class UserServiceImpl implements UserService {
         user.setPassword(passwordEncoder.encode(request.getPassword()));
         user.setProvider(AuthProvider.LOCAL);
 
+        user.setEnabled(true);
 
         userRepository.save(user);
 
