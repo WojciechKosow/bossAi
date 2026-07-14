@@ -1,18 +1,6 @@
-import axios from "axios";
-
-const instance = axios.create({
-  baseURL: import.meta.env.VITE_API_URL,
-  withCredentials: true,
-});
-
-instance.interceptors.request.use((config) => {
-  const token = localStorage.getItem("access_token");
-
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
-  }
-
-  return config;
-});
-
-export default instance;
+// Re-export the single shared axios instance so every feature talks to the same
+// API origin with the same credential + bearer handling. Previously this file
+// created a second instance pointed at a *different* env var (VITE_API_URL),
+// which meant login and session-refresh could hit different origins and the
+// refresh cookie set at login was never sent back.
+export { default } from "@/lib/axios";

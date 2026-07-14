@@ -1,5 +1,10 @@
 import axios from "@/lib/axios";
 import {
+  clearStoredToken,
+  getStoredToken,
+  setStoredToken,
+} from "@/lib/authToken";
+import {
   createContext,
   useContext,
   useState,
@@ -29,7 +34,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [isLoading, setIsLoading] = useState(true);
 
   const login = (token: string, user: User) => {
-    axios.defaults.headers.common["Authorization"] = `Bearer ${token}`;
+    if (token) {
+      setStoredToken(token);
+      axios.defaults.headers.common["Authorization"] = `Bearer ${token}`;
+    }
     setUser(user);
   };
 
@@ -37,26 +45,52 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     try {
       await axios.post("/api/auth/logout");
     } catch {}
+    clearStoredToken();
     delete axios.defaults.headers.common["Authorization"];
     setUser(null);
   };
 
-  // 🔥 Bootstrapping session
+  // Bootstrapping session on app load.
   useEffect(() => {
     const bootstrap = async () => {
       try {
-        // próbujemy refresh (cookie)
-        const refreshRes = await axios.post("/api/auth/refresh");
-        const accessToken = refreshRes.data.token;
+        // 1) Restore from a stored access token if we have one. This survives a
+        //    full page reload even when the cross-site refresh cookie is blocked
+        //    by the browser (third-party cookie) — the common case when the
+        //    frontend and API live on different origins (local dev → Railway).
+        let accessToken = getStoredToken();
+        if (accessToken) {
+          axios.defaults.headers.common["Authorization"] =
+            `Bearer ${accessToken}`;
+        }
 
-        axios.defaults.headers.common["Authorization"] =
-          `Bearer ${accessToken}`;
+        // 2) Best-effort refresh to rotate the token when the cookie IS present.
+        //    A 400/401 here just means "no valid refresh cookie" — not fatal as
+        //    long as we still have a usable access token from step 1.
+        try {
+          const refreshRes = await axios.post("/api/auth/refresh");
+          const rotated: string | undefined = refreshRes.data?.token;
+          if (rotated) {
+            accessToken = rotated;
+            setStoredToken(rotated);
+            axios.defaults.headers.common["Authorization"] =
+              `Bearer ${rotated}`;
+          }
+        } catch {
+          /* no/expired refresh cookie — continue with the stored token */
+        }
 
-        // pobieramy usera
+        if (!accessToken) {
+          setUser(null);
+          return;
+        }
+
         const meRes = await axios.get("/api/auth/me");
-
         setUser(meRes.data);
       } catch {
+        // Token present but rejected by /me (and refresh couldn't renew it).
+        clearStoredToken();
+        delete axios.defaults.headers.common["Authorization"];
         setUser(null);
       } finally {
         setIsLoading(false);
