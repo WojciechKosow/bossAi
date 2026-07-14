@@ -24,8 +24,12 @@ const DashboardPage = () => {
   const { data: plan } = useActivePlan();
   const { data: projects } = useProjects();
 
-  const recent = (projects ?? []).slice(0, 3);
-  const inFlight = (projects ?? []).filter(
+  // Guard against a non-array payload (error body, HTML fallback, etc.).
+  // `?? []` only covers null/undefined — a string/object still white-screens
+  // the dashboard on `.filter`, which is exactly what happened here.
+  const projectList = Array.isArray(projects) ? projects : [];
+  const recent = projectList.slice(0, 3);
+  const inFlight = projectList.filter(
     (p) => p.status === "GENERATING" || p.status === "RENDERING",
   );
 

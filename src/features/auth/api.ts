@@ -19,7 +19,7 @@ export const loginRequest = async (
   data: LoginRequest,
 ): Promise<AuthResponse> => {
   const response = await axios.post(
-    "http://localhost:8080/api/auth/login",
+    "/api/auth/login",
     data,
   );
   return response.data;
@@ -33,7 +33,7 @@ interface RegisterRequest {
 
 export const registerRequest = async (data: RegisterRequest) => {
   const response = await axios.post(
-    "http://localhost:8080/api/auth/register",
+    "/api/auth/register",
     data,
   );
   return response.data;
@@ -41,7 +41,7 @@ export const registerRequest = async (data: RegisterRequest) => {
 
 export const resendVerificationEmail = async (email: string) => {
   const { data } = await axios.post(
-    "http://localhost:8080/api/auth/resend-verification-email",
+    "/api/auth/resend-verification-email",
     { email },
   );
 
@@ -49,7 +49,7 @@ export const resendVerificationEmail = async (email: string) => {
 };
 
 export const verifyAccount = async (tokenId: string, token: string) => {
-  const { data } = await axios.get("http://localhost:8080/api/auth/verify", {
+  const { data } = await axios.get("/api/auth/verify", {
     params: { tokenId, token },
   });
 
@@ -58,7 +58,7 @@ export const verifyAccount = async (tokenId: string, token: string) => {
 
 export const forgotPassword = async (email: string) => {
   const res = await axios.post(
-    "http://localhost:8080/api/auth/forgot-password",
+    "/api/auth/forgot-password",
     { email },
   );
   return res.data;
@@ -70,7 +70,7 @@ export const resetPassword = async (
   password: string,
 ) => {
   const res = await axios.post(
-    `http://localhost:8080/api/auth/reset-password?tokenId=${tokenId}&token=${token}`,
+    `/api/auth/reset-password?tokenId=${tokenId}&token=${token}`,
     {
       newPassword: password,
     },

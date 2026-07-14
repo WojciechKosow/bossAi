@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import axios from "@/lib/axios";
 import { useAuth } from "../context/AuthContext";
 
 const OAuthSuccessPage = () => {
@@ -15,16 +16,14 @@ const OAuthSuccessPage = () => {
       return;
     }
 
-    // 🔥 pobierz usera (ważne)
-    fetch("http://localhost:8080/api/auth/me", {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-      credentials: "include",
-    })
-      .then((res) => res.json())
-      .then((user) => {
-        login(token, user);
+    // Fetch the user via the shared axios instance so it hits the configured
+    // API origin (not a hardcoded localhost) with credentials.
+    axios
+      .get("/api/auth/me", {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      .then((res) => {
+        login(token, res.data);
         navigate("/dashboard");
       })
       .catch(() => {
