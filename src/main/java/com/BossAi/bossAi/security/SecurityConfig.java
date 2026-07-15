@@ -50,7 +50,15 @@ public class SecurityConfig {
                                 // URL since asset IDs are 122-bit random UUIDs.
                                 // Lets <img>/<video> tags load previews without
                                 // an Authorization header.
-                                "/api/assets/file/**"
+                                "/api/assets/file/**",
+                                // SSE progress stream. UUID-keyed like the asset
+                                // blobs. Must be permitAll: the SseEmitter times
+                                // out on long renders and Tomcat re-dispatches the
+                                // request through the security chain asynchronously
+                                // — that dispatch is NOT re-authenticated (stateless
+                                // JWT), so an authenticated matcher throws
+                                // AuthorizationDeniedException on every timeout.
+                                "/api/generations/*/progress"
                         ).permitAll()
                         .anyRequest().authenticated()
                 )
