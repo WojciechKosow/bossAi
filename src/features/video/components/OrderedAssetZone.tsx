@@ -7,7 +7,8 @@ import {
   Loader2,
   type LucideIcon,
 } from "lucide-react";
-import { useAssetBlobUrl, useDeleteAsset, useUploadAsset } from "../hooks";
+import { useDeleteAsset, useUploadAsset } from "../hooks";
+import { assetFileUrl } from "../api";
 import { AssetMedia } from "./AssetMedia";
 import type { AssetDTO, AssetType } from "../types";
 import { useToast } from "@/components/ui/toast";
@@ -227,7 +228,6 @@ const AssetRow = ({
   onRemove: () => void;
 }) => {
   const controls = useDragControls();
-  const audioUrl = useAssetBlobUrl(isAudio ? asset.id : null);
 
   return (
     <Reorder.Item
@@ -273,8 +273,13 @@ const AssetRow = ({
         <p className="truncate text-sm font-medium">
           {asset.originalFilename ?? asset.type.toLowerCase()}
         </p>
-        {isAudio && audioUrl && (
-          <audio src={audioUrl} controls className="mt-1 h-7 w-full max-w-[240px]" />
+        {isAudio && (
+          <audio
+            src={assetFileUrl(asset.id)}
+            controls
+            preload="metadata"
+            className="mt-1 h-7 w-full max-w-[240px]"
+          />
         )}
       </div>
 
