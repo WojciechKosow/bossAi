@@ -196,8 +196,17 @@ public class AssetBridgeService {
      * Wywolywane po {@link #bridgeToVideoProject}, w osobnej transakcji
      * (REQUIRES_NEW) — porazka tu nie cofnie powstalego projektu.
      */
+    /**
+     * @param markComplete when true the render job is completed immediately with
+     *   {@code videoUrl} (legacy pipeline — the ffmpeg mp4 is the final video).
+     *   When false the job is left QUEUED so the new (Remotion) pipeline, which
+     *   runs next, owns completion — the render status then reports "rendering"
+     *   until Remotion actually finishes instead of flipping to COMPLETE early.
+     * @return the created render job id, or null if bootstrap failed.
+     */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public void bootstrapEdlAndRender(UUID projectId, GenerationContext context, String videoUrl) {
+    public UUID bootstrapEdlAndRender(UUID projectId, GenerationContext context,
+                                      String videoUrl, boolean markComplete) {
         try {
             List<ProjectAsset> projectAssets = projectAssetService.getProjectAssetEntities(projectId);
             EdlDto edl = synthesizeBasicEdl(context, projectAssets);
@@ -206,19 +215,25 @@ public class AssetBridgeService {
             EditDecisionListEntity savedEdl = edlService.saveNewVersion(
                     projectId, edlJson, EdlSource.AI_GENERATED);
 
-            // Pre-completed render job pointing at the legacy pipeline's mp4 — gives
-            // the editor an immediate preview without waiting for Remotion.
             RenderJob job = renderJobService.createRenderJob(projectId, savedEdl, "high");
-            renderJobService.markComplete(job.getId(), videoUrl);
+            if (markComplete) {
+                // Legacy pipeline: the ffmpeg mp4 IS the final video — complete now
+                // so the editor has an immediate preview.
+                renderJobService.markComplete(job.getId(), videoUrl);
+            }
+            // else: leave QUEUED — the Remotion pipeline completes it.
 
-            log.info("[AssetBridge] Bootstrapped project {} (segments={}, audioTracks={})",
+            log.info("[AssetBridge] Bootstrapped project {} (segments={}, audioTracks={}, markComplete={})",
                     projectId,
                     edl.getSegments() != null ? edl.getSegments().size() : 0,
-                    edl.getAudioTracks() != null ? edl.getAudioTracks().size() : 0);
+                    edl.getAudioTracks() != null ? edl.getAudioTracks().size() : 0,
+                    markComplete);
+            return job.getId();
         } catch (Exception e) {
             // Don't propagate — caller has already committed the project itself.
             log.warn("[AssetBridge] EDL/render bootstrap failed for project {}: {}",
                     projectId, e.getMessage(), e);
+            return null;
         }
     }
 
