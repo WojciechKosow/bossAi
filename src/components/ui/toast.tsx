@@ -3,6 +3,7 @@ import {
   ReactNode,
   useCallback,
   useContext,
+  useMemo,
   useState,
 } from "react";
 import { AnimatePresence, motion } from "framer-motion";
@@ -66,15 +67,22 @@ export const ToastProvider = ({ children }: { children: ReactNode }) => {
     [remove],
   );
 
-  const value: ToastContextValue = {
-    toast: push,
-    success: (description, title) =>
-      push({ description, title, variant: "success" }),
-    error: (description, title) =>
-      push({ description, title, variant: "error" }),
-    info: (description, title) =>
-      push({ description, title, variant: "info" }),
-  };
+  // Memoized so `useToast()` returns a STABLE reference. Without this the
+  // value object is recreated every render, so any effect that lists `toast`
+  // in its deps re-fires on every render — and since firing a toast triggers a
+  // re-render, that becomes an infinite toast loop.
+  const value = useMemo<ToastContextValue>(
+    () => ({
+      toast: push,
+      success: (description, title) =>
+        push({ description, title, variant: "success" }),
+      error: (description, title) =>
+        push({ description, title, variant: "error" }),
+      info: (description, title) =>
+        push({ description, title, variant: "info" }),
+    }),
+    [push],
+  );
 
   return (
     <ToastContext.Provider value={value}>

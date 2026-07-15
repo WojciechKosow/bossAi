@@ -110,22 +110,34 @@ const CreateVideoPage = () => {
     });
   }, [hydrated, userId, prompt, media, tts, music]);
 
-  /* ---- redirect when the finished project appears ---- */
+  /* ---- redirect when the finished project appears (exactly once) ---- */
+  const navigatedRef = useRef(false);
   useEffect(() => {
-    if (!done || !generationId) return;
-    clearDraft(userId);
+    if (!done || !generationId || navigatedRef.current) return;
+
+    const goOnce = (to: string) => {
+      if (navigatedRef.current) return;
+      navigatedRef.current = true;
+      clearDraft(userId);
+      toast.success("Your video is ready!");
+      navigate(to);
+    };
+
+    // Prefer the project (opens the editor/player); it's bridged just after
+    // the generation is marked DONE, so it usually shows up within a poll.
     const project = (projects ?? []).find(
       (p) => p.generationId === generationId,
     );
     if (project) {
-      toast.success("Your video is ready!");
-      navigate(`/dashboard/projects/${project.id}`);
+      goOnce(`/dashboard/projects/${project.id}`);
       return;
     }
-    const fallback = window.setTimeout(() => {
-      toast.success("Your video is ready!");
-      navigate(`/dashboard/library/preview/${generationId}`);
-    }, 4000);
+
+    // Not bridged yet — wait briefly, then fall back to the generation preview.
+    const fallback = window.setTimeout(
+      () => goOnce(`/dashboard/library/preview/${generationId}`),
+      6000,
+    );
     return () => window.clearTimeout(fallback);
   }, [done, generationId, projects, navigate, toast, userId]);
 
