@@ -41,6 +41,7 @@ public class PipelineAsyncRunner {
     private final UserRepository userRepository;
     private final ProgressService progressService;
     private final CreditService creditService;
+    private final RenderJobService renderJobService;
     private final PipelineConfig.TikTokAdPipeline tikTokAdPipeline;
     private final com.BossAi.bossAi.service.edl.AssetBridgeService assetBridgeService;
     private final com.BossAi.bossAi.service.edl.VideoProductionOrchestrator videoProductionOrchestrator;
@@ -104,14 +105,17 @@ public class PipelineAsyncRunner {
                         ex.getMessage(), ex);
             }
 
-            // Synthesize a basic EDL + completed RenderJob (using the legacy
-            // pipeline's mp4) — separate transaction so a serialization hiccup
-            // here doesn't roll back the project. Editor can render the timeline
-            // immediately; user can still preview via the legacy mp4.
+            // Synthesize a basic EDL + a RenderJob — separate transaction so a
+            // serialization hiccup here doesn't roll back the project. When the
+            // new (Remotion) pipeline is OFF, the job is completed immediately with
+            // the legacy ffmpeg mp4 (that IS the final video). When it's ON, the
+            // job is left QUEUED so the render status reports "rendering" until
+            // Remotion actually finishes — not "complete" the moment ffmpeg is done.
+            UUID bootstrapRenderJobId = null;
             if (projectId != null) {
                 try {
-                    assetBridgeService.bootstrapEdlAndRender(
-                            projectId, context, context.getFinalVideoUrl());
+                    bootstrapRenderJobId = assetBridgeService.bootstrapEdlAndRender(
+                            projectId, context, context.getFinalVideoUrl(), !useNewPipeline);
                 } catch (Exception ex) {
                     log.warn("[PipelineAsyncRunner] EDL bootstrap failed (non-blocking) — {}",
                             ex.getMessage(), ex);
@@ -126,6 +130,17 @@ public class PipelineAsyncRunner {
                 } catch (Exception ex) {
                     log.warn("[PipelineAsyncRunner] New pipeline failed (non-blocking) — {}",
                             ex.getMessage());
+                    // The bootstrap render job was intentionally left QUEUED for
+                    // Remotion to complete. If Remotion never got there, fail it so
+                    // the UI doesn't hang forever on "rendering".
+                    if (bootstrapRenderJobId != null) {
+                        try {
+                            renderJobService.markFailed(bootstrapRenderJobId);
+                        } catch (Exception ignore) {
+                            log.warn("[PipelineAsyncRunner] Could not fail bootstrap render job — {}",
+                                    ignore.getMessage());
+                        }
+                    }
                 }
             }
 
