@@ -89,7 +89,8 @@ public class SecurityConfig {
         config.setAllowCredentials(true);
         config.setAllowedOrigins(List.of(
                 "http://localhost:5173",
-                "http://localhost:1420/"
+                "http://localhost:1420/",
+                "https://boss-ai-frontend-five.vercel.app/"
         ));
 
         config.setAllowedMethods(List.of(
