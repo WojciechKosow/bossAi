@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   useMutation,
   useQuery,
@@ -9,6 +9,7 @@ import {
   analyzePrompt,
   deleteAsset,
   getActivePlan,
+  getGeneration,
   getProject,
   getRenderStatus,
   getTimeline,
@@ -111,23 +112,37 @@ export const useGenerationProgress = (
   enabled = true,
 ) => {
   const [progress, setProgress] = useState<ProgressPayload | null>(null);
-  const [error, setError] = useState<unknown>(null);
   const [done, setDone] = useState(false);
-  /** Backend sent step=FAILED — holds the failure message. */
+  /** Generation ended in FAILED — holds the failure message. */
   const [failed, setFailed] = useState<string | null>(null);
   /** Every distinct step event received, in order — drives the step checklist. */
   const [events, setEvents] = useState<ProgressPayload[]>([]);
-  const closeRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     if (!generationId || !enabled) return;
     setDone(false);
-    setError(null);
     setFailed(null);
     setProgress(null);
     setEvents([]);
 
-    closeRef.current = streamGenerationProgress(generationId, {
+    // `settled` guards against the two completion signals (SSE + polling)
+    // racing each other, and stops the poll loop once we're done.
+    let settled = false;
+    const settleDone = () => {
+      if (settled) return;
+      settled = true;
+      setDone(true);
+    };
+    const settleFailed = (msg?: string) => {
+      if (settled) return;
+      settled = true;
+      setFailed(msg || "Generation failed");
+    };
+
+    // 1) SSE — live per-step progress while connected. Best-effort: the backend
+    //    SseEmitter times out after 5 min, so long renders WILL drop the stream.
+    //    We swallow that error; the poll below is the source of truth.
+    const closeSse = streamGenerationProgress(generationId, {
       onEvent: (p) => {
         setProgress(p);
         setEvents((prev) =>
@@ -135,17 +150,39 @@ export const useGenerationProgress = (
             ? [...prev.slice(0, -1), p]
             : [...prev.slice(-49), p],
         );
-        if (p.step === "DONE") setDone(true);
-        if (p.step === "FAILED") setFailed(p.message || "Generation failed");
+        if (p.step === "DONE") settleDone();
+        if (p.step === "FAILED") settleFailed(p.message);
       },
-      onError: (err) => setError(err),
+      onError: () => {}, // ignore — polling covers completion
       onClose: () => {},
     });
 
-    return () => closeRef.current?.();
+    // 2) Poll the generation status as the authoritative completion signal.
+    //    Survives SSE timeouts/drops so the UI never gets stuck on a finished
+    //    (or failed) render.
+    let pollTimer: number | undefined;
+    const poll = async () => {
+      if (settled) return;
+      try {
+        const gen = await getGeneration(generationId);
+        if (settled) return;
+        if (gen.status === "DONE") return settleDone();
+        if (gen.status === "FAILED") return settleFailed();
+      } catch {
+        /* transient (network/SSE-timeout dispatch) — keep polling */
+      }
+      pollTimer = window.setTimeout(poll, 4000);
+    };
+    pollTimer = window.setTimeout(poll, 4000);
+
+    return () => {
+      settled = true;
+      closeSse?.();
+      window.clearTimeout(pollTimer);
+    };
   }, [generationId, enabled]);
 
-  return { progress, error, done, failed, events };
+  return { progress, done, failed, events };
 };
 
 /* ---------- generations history ---------- */

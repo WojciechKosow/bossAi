@@ -68,7 +68,7 @@ const CreateVideoPage = () => {
 
   const { data: allAssets } = useAssets();
   const startMut = useStartGeneration();
-  const { progress, done, error, failed } = useGenerationProgress(
+  const { progress, done, failed } = useGenerationProgress(
     generationId,
     step === "generating",
   );
@@ -128,10 +128,6 @@ const CreateVideoPage = () => {
     }, 4000);
     return () => window.clearTimeout(fallback);
   }, [done, generationId, projects, navigate, toast, userId]);
-
-  useEffect(() => {
-    if (error) toast.error("Lost connection to progress stream");
-  }, [error, toast]);
 
   /* ---- actions ---- */
   const promptOk =
