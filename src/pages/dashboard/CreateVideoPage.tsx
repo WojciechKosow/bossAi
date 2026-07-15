@@ -8,12 +8,15 @@ import {
   Loader2,
   Wand2,
   Check,
+  CheckCircle2,
   AlertTriangle,
   RotateCcw,
   Film,
   Mic,
   Music,
   Trash2,
+  Download,
+  Pencil,
   GraduationCap,
 } from "lucide-react";
 import { OrderedAssetZone } from "@/features/video/components/OrderedAssetZone";
@@ -21,17 +24,24 @@ import {
   useAssets,
   useGenerationProgress,
   useProjects,
+  useRenderStatus,
   useStartGeneration,
 } from "@/features/video/hooks";
+import { absoluteUrl, getGeneration } from "@/features/video/api";
 import {
   clearDraft,
   loadDraft,
   pickInOrder,
   saveDraft,
 } from "@/features/video/draft";
+import {
+  clearActiveGeneration,
+  setActiveGeneration,
+} from "@/features/video/activeGeneration";
 import type {
   AssetDTO,
   ProgressEvent as ProgressPayload,
+  RenderJobDTO,
   UUID,
   VideoStyle,
 } from "@/features/video/types";
@@ -42,11 +52,12 @@ import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
 
-type Step = "compose" | "generating";
+type Step = "compose" | "generating" | "result";
 
 const stepLabels: Record<Step, string> = {
   compose: "Compose",
   generating: "Generating",
+  result: "Result",
 };
 
 /** The single v0.1 preset — no style picker, this is baked into every request. */
@@ -65,6 +76,7 @@ const CreateVideoPage = () => {
   const [tts, setTts] = useState<AssetDTO[]>([]);
   const [music, setMusic] = useState<AssetDTO | null>(null);
   const [generationId, setGenerationId] = useState<UUID | null>(null);
+  const [resultUrl, setResultUrl] = useState<string | null>(null);
 
   const { data: allAssets } = useAssets();
   const startMut = useStartGeneration();
@@ -73,6 +85,21 @@ const CreateVideoPage = () => {
     step === "generating",
   );
   const { data: projects } = useProjects();
+
+  // The project is bridged just after the generation is marked DONE; once we
+  // have it we poll its render job — the final (Remotion) video is that job's
+  // output, so we wait for it to actually COMPLETE before showing a result.
+  const projectId = useMemo(
+    () =>
+      generationId
+        ? ((projects ?? []).find((p) => p.generationId === generationId)?.id ??
+          null)
+        : null,
+    [generationId, projects],
+  );
+  const { data: render } = useRenderStatus(projectId, {
+    enabled: step === "generating" && done && !!projectId,
+  });
 
   /* ---- draft: hydrate once, then autosave ---- */
   const hydratedRef = useRef(false);
@@ -110,36 +137,57 @@ const CreateVideoPage = () => {
     });
   }, [hydrated, userId, prompt, media, tts, music]);
 
-  /* ---- redirect when the finished project appears (exactly once) ---- */
-  const navigatedRef = useRef(false);
+  /* ---- surface the finished video inline (exactly once) ---- */
+  const settledResultRef = useRef(false);
   useEffect(() => {
-    if (!done || !generationId || navigatedRef.current) return;
+    if (step !== "generating" || !done || !generationId) return;
+    if (settledResultRef.current) return;
 
-    const goOnce = (to: string) => {
-      if (navigatedRef.current) return;
-      navigatedRef.current = true;
+    const finish = (url: string) => {
+      if (settledResultRef.current) return;
+      settledResultRef.current = true;
       clearDraft(userId);
+      clearActiveGeneration(userId); // we've shown it — the global watcher shouldn't
+      setResultUrl(url);
+      setStep("result");
       toast.success("Your video is ready!");
-      navigate(to);
     };
 
-    // Prefer the project (opens the editor/player); it's bridged just after
-    // the generation is marked DONE, so it usually shows up within a poll.
-    const project = (projects ?? []).find(
-      (p) => p.generationId === generationId,
-    );
-    if (project) {
-      goOnce(`/dashboard/projects/${project.id}`);
+    // 1) Final render finished (Remotion, or ffmpeg when the new pipeline is off).
+    if (render?.status === "COMPLETE" && render.outputUrl) {
+      finish(absoluteUrl(render.outputUrl) ?? render.outputUrl);
       return;
     }
+    // 2) Render still running (or queued) — keep waiting; no fallback.
+    if (render?.status === "QUEUED" || render?.status === "RENDERING") return;
 
-    // Not bridged yet — wait briefly, then fall back to the generation preview.
-    const fallback = window.setTimeout(
-      () => goOnce(`/dashboard/library/preview/${generationId}`),
-      6000,
-    );
+    // 3) No render job surfaced (project never bridged / status 404s) — after a
+    //    grace period, fall back to the generation's own mp4 so we never hang.
+    const fallback = window.setTimeout(async () => {
+      if (settledResultRef.current) return;
+      try {
+        const gen = await getGeneration(generationId);
+        const url = gen.videoUrl
+          ? (absoluteUrl(gen.videoUrl) ?? gen.videoUrl)
+          : null;
+        if (url) finish(url);
+      } catch {
+        /* render-status path may still resolve on a later poll */
+      }
+    }, 15000);
     return () => window.clearTimeout(fallback);
-  }, [done, generationId, projects, navigate, toast, userId]);
+  }, [step, done, generationId, render?.status, render?.outputUrl, userId, toast]);
+
+  const resetToCompose = () => {
+    settledResultRef.current = false;
+    setGenerationId(null);
+    setResultUrl(null);
+    setStep("compose");
+    setPrompt("");
+    setMedia([]);
+    setTts([]);
+    setMusic(null);
+  };
 
   /* ---- actions ---- */
   const promptOk =
@@ -173,6 +221,9 @@ const CreateVideoPage = () => {
         forceReuseForTesting: false,
         gifOverlaysEnabled: false,
       });
+      settledResultRef.current = false;
+      setResultUrl(null);
+      setActiveGeneration(userId, res.generationId);
       setGenerationId(res.generationId);
       setStep("generating");
     } catch (e: any) {
@@ -366,13 +417,36 @@ const CreateVideoPage = () => {
               <FailedPanel
                 message={failed}
                 onRetry={() => {
+                  settledResultRef.current = false;
                   setGenerationId(null);
                   setStep("compose");
                 }}
               />
+            ) : done ? (
+              <FinalizingPanel render={render} />
             ) : (
-              <GeneratingPanel progress={progress} done={done} />
+              <GeneratingPanel progress={progress} done={false} />
             )}
+          </motion.div>
+        )}
+
+        {step === "result" && resultUrl && (
+          <motion.div
+            key="result"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            transition={{ duration: 0.25 }}
+          >
+            <ResultPanel
+              url={resultUrl}
+              onCreateAnother={resetToCompose}
+              onOpenEditor={
+                projectId
+                  ? () => navigate(`/dashboard/projects/${projectId}`)
+                  : undefined
+              }
+            />
           </motion.div>
         )}
       </AnimatePresence>
@@ -432,7 +506,7 @@ const SummaryRow = ({
 );
 
 const Stepper = ({ current }: { current: Step }) => {
-  const order: Step[] = ["compose", "generating"];
+  const order: Step[] = ["compose", "generating", "result"];
   const idx = order.indexOf(current);
   return (
     <div className="flex items-center gap-2 text-xs">
@@ -644,5 +718,99 @@ const FailedPanel = ({
     <Button onClick={onRetry} className="mt-6 gradient-bg text-white shadow-glow">
       <RotateCcw size={14} /> Back & try again
     </Button>
+  </div>
+);
+
+/* ============ finalizing (waiting for the render) ============ */
+
+const FinalizingPanel = ({ render }: { render?: RenderJobDTO }) => {
+  const pct =
+    typeof render?.progress === "number"
+      ? Math.round(Math.min(1, Math.max(0.02, render.progress)) * 100)
+      : null;
+  return (
+    <div className="rounded-2xl border border-border bg-card p-8 sm:p-10 max-w-2xl mx-auto">
+      <div className="flex items-center gap-4">
+        <div className="size-14 rounded-2xl gradient-bg flex items-center justify-center shadow-glow animate-float shrink-0">
+          <Wand2 className="size-6 text-white" />
+        </div>
+        <div className="min-w-0">
+          <h2 className="text-xl sm:text-2xl font-semibold">
+            Rendering the final cut
+          </h2>
+          <p className="text-sm text-muted-foreground mt-0.5">
+            Stitching your scenes, voice-over and music into the final video…
+          </p>
+        </div>
+        {pct !== null && (
+          <p className="ml-auto text-2xl font-bold tabular-nums gradient-text shrink-0">
+            {pct}%
+          </p>
+        )}
+      </div>
+      <div className="mt-6">
+        <Progress value={pct ?? 100} indeterminate={pct === null} />
+      </div>
+      <p className="text-xs text-muted-foreground mt-8 text-center">
+        Almost there — stay here and we'll drop the video in the moment it's
+        done, or leave and we'll notify you.
+      </p>
+    </div>
+  );
+};
+
+/* ============ result (inline video) ============ */
+
+const ResultPanel = ({
+  url,
+  onCreateAnother,
+  onOpenEditor,
+}: {
+  url: string;
+  onCreateAnother: () => void;
+  onOpenEditor?: () => void;
+}) => (
+  <div className="rounded-2xl border border-border bg-card p-6 sm:p-8 max-w-2xl mx-auto">
+    <div className="flex items-center gap-3">
+      <div className="size-11 rounded-xl bg-emerald-500/10 text-emerald-500 flex items-center justify-center shrink-0">
+        <CheckCircle2 className="size-6" />
+      </div>
+      <div>
+        <h2 className="text-xl font-semibold">Your video is ready</h2>
+        <p className="text-sm text-muted-foreground mt-0.5">
+          Preview it below, download it, or make another.
+        </p>
+      </div>
+    </div>
+
+    <div className="mt-6 flex justify-center">
+      <video
+        src={url}
+        controls
+        autoPlay
+        playsInline
+        className="w-full max-w-[340px] aspect-[9/16] rounded-xl bg-black object-contain max-h-[70vh]"
+      />
+    </div>
+
+    <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
+      <a href={url} download target="_blank" rel="noreferrer">
+        <Button className="gradient-bg text-white shadow-glow">
+          <Download size={16} /> Download
+        </Button>
+      </a>
+      <Button variant="outline" onClick={onCreateAnother}>
+        <Sparkles size={16} /> Create another
+      </Button>
+      {onOpenEditor && (
+        <Button
+          variant="ghost"
+          onClick={onOpenEditor}
+          className="text-muted-foreground"
+        >
+          <Pencil size={14} /> Open in editor
+        </Button>
+      )}
+    </div>
   </div>
 );

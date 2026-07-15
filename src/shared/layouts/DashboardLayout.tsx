@@ -2,12 +2,14 @@ import { useState } from "react";
 import { Outlet } from "react-router-dom";
 import { Sidebar } from "../components/app-shell/Sidebar";
 import { Topbar } from "../components/app-shell/Topbar";
+import { GenerationNotifier } from "@/features/video/components/GenerationNotifier";
 
 const DashboardLayout = () => {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
   return (
     <div className="min-h-screen bg-background text-foreground flex">
+      <GenerationNotifier />
       {/* Desktop Sidebar */}
       <div className="hidden lg:flex">
         <Sidebar />
