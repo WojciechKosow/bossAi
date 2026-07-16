@@ -15,6 +15,7 @@ import { AssetMedia } from "@/features/video/components/AssetMedia";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { computeItemTitle } from "@/features/video/components/libraryUtils";
+import { EDITOR_ENABLED } from "@/lib/features";
 
 const GenerationPreviewPage = () => {
   const { id } = useParams<{ id: string }>();
@@ -164,7 +165,7 @@ const GenerationPreviewPage = () => {
             </div>
           </div>
 
-          {linkedProject ? (
+          {EDITOR_ENABLED && linkedProject ? (
             <div className="rounded-xl border border-border bg-card p-5">
               <p className="text-sm font-semibold flex items-center gap-2">
                 <Pencil size={14} className="text-primary" />
@@ -183,7 +184,7 @@ const GenerationPreviewPage = () => {
                 <Pencil size={14} /> Open editor
               </Button>
             </div>
-          ) : (
+          ) : EDITOR_ENABLED ? (
             <div className="rounded-xl border border-border bg-card p-5">
               <p className="text-sm font-semibold flex items-center gap-2">
                 <Sparkles size={14} className="text-primary" />
@@ -207,7 +208,7 @@ const GenerationPreviewPage = () => {
                 </Button>
               </div>
             </div>
-          )}
+          ) : null}
         </div>
       </motion.div>
     </div>

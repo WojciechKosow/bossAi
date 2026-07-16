@@ -8,6 +8,7 @@ import { assetFileUrl } from "@/features/video/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { computeItemTitle } from "@/features/video/components/libraryUtils";
+import { EDITOR_ENABLED } from "@/lib/features";
 import { format } from "date-fns";
 
 const AssetPreviewPage = () => {
@@ -132,7 +133,7 @@ const AssetPreviewPage = () => {
             </div>
           </div>
 
-          {linkedProject ? (
+          {EDITOR_ENABLED && linkedProject ? (
             <div className="rounded-xl border border-border bg-card p-5">
               <p className="text-sm font-semibold flex items-center gap-2">
                 <Pencil size={14} className="text-primary" />
@@ -151,7 +152,7 @@ const AssetPreviewPage = () => {
                 <Pencil size={14} /> Open editor
               </Button>
             </div>
-          ) : (
+          ) : EDITOR_ENABLED ? (
             <div className="rounded-xl border border-border bg-card p-5">
               <p className="text-sm font-semibold flex items-center gap-2">
                 <Sparkles size={14} className="text-primary" />
@@ -173,7 +174,7 @@ const AssetPreviewPage = () => {
                 <Sparkles size={14} /> Create new video
               </Button>
             </div>
-          )}
+          ) : null}
         </div>
       </motion.div>
     </div>

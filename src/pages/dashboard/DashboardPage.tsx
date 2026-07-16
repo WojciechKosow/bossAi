@@ -18,6 +18,16 @@ import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { ProjectThumbnail } from "@/features/video/components/ProjectThumbnail";
 import { BETA_MODE } from "@/lib/betaMode";
+import { EDITOR_ENABLED } from "@/lib/features";
+import type { VideoProjectDTO } from "@/features/video/types";
+
+/** Editor is parked for V0.2 — link projects to the view-only preview instead. */
+const projectLink = (p: VideoProjectDTO) =>
+  EDITOR_ENABLED
+    ? `/dashboard/projects/${p.id}`
+    : p.generationId
+      ? `/dashboard/library/preview/${p.generationId}`
+      : "/dashboard/library";
 
 const DashboardPage = () => {
   const { user } = useAuth();
@@ -130,7 +140,7 @@ const DashboardPage = () => {
               {recent.map((p) => (
                 <Link
                   key={p.id}
-                  to={`/dashboard/projects/${p.id}`}
+                  to={projectLink(p)}
                   className="group rounded-lg overflow-hidden border border-border hover:border-primary/40 transition"
                 >
                   <div className="aspect-[9/16] bg-muted">
@@ -165,7 +175,7 @@ const DashboardPage = () => {
             {inFlight.map((p) => (
               <Link
                 key={p.id}
-                to={`/dashboard/projects/${p.id}`}
+                to={projectLink(p)}
                 className="block rounded-lg border border-border p-3 hover:border-primary/40 transition"
               >
                 <div className="flex items-center gap-2 text-xs font-medium">

@@ -24,6 +24,7 @@ import {
   computeItemTitle,
   computeRelativeTimestamp,
 } from "@/features/video/components/libraryUtils";
+import { EDITOR_ENABLED } from "@/lib/features";
 import type {
   AssetDTO,
   GenerationDTO,
@@ -51,6 +52,9 @@ type LibraryItem = {
   generationId?: UUID;
   project?: VideoProjectDTO;
   asset?: AssetDTO;
+  /** The rendered VIDEO asset to preview inline (projects reuse their
+   *  generation's video asset so the card plays instead of showing a stub). */
+  previewAssetId?: UUID;
   status: ProjectStatus | "READY";
   title?: string;
   prompt?: string;
@@ -67,30 +71,32 @@ const buildItems = (
   const generationById = new Map<UUID, GenerationDTO>();
   (generations ?? []).forEach((g) => generationById.set(g.id, g));
 
-  // 1. Projects — editable timeline items.
+  // 1. Projects — one card per generated video.
   for (const p of projects ?? []) {
     const gen = p.generationId ? generationById.get(p.generationId) : undefined;
     const createdAt =
       p.createdAt ?? gen?.createdAt ?? new Date().toISOString();
+
+    const claimed = (assets ?? []).filter(
+      (a) =>
+        a.generationId && p.generationId && a.generationId === p.generationId,
+    );
+    claimed.forEach((a) => claimedAssetIds.add(a.id));
+    // Reuse the generation's rendered VIDEO asset so the project card plays
+    // the video inline instead of showing a stub.
+    const previewAsset = claimed.find((a) => a.type === "VIDEO");
+
     items.push({
       key: `project:${p.id}`,
       kind: "project",
       generationId: p.generationId,
       project: p,
+      previewAssetId: previewAsset?.id,
       status: p.status,
       title: computeItemTitle({ project: p, generation: gen, createdAt }),
       prompt: p.originalPrompt,
       createdAt,
     });
-
-    (assets ?? [])
-      .filter(
-        (a) =>
-          a.generationId &&
-          p.generationId &&
-          a.generationId === p.generationId,
-      )
-      .forEach((a) => claimedAssetIds.add(a.id));
   }
 
   // 2. Rendered videos — every successful generation produces one
@@ -198,19 +204,21 @@ const ItemCard = ({ item, index }: { item: LibraryItem; index: number }) => {
   const sb = statusVariant(item.status);
   const isProcessing =
     item.status === "GENERATING" || item.status === "RENDERING";
-  const editable = item.kind === "project";
+  // The editor is parked for V0.2 — until then every card is view-only.
+  const editable = EDITOR_ENABLED && item.kind === "project";
+  const previewTarget = item.asset
+    ? `/dashboard/library/preview/asset/${item.asset.id}`
+    : item.generationId
+      ? `/dashboard/library/preview/${item.generationId}`
+      : `/dashboard/library`;
   const target =
-    item.kind === "project"
+    EDITOR_ENABLED && item.kind === "project"
       ? `/dashboard/projects/${item.project!.id}`
-      : item.asset
-        ? `/dashboard/library/preview/asset/${item.asset.id}`
-        : item.generationId
-          ? `/dashboard/library/preview/${item.generationId}`
-          : `/dashboard/library`;
-  const downloadHref =
-    item.kind === "asset" && item.asset
-      ? assetFileUrl(item.asset.id)
-      : undefined;
+      : previewTarget;
+  const previewAssetId = item.asset?.id ?? item.previewAssetId;
+  const downloadHref = previewAssetId
+    ? assetFileUrl(previewAssetId)
+    : undefined;
 
   return (
     <motion.div
@@ -221,8 +229,8 @@ const ItemCard = ({ item, index }: { item: LibraryItem; index: number }) => {
     >
       <Link to={target} className="block">
         <div className="relative aspect-[9/16] bg-muted overflow-hidden">
-          {item.kind === "asset" && item.asset ? (
-            <AssetMedia assetId={item.asset.id} type="VIDEO" />
+          {previewAssetId ? (
+            <AssetMedia assetId={previewAssetId} type="VIDEO" />
           ) : isProcessing ? (
             <div className="size-full flex items-center justify-center bg-gradient-to-br from-primary/20 to-accent/40">
               <Loader2 className="size-6 text-primary animate-spin" />

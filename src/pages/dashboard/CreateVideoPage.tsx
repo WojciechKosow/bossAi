@@ -29,6 +29,7 @@ import {
 } from "@/features/video/hooks";
 import { absoluteUrl } from "@/features/video/api";
 import { useQueryClient } from "@tanstack/react-query";
+import { EDITOR_ENABLED } from "@/lib/features";
 import {
   clearDraft,
   loadDraft,
@@ -461,7 +462,7 @@ const CreateVideoPage = () => {
               url={resultUrl}
               onCreateAnother={resetToCompose}
               onOpenEditor={
-                projectId
+                EDITOR_ENABLED && projectId
                   ? () => navigate(`/dashboard/projects/${projectId}`)
                   : undefined
               }
