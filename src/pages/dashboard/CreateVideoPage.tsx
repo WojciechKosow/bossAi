@@ -101,8 +101,13 @@ const CreateVideoPage = () => {
         : null,
     [generationId, projects],
   );
+  // The project only exists once the backend has bridged it, which happens
+  // *after* the generation is marked DONE. So its presence is proof on its own
+  // that the generation finished — we poll the render job off `projectId`
+  // rather than the SSE `done` flag, which can stall if the progress stream
+  // drops mid-generation (long ffmpeg + Remotion renders outlive it).
   const { data: render } = useRenderStatus(projectId, {
-    enabled: step === "generating" && done && !!projectId,
+    enabled: step === "generating" && !!projectId,
   });
 
   /* ---- draft: hydrate once, then autosave ---- */
@@ -150,10 +155,13 @@ const CreateVideoPage = () => {
     }
   }, [step, done, queryClient]);
 
-  /* ---- surface the finished video inline (exactly once) ---- */
+  /* ---- surface the finished video inline (exactly once) ----
+     Driven by the render job's status, NOT the SSE `done` flag. The render job
+     only exists post-DONE, so a COMPLETE/FAILED render is itself proof the
+     generation finished — this resolves even when the progress stream stalled. */
   const settledResultRef = useRef(false);
   useEffect(() => {
-    if (step !== "generating" || !done || !generationId) return;
+    if (step !== "generating") return;
     if (settledResultRef.current) return;
 
     const finish = (url: string) => {
@@ -181,7 +189,7 @@ const CreateVideoPage = () => {
     }
     // 3) QUEUED / RENDERING / not yet surfaced — keep waiting. Remotion can take
     //    minutes; FinalizingPanel covers this. Do NOT time out into ffmpeg.
-  }, [step, done, generationId, render?.status, render?.outputUrl, userId, toast]);
+  }, [step, render?.status, render?.outputUrl, userId, toast]);
 
   const resetToCompose = () => {
     settledResultRef.current = false;
@@ -430,7 +438,10 @@ const CreateVideoPage = () => {
                   setStep("compose");
                 }}
               />
-            ) : done ? (
+            ) : done || projectId ? (
+              // `done` (SSE) OR a bridged project (proof the generation finished,
+              // even if the progress stream stalled) → we're now waiting on the
+              // final render, not still generating.
               <FinalizingPanel render={render} />
             ) : (
               <GeneratingPanel progress={progress} done={false} />
