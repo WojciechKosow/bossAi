@@ -24,6 +24,7 @@ import AssetPreviewPage from "../pages/dashboard/AssetPreviewPage";
 import BillingPage from "../pages/dashboard/BillingPage";
 import SettingsPage from "../pages/dashboard/SettingsPage";
 import { BETA_MODE } from "@/lib/betaMode";
+import { EDITOR_ENABLED } from "@/lib/features";
 
 const AppRouter = () => {
   return (
@@ -105,7 +106,17 @@ const AppRouter = () => {
             path="library/preview/:id"
             element={<GenerationPreviewPage />}
           />
-          <Route path="projects/:id" element={<ProjectEditorPage />} />
+          {/* Editor parked for V0.2 — route kept but redirected while disabled. */}
+          <Route
+            path="projects/:id"
+            element={
+              EDITOR_ENABLED ? (
+                <ProjectEditorPage />
+              ) : (
+                <Navigate to="/dashboard/library" replace />
+              )
+            }
+          />
           <Route path="billing" element={<BillingPage />} />
           <Route path="settings" element={<SettingsPage />} />
           {/* legacy redirects */}
