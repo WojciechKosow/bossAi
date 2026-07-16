@@ -27,7 +27,8 @@ import {
   useRenderStatus,
   useStartGeneration,
 } from "@/features/video/hooks";
-import { absoluteUrl, getGeneration } from "@/features/video/api";
+import { absoluteUrl } from "@/features/video/api";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   clearDraft,
   loadDraft,
@@ -77,6 +78,9 @@ const CreateVideoPage = () => {
   const [music, setMusic] = useState<AssetDTO | null>(null);
   const [generationId, setGenerationId] = useState<UUID | null>(null);
   const [resultUrl, setResultUrl] = useState<string | null>(null);
+  const [renderFailed, setRenderFailed] = useState<string | null>(null);
+
+  const queryClient = useQueryClient();
 
   const { data: allAssets } = useAssets();
   const startMut = useStartGeneration();
@@ -137,6 +141,15 @@ const CreateVideoPage = () => {
     });
   }, [hydrated, userId, prompt, media, tts, music]);
 
+  /* ---- once the generation is DONE, the bridged project appears and we start
+         polling its render job. Nudge the projects cache so the project (and
+         thus render polling) is found immediately, not after the next refetch. */
+  useEffect(() => {
+    if (step === "generating" && done) {
+      queryClient.invalidateQueries({ queryKey: ["projects"] });
+    }
+  }, [step, done, queryClient]);
+
   /* ---- surface the finished video inline (exactly once) ---- */
   const settledResultRef = useRef(false);
   useEffect(() => {
@@ -153,33 +166,26 @@ const CreateVideoPage = () => {
       toast.success("Your video is ready!");
     };
 
-    // 1) Final render finished (Remotion, or ffmpeg when the new pipeline is off).
+    // 1) Final render finished — the result is ALWAYS the render job's
+    //    outputUrl (Remotion). Never fall back to generation.videoUrl (ffmpeg).
     if (render?.status === "COMPLETE" && render.outputUrl) {
       finish(absoluteUrl(render.outputUrl) ?? render.outputUrl);
       return;
     }
-    // 2) Render still running (or queued) — keep waiting; no fallback.
-    if (render?.status === "QUEUED" || render?.status === "RENDERING") return;
-
-    // 3) No render job surfaced (project never bridged / status 404s) — after a
-    //    grace period, fall back to the generation's own mp4 so we never hang.
-    const fallback = window.setTimeout(async () => {
-      if (settledResultRef.current) return;
-      try {
-        const gen = await getGeneration(generationId);
-        const url = gen.videoUrl
-          ? (absoluteUrl(gen.videoUrl) ?? gen.videoUrl)
-          : null;
-        if (url) finish(url);
-      } catch {
-        /* render-status path may still resolve on a later poll */
-      }
-    }, 15000);
-    return () => window.clearTimeout(fallback);
+    // 2) The render itself failed — surface a failure state instead of hanging.
+    if (render?.status === "FAILED") {
+      settledResultRef.current = true;
+      clearActiveGeneration(userId);
+      setRenderFailed("The final render failed. Please try again.");
+      return;
+    }
+    // 3) QUEUED / RENDERING / not yet surfaced — keep waiting. Remotion can take
+    //    minutes; FinalizingPanel covers this. Do NOT time out into ffmpeg.
   }, [step, done, generationId, render?.status, render?.outputUrl, userId, toast]);
 
   const resetToCompose = () => {
     settledResultRef.current = false;
+    setRenderFailed(null);
     setGenerationId(null);
     setResultUrl(null);
     setStep("compose");
@@ -222,6 +228,7 @@ const CreateVideoPage = () => {
         gifOverlaysEnabled: false,
       });
       settledResultRef.current = false;
+      setRenderFailed(null);
       setResultUrl(null);
       setActiveGeneration(userId, res.generationId);
       setGenerationId(res.generationId);
@@ -413,11 +420,12 @@ const CreateVideoPage = () => {
             exit={{ opacity: 0, y: -10 }}
             transition={{ duration: 0.25 }}
           >
-            {failed ? (
+            {failed || renderFailed ? (
               <FailedPanel
-                message={failed}
+                message={failed ?? renderFailed ?? "Generation failed"}
                 onRetry={() => {
                   settledResultRef.current = false;
+                  setRenderFailed(null);
                   setGenerationId(null);
                   setStep("compose");
                 }}
