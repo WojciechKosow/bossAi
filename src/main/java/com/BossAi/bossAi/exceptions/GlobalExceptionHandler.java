@@ -10,6 +10,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.context.request.async.AsyncRequestTimeoutException;
 
 import java.util.Map;
 
@@ -59,10 +60,24 @@ public class GlobalExceptionHandler {
         ));
     }
 
+    /**
+     * SSE emitter timeouts (generation- and render-progress streams) surface as
+     * AsyncRequestTimeoutException once the emitter's own timeout elapses. This
+     * is expected — the frontend recovers via status polling — so we swallow it
+     * quietly instead of letting it fall through to {@link #handleGeneric},
+     * whose {@code Map.of(...)} would NPE on the exception's null message.
+     * The response is already committed at this point, so no body is written.
+     */
+    @ExceptionHandler(AsyncRequestTimeoutException.class)
+    public ResponseEntity<Void> handleAsyncTimeout() {
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).build();
+    }
+
     @ExceptionHandler(RuntimeException.class)
     public ResponseEntity<?> handleGeneric(RuntimeException ex) {
+        String message = ex.getMessage() != null ? ex.getMessage() : "Unexpected error";
         return ResponseEntity
                 .status(HttpStatus.BAD_REQUEST)
-                .body(Map.of("message", ex.getMessage()));
+                .body(Map.of("message", message));
     }
 }
