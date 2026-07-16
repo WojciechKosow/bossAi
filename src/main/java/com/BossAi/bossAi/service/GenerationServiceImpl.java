@@ -464,10 +464,10 @@ public class GenerationServiceImpl implements GenerationService {
         // TEST ONLY: forceReuseForTesting bypasses plan check
         boolean forceReuse = request.isForceReuseForTesting();
 
-        // Asset reuse dostępny tylko dla planów > BASIC (PRO, CREATOR), or forced for testing
+        // Asset reuse is a storage-plan feature (PRO). Driven by the plan
+        // definition's explicit assetReuse flag, not enum ordering.
         boolean reuseEnabled = forceReuse
-                || (request.isReuseAssets()
-                    && userPlan.getPlanType().ordinal() > PlanType.BASIC.ordinal());
+                || (request.isReuseAssets() && planDefinition.isAssetReuse());
 
         if (forceReuse) {
             log.warn("[GenerationService] ⚠ TEST MODE: forceReuseForTesting=true — " +

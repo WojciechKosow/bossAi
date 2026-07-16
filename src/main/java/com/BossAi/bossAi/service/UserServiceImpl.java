@@ -179,7 +179,7 @@ public class UserServiceImpl implements UserService {
 
         token.setUsed(true);
 
-        assignPlanService.assignCreatorPlan(user);
+        assignPlanService.assignFreePlan(user);
 
         userRepository.save(user);
         userTokenRepository.save(token);
@@ -466,33 +466,6 @@ public class UserServiceImpl implements UserService {
                 requestContextUtil.getClientIp(),
                 requestContextUtil.getUserAgent()
         );
-    }
-
-    @Transactional
-    private void assignFreePlan(User user) {
-        if (userPlanRepository.existsByUserAndPlanType(user, PlanType.FREE)) {
-            return;
-        }
-
-        UserWallet userWallet = new UserWallet();
-
-        PlanDefinition planDefinition = planDefinitionRepository.findById(PlanType.FREE)
-                .orElseThrow();
-
-
-        UserPlan userPlan = new UserPlan();
-        userPlan.setUser(user);
-        userPlan.setPlanType(PlanType.FREE);
-        userPlan.setCreditsTotal(planDefinition.getMonthlyCreditsTotal());
-        userPlan.setActivatedAt(LocalDateTime.now());
-        userPlan.setExpiresAt(LocalDateTime.now().plusDays(planDefinition.getDurationDays()));
-        userPlan.setActive(true);
-
-        userWallet.setUserId(user.getId());
-        userWallet.setCreditsBalance(0);
-
-        userWalletRepository.save(userWallet);
-        userPlanRepository.save(userPlan);
     }
 
     private UserDTO mapToDTO(User user) {

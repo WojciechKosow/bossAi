@@ -28,17 +28,4 @@ public class PlanDefinitionController {
         return planDefinitionRepository.findAll();
     }
 
-
-    /*
-    * it just helps me to test the api
-    * it will have to disappear
-    * */
-//    TODO: remove it after testing/before deploying the app
-    @PostMapping("/assign-pro-plan")
-    public void assignProPlan(Authentication authentication) {
-        String email = authentication.getName();
-        User user = userRepository.findByEmail(email).orElseThrow();
-        assignPlanService.assignCreatorPlan(user);
-    }
-
 }

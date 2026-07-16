@@ -3,6 +3,7 @@ package com.BossAi.bossAi.entity;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import jakarta.persistence.Version;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -23,4 +24,8 @@ public class UserWallet {
     private int creditsBalance;
 
     private LocalDateTime updatedAt;
+
+    // Guards concurrent debits/top-ups (wallet spend races the credit ledger).
+    @Version
+    private Long version;
 }

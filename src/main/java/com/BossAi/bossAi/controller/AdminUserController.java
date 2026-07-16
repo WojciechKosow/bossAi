@@ -69,7 +69,8 @@ public class AdminUserController {
         user.setCreatedAt(LocalDateTime.now());
         userRepository.save(user);
 
-        assignPlanService.assignCreatorPlan(user);
+        assignPlanService.assignFreePlan(user);
+        assignPlanService.assignPlan(user, com.BossAi.bossAi.entity.PlanType.PRO, null);
 
         log.info("[AdminUserController] Beta user created: {}", email);
 
