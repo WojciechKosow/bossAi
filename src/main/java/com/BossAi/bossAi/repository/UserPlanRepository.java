@@ -18,4 +18,6 @@ public interface UserPlanRepository extends JpaRepository<UserPlan, UUID> {
     boolean existsByUserAndPlanType(User user, PlanType planType);
 
     List<UserPlan> findByUserAndActiveTrue(User user);
+
+    List<UserPlan> findByUser_IdAndActiveTrue(UUID userId);
 }

@@ -5,6 +5,7 @@ import com.BossAi.bossAi.dto.AssetDTO;
 import com.BossAi.bossAi.entity.*;
 import com.BossAi.bossAi.repository.AssetRepository;
 import com.BossAi.bossAi.repository.GenerationRepository;
+import com.BossAi.bossAi.repository.PlanDefinitionRepository;
 import com.BossAi.bossAi.repository.UserPlanRepository;
 import com.BossAi.bossAi.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
@@ -29,6 +30,7 @@ public class AssetServiceImpl implements AssetService {
     private final AssetRepository assetRepository;
     private final GenerationRepository generationRepository;
     private final PlanSelectionService planSelectionService;
+    private final PlanDefinitionRepository planDefinitionRepository;
     private final StorageService storageService;
     private final BetaConfig betaConfig;
 
@@ -50,20 +52,29 @@ public class AssetServiceImpl implements AssetService {
                                 String storageKey, UUID generationId, String prompt, String originalUrl) {
         User user = userRepository.findById(userId).orElseThrow();
 
-        Generation generation = generationRepository.getReferenceById(generationId);
+        Generation generation = generationRepository.findById(generationId).orElse(null);
 
-        UserPlan userPlan = planSelectionService.selectHighestPlan(user);
+        // Retention/reuse follow the plan that OWNS this generation (the plan
+        // selected when it started) — not the user's current highest-credit plan.
+        // A Pro user who just spent their last credits producing this video must
+        // still get Pro retention on it.
+        UserPlan owningPlan = generation != null && generation.getUserPlan() != null
+                ? generation.getUserPlan()
+                : planSelectionService.selectHighestPlan(user);
+        PlanDefinition planDefinition = owningPlan == null
+                ? null
+                : planDefinitionRepository.findById(owningPlan.getPlanType()).orElse(null);
 
         Asset asset = new Asset();
         asset.setUser(user);
         asset.setType(type);
         asset.setSource(source);
         asset.setSizeBytes(data.length);
-        asset.setReusable(canReuse(userPlan));
+        asset.setReusable(planDefinition != null && planDefinition.isAssetReuse());
         asset.setPrompt(prompt);
         asset.setOriginalFilename(originalUrl);
         asset.setCreatedAt(LocalDateTime.now());
-        asset.setExpiresAt(resolveExpiration(userPlan));
+        asset.setExpiresAt(resolveExpiration(planDefinition));
         asset.setGenerationId(generationId);
 
         assetRepository.save(asset);
@@ -236,19 +247,24 @@ public class AssetServiceImpl implements AssetService {
         return storageKey;
     }
 
-    private boolean canReuse(UserPlan userPlan) {
-        if (userPlan == null) return false;
-        return userPlan.getPlanType().ordinal() >= PlanType.PRO.ordinal();
-    }
-
-    private LocalDateTime resolveExpiration(UserPlan userPlan) {
-        if (userPlan == null || userPlan.getPlanType().ordinal() < PlanType.BASIC.ordinal()) {
-            return LocalDateTime.now().plusHours(48);
+    /**
+     * Per-plan retention for generated assets (including the final video).
+     *  - storage plans (PRO): null → retained. The cleanup service manages the
+     *    post-expiry grace window once the plan lapses.
+     *  - non-storage plans: hard TTL from now (BASIC 24h, FREE/TRIAL ~8h).
+     *  - unknown / no plan: short safety TTL.
+     */
+    private LocalDateTime resolveExpiration(PlanDefinition planDefinition) {
+        if (planDefinition == null) {
+            return LocalDateTime.now().plusHours(8);
         }
-        return null;
-    }
-
-    private boolean hasPermanentStorage(UserPlan userPlan) {
-        return userPlan != null && userPlan.getPlanType().ordinal() >= PlanType.BASIC.ordinal();
+        if (planDefinition.isStorage()) {
+            return null;
+        }
+        int hours = planDefinition.getGeneratedVideoRetentionHours();
+        if (hours <= 0) {
+            hours = 8;
+        }
+        return LocalDateTime.now().plusHours(hours);
     }
 }

@@ -6,6 +6,7 @@ import com.BossAi.bossAi.config.properties.FfmpegProperties;
 import com.BossAi.bossAi.config.properties.GifProperties;
 import com.BossAi.bossAi.config.properties.OpenAiProperties;
 import com.BossAi.bossAi.config.properties.RemotionRendererProperties;
+import com.BossAi.bossAi.config.properties.StripeProperties;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -21,7 +22,8 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 		FfmpegProperties.class,
 		AudioAnalysisProperties.class,
 		RemotionRendererProperties.class,
-		GifProperties.class
+		GifProperties.class,
+		StripeProperties.class
 })
 public class BossAiApplication {
 
