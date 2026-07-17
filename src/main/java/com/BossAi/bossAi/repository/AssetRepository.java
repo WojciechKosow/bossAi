@@ -16,6 +16,10 @@ import java.util.UUID;
 public interface AssetRepository extends JpaRepository<Asset, UUID> {
     List<Asset> findByUserOrderByCreatedAtDesc(User user);
     List<Asset> findByExpiresAtBefore(LocalDateTime dateTime);
+
+    // Storage-plan assets are kept with a null expiry while the plan is active;
+    // the cleanup service uses this to manage the post-expiry grace window.
+    List<Asset> findByExpiresAtIsNull();
     List<Asset> findByUserAndType(User user, AssetType type);
     Optional<Asset> findByGenerationId(UUID generationId);
 
