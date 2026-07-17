@@ -4,7 +4,6 @@ import com.BossAi.bossAi.entity.UserWallet;
 import com.BossAi.bossAi.repository.UserWalletRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -25,23 +24,18 @@ public class WalletService {
 
     private final UserWalletRepository userWalletRepository;
 
-    /** Adds credits to a user's wallet, creating it if absent. Retries on write contention. */
+    /**
+     * Adds credits to a user's wallet, creating it if absent.
+     *
+     * Joins the caller's transaction (REQUIRED). Concurrency is guarded by
+     * UserWallet's @Version: a conflicting write fails the transaction, so a
+     * caller such as the Stripe webhook simply lets Stripe re-deliver and retry.
+     */
+    @Transactional
     public UserWallet topUp(UUID userId, int credits) {
         if (credits <= 0) {
             throw new IllegalArgumentException("Top-up credits must be positive: " + credits);
         }
-        int attempts = 0;
-        while (true) {
-            try {
-                return topUpInternal(userId, credits);
-            } catch (ObjectOptimisticLockingFailureException e) {
-                if (++attempts >= 3) throw e;
-            }
-        }
-    }
-
-    @Transactional
-    protected UserWallet topUpInternal(UUID userId, int credits) {
         UserWallet wallet = userWalletRepository.findById(userId)
                 .orElseGet(() -> {
                     UserWallet w = new UserWallet();

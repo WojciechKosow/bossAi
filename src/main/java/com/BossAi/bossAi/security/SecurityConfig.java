@@ -46,6 +46,10 @@ public class SecurityConfig {
                                 "/api/auth/**",
                                 "/oauth2/**",
                                 "/internal/**",
+                                // Stripe webhook: authenticated by signature
+                                // verification (see StripeWebhookService), not a
+                                // JWT — Stripe calls it server-to-server.
+                                "/api/payments/webhook",
                                 // UUID-keyed asset blobs: equivalent to a signed
                                 // URL since asset IDs are 122-bit random UUIDs.
                                 // Lets <img>/<video> tags load previews without
