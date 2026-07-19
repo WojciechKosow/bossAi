@@ -20,4 +20,6 @@ public interface UserPlanRepository extends JpaRepository<UserPlan, UUID> {
     List<UserPlan> findByUserAndActiveTrue(User user);
 
     List<UserPlan> findByUser_IdAndActiveTrue(UUID userId);
+
+    Optional<UserPlan> findByStripeSubscriptionId(String stripeSubscriptionId);
 }

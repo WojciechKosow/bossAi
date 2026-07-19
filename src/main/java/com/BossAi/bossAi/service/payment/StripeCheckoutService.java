@@ -33,6 +33,7 @@ public class StripeCheckoutService {
     private final StripeProperties stripeProperties;
     private final PaymentOrderRepository paymentOrderRepository;
     private final PlanDefinitionRepository planDefinitionRepository;
+    private final StripeCustomerService stripeCustomerService;
 
     public record CheckoutResult(UUID orderId, String checkoutUrl) {}
 
@@ -85,6 +86,83 @@ public class StripeCheckoutService {
                 .build());
 
         return startSession(order, "BossAI — " + planType + " plan");
+    }
+
+    /** Start a recurring subscription checkout (Phase 1b: BASIC / PRO). */
+    @Transactional
+    public CheckoutResult createSubscriptionCheckout(User user, PlanType planType) {
+        PlanDefinition def = planDefinitionRepository.findById(planType)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unknown plan: " + planType));
+        if (!def.isSubscription()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, planType + " is not a subscription plan");
+        }
+        String priceId = stripeProperties.priceIdFor(planType);
+        if (priceId == null) {
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,
+                    "No Stripe price configured for " + planType + " (set stripe.price." + planType.name().toLowerCase() + ")");
+        }
+
+        String customerId;
+        try {
+            customerId = stripeCustomerService.getOrCreateCustomerId(user);
+        } catch (StripeException e) {
+            log.error("[Stripe] Could not create/resolve customer for user {}: {}", user.getId(), e.getMessage());
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Could not start checkout");
+        }
+
+        PaymentOrder order = paymentOrderRepository.save(PaymentOrder.builder()
+                .userId(user.getId())
+                .purpose(PaymentPurpose.SUBSCRIPTION)
+                .planType(planType)
+                .credits(0)
+                .amountCents(def.getPriceCents())
+                .currency(def.getCurrency() == null ? "USD" : def.getCurrency())
+                .status(PaymentOrderStatus.CREATED)
+                .build());
+
+        String successUrl = stripeProperties.getSuccessUrl().replace("{ORDER_ID}", order.getId().toString());
+
+        SessionCreateParams params = SessionCreateParams.builder()
+                .setMode(SessionCreateParams.Mode.SUBSCRIPTION)
+                .setCustomer(customerId)
+                .setSuccessUrl(successUrl)
+                .setCancelUrl(stripeProperties.getCancelUrl())
+                .setClientReferenceId(order.getId().toString())
+                .putMetadata("orderId", order.getId().toString())
+                .putMetadata("userId", user.getId().toString())
+                .putMetadata("purpose", PaymentPurpose.SUBSCRIPTION.name())
+                .putMetadata("planType", planType.name())
+                .addLineItem(SessionCreateParams.LineItem.builder()
+                        .setQuantity(1L)
+                        .setPrice(priceId)
+                        .build())
+                // Copy identifiers onto the subscription so renewal invoices can
+                // be traced back to our user/plan without extra API calls.
+                .setSubscriptionData(SessionCreateParams.SubscriptionData.builder()
+                        .putMetadata("userId", user.getId().toString())
+                        .putMetadata("planType", planType.name())
+                        .putMetadata("orderId", order.getId().toString())
+                        .build())
+                .build();
+
+        RequestOptions options = RequestOptions.builder()
+                .setIdempotencyKey("checkout-session-" + order.getId())
+                .build();
+
+        try {
+            Session session = Session.create(params, options);
+            order.setStripeCheckoutSessionId(session.getId());
+            order.setStatus(PaymentOrderStatus.PENDING);
+            paymentOrderRepository.save(order);
+            log.info("[Stripe] Created subscription checkout session {} for order {} ({} {} {}c)",
+                    session.getId(), order.getId(), planType, order.getCurrency(), order.getAmountCents());
+            return new CheckoutResult(order.getId(), session.getUrl());
+        } catch (StripeException e) {
+            order.setStatus(PaymentOrderStatus.FAILED);
+            paymentOrderRepository.save(order);
+            log.error("[Stripe] Failed to create subscription session for order {}: {}", order.getId(), e.getMessage());
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Could not start checkout");
+        }
     }
 
     private CheckoutResult startSession(PaymentOrder order, String productName) {

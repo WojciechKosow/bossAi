@@ -10,7 +10,9 @@ import com.BossAi.bossAi.service.WalletService;
 import com.stripe.exception.EventDataObjectDeserializationException;
 import com.stripe.exception.SignatureVerificationException;
 import com.stripe.model.Event;
+import com.stripe.model.Invoice;
 import com.stripe.model.StripeObject;
+import com.stripe.model.Subscription;
 import com.stripe.model.checkout.Session;
 import com.stripe.net.Webhook;
 import lombok.RequiredArgsConstructor;
@@ -79,6 +81,14 @@ public class StripeWebhookService {
             }
             case "checkout.session.expired" -> updateStatus(extractSession(event), PaymentOrderStatus.EXPIRED);
             case "checkout.session.async_payment_failed" -> updateStatus(extractSession(event), PaymentOrderStatus.FAILED);
+
+            // Subscription lifecycle (Phase 1b). Initial activation happens on
+            // checkout.session.completed above (mode=subscription). invoice.paid
+            // handles RENEWALS only; deletion deactivates the plan (which then
+            // enters the Pro storage grace window).
+            case "invoice.paid", "invoice.payment_succeeded" -> handleInvoicePaid(event);
+            case "customer.subscription.deleted" -> handleSubscriptionDeleted(event);
+
             default -> log.debug("[Stripe] Ignoring event type {}", event.getType());
         }
 
@@ -106,10 +116,12 @@ public class StripeWebhookService {
 
         switch (order.getPurpose()) {
             case TOP_UP -> walletService.topUp(order.getUserId(), order.getCredits());
-            case PLAN -> {
-                User user = userRepository.findById(order.getUserId())
-                        .orElseThrow(() -> new IllegalStateException("User not found for order " + order.getId()));
-                assignPlanService.assignPlan(user, order.getPlanType(), order.getStripePaymentIntentId());
+            case PLAN -> assignPlanService.assignPlan(orderUser(order), order.getPlanType(),
+                    order.getStripePaymentIntentId());
+            case SUBSCRIPTION -> {
+                order.setStripeSubscriptionId(session.getSubscription());
+                assignPlanService.activateSubscription(orderUser(order), order.getPlanType(),
+                        session.getSubscription());
             }
         }
 
@@ -118,6 +130,51 @@ public class StripeWebhookService {
         paymentOrderRepository.save(order);
         log.info("[Stripe] Fulfilled order {} ({}) for user {}",
                 order.getId(), order.getPurpose(), order.getUserId());
+    }
+
+    /** Renewal cycles: refresh the plan's monthly credits and extend its expiry. */
+    private void handleInvoicePaid(Event event) {
+        StripeObject obj = extractObject(event);
+        if (!(obj instanceof Invoice invoice)) {
+            return;
+        }
+        // Only act on renewals. The first invoice ("subscription_create") is
+        // already handled by checkout.session.completed — acting on it here too
+        // would double-grant.
+        if (!"subscription_cycle".equals(invoice.getBillingReason())) {
+            log.debug("[Stripe] invoice.paid billing_reason={} — not a renewal, skipping",
+                    invoice.getBillingReason());
+            return;
+        }
+        String subscriptionId = subscriptionIdOf(invoice);
+        if (subscriptionId == null) {
+            log.warn("[Stripe] invoice.paid without a subscription id — skipping");
+            return;
+        }
+        assignPlanService.renewSubscription(subscriptionId);
+        log.info("[Stripe] Renewed subscription {}", subscriptionId);
+    }
+
+    private void handleSubscriptionDeleted(Event event) {
+        StripeObject obj = extractObject(event);
+        if (!(obj instanceof Subscription subscription)) {
+            return;
+        }
+        assignPlanService.deactivateSubscription(subscription.getId());
+        log.info("[Stripe] Deactivated subscription {}", subscription.getId());
+    }
+
+    private String subscriptionIdOf(Invoice invoice) {
+        Invoice.Parent parent = invoice.getParent();
+        if (parent != null && parent.getSubscriptionDetails() != null) {
+            return parent.getSubscriptionDetails().getSubscription();
+        }
+        return null;
+    }
+
+    private User orderUser(PaymentOrder order) {
+        return userRepository.findById(order.getUserId())
+                .orElseThrow(() -> new IllegalStateException("User not found for order " + order.getId()));
     }
 
     private void updateStatus(Session session, PaymentOrderStatus status) {
@@ -150,21 +207,22 @@ public class StripeWebhookService {
     }
 
     private Session extractSession(Event event) {
+        return extractObject(event) instanceof Session session ? session : null;
+    }
+
+    private StripeObject extractObject(Event event) {
         Optional<StripeObject> obj = event.getDataObjectDeserializer().getObject();
-        StripeObject stripeObject;
         if (obj.isPresent()) {
-            stripeObject = obj.get();
-        } else {
-            // API-version skew between our SDK and the event: fall back to a
-            // lenient deserialize rather than dropping the event.
-            try {
-                stripeObject = event.getDataObjectDeserializer().deserializeUnsafe();
-            } catch (EventDataObjectDeserializationException e) {
-                log.warn("[Stripe] Could not deserialize event {} ({}): {}",
-                        event.getId(), event.getType(), e.getMessage());
-                return null;
-            }
+            return obj.get();
         }
-        return stripeObject instanceof Session session ? session : null;
+        // API-version skew between our SDK and the event: fall back to a lenient
+        // deserialize rather than dropping the event.
+        try {
+            return event.getDataObjectDeserializer().deserializeUnsafe();
+        } catch (EventDataObjectDeserializationException e) {
+            log.warn("[Stripe] Could not deserialize event {} ({}): {}",
+                    event.getId(), event.getType(), e.getMessage());
+            return null;
+        }
     }
 }

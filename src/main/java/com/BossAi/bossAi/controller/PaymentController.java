@@ -27,6 +27,7 @@ public class PaymentController {
 
     private final StripeCheckoutService checkoutService;
     private final StripeWebhookService webhookService;
+    private final com.BossAi.bossAi.service.payment.StripeCustomerService customerService;
     private final PaymentOrderRepository paymentOrderRepository;
     private final UserRepository userRepository;
 
@@ -63,6 +64,27 @@ public class PaymentController {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "planType is required");
         }
         return checkoutService.createPlanCheckout(currentUser(authentication), request.planType());
+    }
+
+    /** Start a hosted-Checkout subscription session (BASIC / PRO). Returns the URL to redirect to. */
+    @PostMapping("/checkout/subscription")
+    public StripeCheckoutService.CheckoutResult subscription(@RequestBody PlanCheckoutRequest request,
+                                                             Authentication authentication) {
+        if (request.planType() == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "planType is required");
+        }
+        return checkoutService.createSubscriptionCheckout(currentUser(authentication), request.planType());
+    }
+
+    /** Stripe billing portal so the user can update or cancel their subscription. */
+    @PostMapping("/portal")
+    public java.util.Map<String, String> portal(Authentication authentication) {
+        try {
+            String url = customerService.createBillingPortalUrl(currentUser(authentication));
+            return java.util.Map.of("url", url);
+        } catch (com.stripe.exception.StripeException e) {
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Could not open billing portal");
+        }
     }
 
     /** Poll the real outcome of a checkout — the browser redirect is never trusted. */
