@@ -57,6 +57,10 @@ public class User {
 
     private LocalDateTime lastGeneration;
 
+    // Stripe customer id — created lazily on first subscription checkout and
+    // reused for all future subscriptions/invoices/billing-portal sessions.
+    private String stripeCustomerId;
+
     @PrePersist
     void onCreate() {
         this.createdAt = LocalDateTime.now();

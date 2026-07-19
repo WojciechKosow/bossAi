@@ -27,4 +27,33 @@ public class StripeProperties {
     private String webhookSecret = "";
     private String successUrl = "http://localhost:5173/billing/success?order={ORDER_ID}";
     private String cancelUrl = "http://localhost:5173/billing/cancel";
+
+    // Where Stripe's billing portal returns the user after they manage their sub.
+    private String portalReturnUrl = "http://localhost:5173/billing";
+
+    // Recurring Price ids from the Stripe dashboard. These DIFFER between test
+    // and live mode, so they live in config (env), never hard-coded.
+    //   stripe.price.basic=price_...
+    //   stripe.price.pro=price_...
+    private Price price = new Price();
+
+    @Getter
+    @Setter
+    public static class Price {
+        private String basic = "";
+        private String pro = "";
+    }
+
+    /** Stripe Price id for a subscription plan, or null if not a configured sub plan. */
+    public String priceIdFor(com.BossAi.bossAi.entity.PlanType planType) {
+        return switch (planType) {
+            case BASIC -> emptyToNull(price.getBasic());
+            case PRO -> emptyToNull(price.getPro());
+            default -> null;
+        };
+    }
+
+    private static String emptyToNull(String s) {
+        return (s == null || s.isBlank()) ? null : s;
+    }
 }

@@ -51,6 +51,9 @@ public class PaymentOrder {
 
     private String stripePaymentIntentId;
 
+    // Set when purpose == SUBSCRIPTION.
+    private String stripeSubscriptionId;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     private PaymentOrderStatus status;

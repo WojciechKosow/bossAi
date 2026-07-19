@@ -96,4 +96,60 @@ public class AssignPlanService {
 
         return userPlanRepository.save(userPlan);
     }
+
+    /**
+     * Activates a subscription plan on first payment. Idempotent on the Stripe
+     * subscription id — a replayed activation event never creates a duplicate
+     * plan. Wallet is preserved.
+     */
+    @Transactional
+    public UserPlan activateSubscription(User user, PlanType planType, String subscriptionId) {
+        if (subscriptionId != null) {
+            UserPlan existing = userPlanRepository.findByStripeSubscriptionId(subscriptionId).orElse(null);
+            if (existing != null) {
+                return existing; // already activated for this subscription
+            }
+        }
+        ensureWallet(user);
+
+        PlanDefinition def = planDefinitionRepository.findById(planType).orElseThrow();
+
+        UserPlan userPlan = new UserPlan();
+        userPlan.setUser(user);
+        userPlan.setPlanType(planType);
+        userPlan.setActive(true);
+        userPlan.setCreditsTotal(def.getMonthlyCreditsTotal());
+        userPlan.setActivatedAt(LocalDateTime.now());
+        userPlan.setExpiresAt(LocalDateTime.now().plusDays(def.getDurationDays()));
+        userPlan.setStripeSubscriptionId(subscriptionId);
+
+        return userPlanRepository.save(userPlan);
+    }
+
+    /**
+     * Renews a subscription plan for a new billing period: fresh monthly credit
+     * allotment and extended expiry. Called on invoice.paid (renewal cycle).
+     */
+    @Transactional
+    public void renewSubscription(String subscriptionId) {
+        UserPlan plan = userPlanRepository.findByStripeSubscriptionId(subscriptionId).orElse(null);
+        if (plan == null) {
+            return;
+        }
+        PlanDefinition def = planDefinitionRepository.findById(plan.getPlanType()).orElseThrow();
+        plan.setActive(true);
+        plan.setCreditsTotal(def.getMonthlyCreditsTotal());
+        plan.setCreditsUsed(0); // fresh monthly allotment
+        plan.setExpiresAt(LocalDateTime.now().plusDays(def.getDurationDays()));
+        userPlanRepository.save(plan);
+    }
+
+    /** Deactivates a subscription plan (e.g. cancelled/ended). */
+    @Transactional
+    public void deactivateSubscription(String subscriptionId) {
+        userPlanRepository.findByStripeSubscriptionId(subscriptionId).ifPresent(plan -> {
+            plan.setActive(false);
+            userPlanRepository.save(plan);
+        });
+    }
 }
