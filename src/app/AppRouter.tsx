@@ -22,6 +22,8 @@ import ProjectEditorPage from "../pages/dashboard/ProjectEditorPage";
 import GenerationPreviewPage from "../pages/dashboard/GenerationPreviewPage";
 import AssetPreviewPage from "../pages/dashboard/AssetPreviewPage";
 import BillingPage from "../pages/dashboard/BillingPage";
+import BillingSuccessPage from "../pages/dashboard/BillingSuccessPage";
+import BillingCancelPage from "../pages/dashboard/BillingCancelPage";
 import SettingsPage from "../pages/dashboard/SettingsPage";
 import { BETA_MODE } from "@/lib/betaMode";
 import { EDITOR_ENABLED } from "@/lib/features";
@@ -85,6 +87,25 @@ const AppRouter = () => {
         <Route path="/oauth-success" element={<OAuthSuccessPage />} />
         <Route path="/verify" element={<VerifyPage />} />
         <Route path="/check-email" element={<CheckEmail />} />
+
+        {/* Stripe Checkout return pages (authenticated — token persists across the
+            redirect). Success polls the order; the webhook does the fulfilment. */}
+        <Route
+          path="/billing/success"
+          element={
+            <PrivateRoute>
+              <BillingSuccessPage />
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path="/billing/cancel"
+          element={
+            <PrivateRoute>
+              <BillingCancelPage />
+            </PrivateRoute>
+          }
+        />
 
         {/* PRIVATE AREA */}
         <Route
