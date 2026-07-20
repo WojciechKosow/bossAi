@@ -28,6 +28,7 @@ public class PaymentController {
     private final StripeCheckoutService checkoutService;
     private final StripeWebhookService webhookService;
     private final com.BossAi.bossAi.service.payment.StripeCustomerService customerService;
+    private final com.BossAi.bossAi.service.payment.StripeSubscriptionService subscriptionService;
     private final PaymentOrderRepository paymentOrderRepository;
     private final UserRepository userRepository;
 
@@ -74,6 +75,20 @@ public class PaymentController {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "planType is required");
         }
         return checkoutService.createSubscriptionCheckout(currentUser(authentication), request.planType());
+    }
+
+    /** Cancel the active subscription at period end (keeps the plan until it expires). */
+    @PostMapping("/subscription/cancel")
+    public com.BossAi.bossAi.service.payment.StripeSubscriptionService.SubscriptionState cancelSubscription(
+            Authentication authentication) {
+        return subscriptionService.cancelAtPeriodEnd(currentUser(authentication));
+    }
+
+    /** Undo a pending cancellation. */
+    @PostMapping("/subscription/resume")
+    public com.BossAi.bossAi.service.payment.StripeSubscriptionService.SubscriptionState resumeSubscription(
+            Authentication authentication) {
+        return subscriptionService.resume(currentUser(authentication));
     }
 
     /** Stripe billing portal so the user can update or cancel their subscription. */

@@ -23,4 +23,5 @@ public class UserPlanDTO {
     private LocalDateTime activatedAt;
     private LocalDateTime expiresAt;
     private boolean active;
+    private boolean cancelAtPeriodEnd;
 }
