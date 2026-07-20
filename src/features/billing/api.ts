@@ -2,12 +2,19 @@ import axios from "@/lib/axios";
 import type {
   ActivePlan,
   CheckoutResult,
+  CreditBalance,
   CreditPack,
   OrderStatus,
   PlanDefinition,
   PlanType,
   SubscriptionState,
 } from "./types";
+
+/** The user's spendable credit balance (plan + wallet). */
+export const getCredits = async (): Promise<CreditBalance> => {
+  const { data } = await axios.get("/api/me/credits");
+  return data;
+};
 
 /** Wallet top-up SKUs available for purchase. */
 export const getCreditPacks = async (): Promise<CreditPack[]> => {

@@ -7,6 +7,7 @@ import {
   useBillingPortal,
   useCancelSubscription,
   useCreditPacks,
+  useCredits,
   usePlansCatalog,
   useResumeSubscription,
   useStartPlan,
@@ -34,6 +35,7 @@ const BillingPage = () => {
   const { data: activePlan } = useActivePlan();
   const { data: plans } = usePlansCatalog();
   const { data: creditPacks } = useCreditPacks();
+  const { data: credits } = useCredits();
 
   const startSubscription = useStartSubscription();
   const startPlan = useStartPlan();
@@ -85,6 +87,21 @@ const BillingPage = () => {
       {BETA_MODE && (
         <div className="bg-card border border-primary/30 rounded-xl p-6 text-center text-sm text-muted-foreground">
           Beta access — billing is disabled while the closed beta is running.
+        </div>
+      )}
+
+      {/* CREDIT BALANCE */}
+      {credits && (
+        <div className="bg-card border border-border rounded-xl p-8">
+          <div className="flex items-center gap-2 text-muted-foreground text-sm">
+            <Coins size={16} />
+            Available credits
+          </div>
+          <p className="text-4xl font-bold mt-2">{credits.totalCredits}</p>
+          <p className="text-sm text-muted-foreground mt-2">
+            {credits.planCredits} from your plan &middot; {credits.walletCredits}{" "}
+            in your wallet
+          </p>
         </div>
       )}
 
