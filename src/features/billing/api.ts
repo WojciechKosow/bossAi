@@ -6,6 +6,7 @@ import type {
   OrderStatus,
   PlanDefinition,
   PlanType,
+  SubscriptionState,
 } from "./types";
 
 /** Wallet top-up SKUs available for purchase. */
@@ -35,6 +36,18 @@ export const startSubscription = async (
   const { data } = await axios.post("/api/payments/checkout/subscription", {
     planType,
   });
+  return data;
+};
+
+/** Cancel the active subscription at period end (keeps the plan until it expires). */
+export const cancelSubscription = async (): Promise<SubscriptionState> => {
+  const { data } = await axios.post("/api/payments/subscription/cancel");
+  return data;
+};
+
+/** Undo a pending cancellation. */
+export const resumeSubscription = async (): Promise<SubscriptionState> => {
+  const { data } = await axios.post("/api/payments/subscription/resume");
   return data;
 };
 
