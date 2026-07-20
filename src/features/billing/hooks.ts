@@ -3,6 +3,7 @@ import {
   cancelSubscription,
   getActivePlan,
   getCreditPacks,
+  getCredits,
   getOrder,
   getPlans,
   openBillingPortal,
@@ -26,6 +27,9 @@ export const usePlansCatalog = () =>
 
 export const useActivePlan = () =>
   useQuery({ queryKey: ["active-plan"], queryFn: getActivePlan });
+
+export const useCredits = () =>
+  useQuery({ queryKey: ["credits"], queryFn: getCredits });
 
 export const useStartTopUp = () =>
   useMutation({

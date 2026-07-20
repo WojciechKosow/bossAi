@@ -67,3 +67,9 @@ export interface SubscriptionState {
   cancelAtPeriodEnd: boolean;
   activeUntil: string;
 }
+
+export interface CreditBalance {
+  planCredits: number;
+  walletCredits: number;
+  totalCredits: number;
+}
