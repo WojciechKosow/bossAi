@@ -45,6 +45,11 @@ public class UserPlan {
     private String stripePaymentIntentId;
     private String stripeSubscriptionId;
 
+    // True once the user has cancelled a subscription that is still running out
+    // its paid period. The plan stays active until expiresAt; then the Stripe
+    // subscription.deleted event deactivates it.
+    private boolean cancelAtPeriodEnd;
+
     @Version
     private Long version;
 

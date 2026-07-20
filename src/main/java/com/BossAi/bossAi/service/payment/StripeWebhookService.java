@@ -87,6 +87,7 @@ public class StripeWebhookService {
             // handles RENEWALS only; deletion deactivates the plan (which then
             // enters the Pro storage grace window).
             case "invoice.paid", "invoice.payment_succeeded" -> handleInvoicePaid(event);
+            case "customer.subscription.updated" -> handleSubscriptionUpdated(event);
             case "customer.subscription.deleted" -> handleSubscriptionDeleted(event);
 
             default -> log.debug("[Stripe] Ignoring event type {}", event.getType());
@@ -153,6 +154,17 @@ public class StripeWebhookService {
         }
         assignPlanService.renewSubscription(subscriptionId);
         log.info("[Stripe] Renewed subscription {}", subscriptionId);
+    }
+
+    /** Keeps our cancel-at-period-end flag in sync (e.g. cancel via Stripe portal). */
+    private void handleSubscriptionUpdated(Event event) {
+        StripeObject obj = extractObject(event);
+        if (!(obj instanceof Subscription subscription)) {
+            return;
+        }
+        assignPlanService.setCancelAtPeriodEnd(
+                subscription.getId(),
+                Boolean.TRUE.equals(subscription.getCancelAtPeriodEnd()));
     }
 
     private void handleSubscriptionDeleted(Event event) {

@@ -122,6 +122,7 @@ public class AssignPlanService {
         userPlan.setActivatedAt(LocalDateTime.now());
         userPlan.setExpiresAt(LocalDateTime.now().plusDays(def.getDurationDays()));
         userPlan.setStripeSubscriptionId(subscriptionId);
+        userPlan.setCancelAtPeriodEnd(false);
 
         return userPlanRepository.save(userPlan);
     }
@@ -141,6 +142,7 @@ public class AssignPlanService {
         plan.setCreditsTotal(def.getMonthlyCreditsTotal());
         plan.setCreditsUsed(0); // fresh monthly allotment
         plan.setExpiresAt(LocalDateTime.now().plusDays(def.getDurationDays()));
+        plan.setCancelAtPeriodEnd(false);
         userPlanRepository.save(plan);
     }
 
@@ -149,6 +151,15 @@ public class AssignPlanService {
     public void deactivateSubscription(String subscriptionId) {
         userPlanRepository.findByStripeSubscriptionId(subscriptionId).ifPresent(plan -> {
             plan.setActive(false);
+            userPlanRepository.save(plan);
+        });
+    }
+
+    /** Syncs the cancel-at-period-end flag (from a subscription.updated event). */
+    @Transactional
+    public void setCancelAtPeriodEnd(String subscriptionId, boolean cancelAtPeriodEnd) {
+        userPlanRepository.findByStripeSubscriptionId(subscriptionId).ifPresent(plan -> {
+            plan.setCancelAtPeriodEnd(cancelAtPeriodEnd);
             userPlanRepository.save(plan);
         });
     }

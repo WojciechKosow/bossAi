@@ -111,7 +111,8 @@ public class UserPlanServiceImpl implements UserPlanService {
                 userPlan.getVideosUsed(),
                 userPlan.getActivatedAt(),
                 userPlan.getExpiresAt(),
-                userPlan.isActive()
+                userPlan.isActive(),
+                userPlan.isCancelAtPeriodEnd()
         );
     }
 
