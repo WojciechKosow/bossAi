@@ -59,4 +59,11 @@ export interface ActivePlan {
   activatedAt: string;
   expiresAt: string;
   active: boolean;
+  cancelAtPeriodEnd: boolean;
+}
+
+export interface SubscriptionState {
+  planType: PlanType;
+  cancelAtPeriodEnd: boolean;
+  activeUntil: string;
 }

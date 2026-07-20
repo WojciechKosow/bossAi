@@ -5,8 +5,10 @@ import { BETA_MODE } from "@/lib/betaMode";
 import {
   useActivePlan,
   useBillingPortal,
+  useCancelSubscription,
   useCreditPacks,
   usePlansCatalog,
+  useResumeSubscription,
   useStartPlan,
   useStartSubscription,
   useStartTopUp,
@@ -37,6 +39,8 @@ const BillingPage = () => {
   const startPlan = useStartPlan();
   const startTopUp = useStartTopUp();
   const portal = useBillingPortal();
+  const cancelSub = useCancelSubscription();
+  const resumeSub = useResumeSubscription();
 
   const currentType = activePlan?.type;
   const hasSubscription = currentType === "BASIC" || currentType === "PRO";
@@ -102,9 +106,60 @@ const BillingPage = () => {
           </div>
           {activePlan.expiresAt && (
             <p className="text-muted-foreground mt-2 text-sm">
-              {hasSubscription ? "Renews" : "Expires"}{" "}
+              {hasSubscription
+                ? activePlan.cancelAtPeriodEnd
+                  ? "Cancels"
+                  : "Renews"
+                : "Expires"}{" "}
               {format(new Date(activePlan.expiresAt), "PPP")}
             </p>
+          )}
+
+          {/* Cancel / resume — deferred cancellation keeps the plan until it expires */}
+          {hasSubscription && (
+            <div className="mt-5">
+              {activePlan.cancelAtPeriodEnd ? (
+                <div className="flex items-center gap-3 flex-wrap">
+                  <span className="text-sm text-amber-600 dark:text-amber-400">
+                    Your subscription is set to cancel — you keep {activePlan.type}{" "}
+                    until {format(new Date(activePlan.expiresAt), "PPP")}.
+                  </span>
+                  <Button
+                    size="sm"
+                    onClick={() => resumeSub.mutate()}
+                    disabled={resumeSub.isPending}
+                  >
+                    {resumeSub.isPending ? (
+                      <Loader2 className="animate-spin" />
+                    ) : null}
+                    Resume subscription
+                  </Button>
+                </div>
+              ) : (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    if (
+                      window.confirm(
+                        `Cancel your ${activePlan.type} subscription? You'll keep it until ${format(
+                          new Date(activePlan.expiresAt),
+                          "PPP",
+                        )}, then drop to the free plan. You won't be charged again.`,
+                      )
+                    ) {
+                      cancelSub.mutate();
+                    }
+                  }}
+                  disabled={cancelSub.isPending}
+                >
+                  {cancelSub.isPending ? (
+                    <Loader2 className="animate-spin" />
+                  ) : null}
+                  Cancel subscription
+                </Button>
+              )}
+            </div>
           )}
         </div>
       )}

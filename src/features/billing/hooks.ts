@@ -1,10 +1,12 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  cancelSubscription,
   getActivePlan,
   getCreditPacks,
   getOrder,
   getPlans,
   openBillingPortal,
+  resumeSubscription,
   startPlanCheckout,
   startSubscription,
   startTopUp,
@@ -48,6 +50,22 @@ export const useBillingPortal = () =>
     mutationFn: openBillingPortal,
     onSuccess: (r) => redirectToCheckout(r.url),
   });
+
+export const useCancelSubscription = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: cancelSubscription,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["active-plan"] }),
+  });
+};
+
+export const useResumeSubscription = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: resumeSubscription,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["active-plan"] }),
+  });
+};
 
 const SETTLED: OrderStatusValue[] = ["PAID", "FAILED", "EXPIRED"];
 
