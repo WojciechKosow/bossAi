@@ -75,6 +75,27 @@ public class RemotionRenderClient {
     }
 
     /**
+     * Pobiera surowe bajty wyrenderowanego pliku z Remotiona.
+     *
+     * @param outputPath ścieżka zwrócona przez Remotion (np. "/output/{renderId}.mp4"),
+     *                   względna do baseUrl renderera
+     * @return bajty pliku MP4
+     */
+    public byte[] downloadOutput(String outputPath) {
+        log.info("[RemotionRenderClient] Downloading rendered output — path: {}", outputPath);
+        byte[] bytes = webClient.get()
+                .uri(outputPath)
+                .retrieve()
+                .bodyToMono(byte[].class)
+                .block();
+        if (bytes == null || bytes.length == 0) {
+            throw new RuntimeException("Remotion output download returned empty body: " + outputPath);
+        }
+        log.info("[RemotionRenderClient] Downloaded {} bytes from {}", bytes.length, outputPath);
+        return bytes;
+    }
+
+    /**
      * Pobiera aktualny status renderowania.
      *
      * @param renderId identyfikator renderowania

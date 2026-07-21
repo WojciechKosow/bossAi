@@ -55,6 +55,9 @@ public class SecurityConfig {
                                 // Lets <img>/<video> tags load previews without
                                 // an Authorization header.
                                 "/api/assets/file/**",
+                                // Rendered-video blobs, UUID-keyed (RenderJob id)
+                                // like the asset blobs above — same signed-URL logic.
+                                "/api/renders/*/file",
                                 // SSE progress stream. UUID-keyed like the asset
                                 // blobs. Must be permitAll: the SseEmitter times
                                 // out on long renders and Tomcat re-dispatches the

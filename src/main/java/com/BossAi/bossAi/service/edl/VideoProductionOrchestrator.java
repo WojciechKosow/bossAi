@@ -65,6 +65,7 @@ public class VideoProductionOrchestrator {
     private final AutonomousCompositionDecider autonomousCompositionDecider;
     private final OverlayPlacementEngine overlayPlacementEngine;
     private final ObjectMapper objectMapper;
+    private final com.BossAi.bossAi.service.StorageService storageService;
 
     /**
      * Uruchamia pelny przepływ produkcji wideo dla istniejacego projektu.
@@ -506,10 +507,30 @@ public class VideoProductionOrchestrator {
                         renderProgressService.broadcast(projectId, RenderStatus.RENDERING, progress, null);
                     });
 
+            // Ingest Remotion's rendered MP4 into our own storage (R2 / local)
+            // so the final video lives with every other asset instead of on the
+            // render box's ephemeral disk. The bytes are Remotion's output,
+            // unchanged — we only relocate them. Served back via the UUID-keyed
+            // /api/renders/{renderId}/file route (presigned-redirect on R2).
+            String servedUrl = status.outputUrl();
+            try {
+                byte[] videoBytes = remotionRenderClient.downloadOutput(status.outputUrl());
+                String storageKey = "renders/" + renderId + ".mp4";
+                storageService.save(videoBytes, storageKey);
+                servedUrl = "/api/renders/" + renderId + "/file";
+                log.info("[Orchestrator] Rendered video stored — key: {}, {} bytes",
+                        storageKey, videoBytes.length);
+            } catch (Exception ingestEx) {
+                // Non-fatal: fall back to Remotion's own output URL so the render
+                // isn't lost if ingestion hiccups. The video still exists on Remotion.
+                log.warn("[Orchestrator] Could not ingest rendered video into storage " +
+                        "(falling back to Remotion URL) — {}", ingestEx.getMessage(), ingestEx);
+            }
+
             // Mark complete
-            renderJobService.markComplete(renderJob.getId(), status.outputUrl());
-            renderProgressService.broadcast(projectId, RenderStatus.COMPLETE, 1.0, status.outputUrl());
-            log.info("[Orchestrator] Render complete for project {} — output: {}", projectId, status.outputUrl());
+            renderJobService.markComplete(renderJob.getId(), servedUrl);
+            renderProgressService.broadcast(projectId, RenderStatus.COMPLETE, 1.0, servedUrl);
+            log.info("[Orchestrator] Render complete for project {} — output: {}", projectId, servedUrl);
 
         } catch (RemotionRenderClient.RenderFailedException e) {
             log.error("[Orchestrator] Render failed for project {}", projectId, e);
