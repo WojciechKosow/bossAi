@@ -89,9 +89,13 @@ public class WebClientConfig {
      */
     @Bean
     public WebClient.Builder webClientBuilder() {
+        // 256MB ceiling: this builder also backs the Remotion client, which
+        // downloads the fully rendered MP4 into memory before handing it to
+        // storage. It's a cap, not a pre-allocation — small JSON responses
+        // (audio-analysis, render status) are unaffected.
         return WebClient.builder()
                 .exchangeStrategies(ExchangeStrategies.builder()
-                        .codecs(cfg -> cfg.defaultCodecs().maxInMemorySize(16 * 1024 * 1024))
+                        .codecs(cfg -> cfg.defaultCodecs().maxInMemorySize(256 * 1024 * 1024))
                         .build());
     }
 
