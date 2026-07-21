@@ -12,6 +12,7 @@ import com.BossAi.bossAi.entity.*;
 import com.BossAi.bossAi.service.EdlService;
 import com.BossAi.bossAi.service.ProjectAssetService;
 import com.BossAi.bossAi.service.RenderJobService;
+import com.BossAi.bossAi.service.StorageService;
 import com.BossAi.bossAi.service.VideoProjectService;
 import com.BossAi.bossAi.service.generation.GenerationContext;
 import com.BossAi.bossAi.service.generation.context.SceneAsset;
@@ -57,6 +58,37 @@ public class AssetBridgeService {
     private final EdlService edlService;
     private final RenderJobService renderJobService;
     private final ObjectMapper objectMapper;
+    private final StorageService storageService;
+
+    /**
+     * Normalizes a ProjectAsset location to a storage KEY.
+     *
+     * The old pipeline hands us local temp-file paths for freshly generated
+     * scene clips, voice and music (e.g. C:\tmp\…\scene_00.mp4). Those only
+     * worked when storage was local disk. To make them backend-agnostic (R2),
+     * a value that points to a real local file is ingested into storage under
+     * {@code key} and the key is returned; anything else (already a storage
+     * key, or a null) is passed through unchanged.
+     */
+    private String ensureStored(String pathOrKey, String key) {
+        if (pathOrKey == null || pathOrKey.isBlank()) {
+            return pathOrKey;
+        }
+        try {
+            java.nio.file.Path p = java.nio.file.Paths.get(pathOrKey);
+            if (java.nio.file.Files.isRegularFile(p)) {
+                byte[] bytes = java.nio.file.Files.readAllBytes(p);
+                storageService.save(bytes, key);
+                log.info("[AssetBridge] Ingested local file into storage — {} → {} ({} bytes)",
+                        pathOrKey, key, bytes.length);
+                return key;
+            }
+        } catch (Exception e) {
+            // Not a readable local path — treat as an already-stored key.
+            log.debug("[AssetBridge] ensureStored passthrough for '{}': {}", pathOrKey, e.getMessage());
+        }
+        return pathOrKey;
+    }
 
     /**
      * Tworzy VideoProject i rejestruje wszystkie assety z GenerationContext.
@@ -94,9 +126,14 @@ public class AssetBridgeService {
                         "video/mp4",
                         scene.getIndex()
                 );
+                String sceneSource = scene.getVideoUrl() != null
+                        ? scene.getVideoUrl() : scene.getVideoLocalPath();
+                String sceneKey = ensureStored(sceneSource,
+                        "projects/" + projectId + "/scenes/scene_"
+                                + String.format("%02d", scene.getIndex()) + ".mp4");
                 projectAssetService.markReady(
                         asset.getId(),
-                        scene.getVideoUrl() != null ? scene.getVideoUrl() : scene.getVideoLocalPath(),
+                        sceneKey,
                         null,
                         scene.getDurationMs() / 1000.0,
                         1080, 1920
@@ -143,7 +180,8 @@ public class AssetBridgeService {
                 );
                 projectAssetService.markReady(
                         concatAsset.getId(),
-                        context.getVoiceLocalPath(),
+                        ensureStored(context.getVoiceLocalPath(),
+                                "projects/" + projectId + "/voice_concat.mp3"),
                         null, null, null, null
                 );
                 log.info("[AssetBridge] Registered concatenated voice as AI_GENERATED → id={}", concatAsset.getId());
@@ -159,7 +197,8 @@ public class AssetBridgeService {
             );
             projectAssetService.markReady(
                     voiceAsset.getId(),
-                    context.getVoiceLocalPath(),
+                    ensureStored(context.getVoiceLocalPath(),
+                            "projects/" + projectId + "/voice.mp3"),
                     null, null, null, null
             );
         }
@@ -175,7 +214,8 @@ public class AssetBridgeService {
             );
             projectAssetService.markReady(
                     musicAsset.getId(),
-                    context.getMusicLocalPath(),
+                    ensureStored(context.getMusicLocalPath(),
+                            "projects/" + projectId + "/music.mp3"),
                     null, null, null, null
             );
         }

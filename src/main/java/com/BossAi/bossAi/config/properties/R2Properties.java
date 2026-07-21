@@ -42,12 +42,30 @@ public class R2Properties {
     private long presignTtlMinutes = 60;
 
     /**
-     * Effective endpoint: explicit override if set, otherwise derived from accountId.
+     * Effective endpoint, normalized to {@code scheme://host[:port]} only.
+     *
+     * Any path is stripped — a common mistake is pasting the "S3 API" value
+     * with the bucket appended (…cloudflarestorage.com/my-bucket). The AWS SDK
+     * ignores that path, but the presigner would otherwise concatenate it and
+     * emit …/my-bucket/my-bucket/key, breaking the signature. Stripping here
+     * keeps the SDK and the presigner in agreement.
      */
     public String resolveEndpoint() {
-        if (endpoint != null && !endpoint.isBlank()) {
-            return endpoint;
+        String ep = (endpoint != null && !endpoint.isBlank())
+                ? endpoint.trim()
+                : "https://" + accountId + ".r2.cloudflarestorage.com";
+        try {
+            java.net.URI u = java.net.URI.create(ep);
+            if (u.getHost() == null) {
+                return ep;
+            }
+            String base = (u.getScheme() != null ? u.getScheme() : "https") + "://" + u.getHost();
+            if (u.getPort() != -1) {
+                base += ":" + u.getPort();
+            }
+            return base;
+        } catch (Exception e) {
+            return ep;
         }
-        return "https://" + accountId + ".r2.cloudflarestorage.com";
     }
 }

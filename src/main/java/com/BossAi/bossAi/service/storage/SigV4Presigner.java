@@ -50,13 +50,20 @@ public final class SigV4Presigner {
      */
     public static String presignGet(String endpoint, String region, String accessKey,
                                     String secretKey, String bucket, String key, Duration ttl) {
+        return presignGet(endpoint, region, accessKey, secretKey, bucket, key, ttl,
+                ZonedDateTime.now(ZoneOffset.UTC));
+    }
+
+    /** Testable variant with an injectable signing timestamp. */
+    static String presignGet(String endpoint, String region, String accessKey,
+                             String secretKey, String bucket, String key, Duration ttl,
+                             ZonedDateTime now) {
         URI uri = URI.create(endpoint);
         String host = uri.getHost();
         if (uri.getPort() != -1) {
             host = host + ":" + uri.getPort();
         }
 
-        ZonedDateTime now = ZonedDateTime.now(ZoneOffset.UTC);
         String amzDate = AMZ_DATE.format(now);
         String dateStamp = DATE_STAMP.format(now);
         String credentialScope = dateStamp + "/" + region + "/" + SERVICE + "/" + AWS4_REQUEST;
