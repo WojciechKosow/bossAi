@@ -14,6 +14,7 @@ import software.amazon.awssdk.services.s3.model.GetObjectRequest;
 import software.amazon.awssdk.services.s3.model.GetObjectResponse;
 import software.amazon.awssdk.services.s3.model.NoSuchKeyException;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
+import software.amazon.awssdk.services.s3.model.S3Exception;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -37,6 +38,18 @@ public class R2StorageService implements StorageService {
     private final S3Client s3;
     private final R2Properties props;
 
+    @jakarta.annotation.PostConstruct
+    void logConfig() {
+        String ak = props.getAccessKey();
+        log.info("[R2Storage] Active — endpoint={}, region={}, bucket={}, accessKeyId={}…({} chars), secret={}",
+                props.resolveEndpoint(),
+                props.getRegion(),
+                props.getBucket(),
+                ak == null ? "<null>" : ak.substring(0, Math.min(4, ak.length())),
+                ak == null ? 0 : ak.length(),
+                props.getSecretKey() == null || props.getSecretKey().isBlank() ? "<MISSING>" : "present");
+    }
+
     @Override
     public void save(byte[] data, String key) {
         try {
@@ -48,9 +61,25 @@ public class R2StorageService implements StorageService {
                             .build(),
                     RequestBody.fromBytes(data));
             log.debug("[R2Storage] Saved {} ({} bytes)", key, data.length);
+        } catch (S3Exception e) {
+            throw new RuntimeException("R2 save failed for key: " + key + " — " + describe(e), e);
         } catch (Exception e) {
-            throw new RuntimeException("R2 save failed for key: " + key, e);
+            throw new RuntimeException("R2 save failed for key: " + key + " — " + e.getMessage(), e);
         }
+    }
+
+    /**
+     * Extracts the actionable bits from an S3/R2 error: HTTP status + AWS error
+     * code + message (e.g. "403 InvalidAccessKeyId", "404 NoSuchBucket",
+     * "403 SignatureDoesNotMatch"). Makes misconfiguration obvious in the logs.
+     */
+    private static String describe(S3Exception e) {
+        var d = e.awsErrorDetails();
+        int status = e.statusCode();
+        if (d != null) {
+            return status + " " + d.errorCode() + ": " + d.errorMessage();
+        }
+        return status + " " + e.getMessage();
     }
 
     @Override
@@ -60,8 +89,10 @@ public class R2StorageService implements StorageService {
                     .bucket(props.getBucket())
                     .key(key)
                     .build());
+        } catch (S3Exception e) {
+            throw new RuntimeException("R2 delete failed for key: " + key + " — " + describe(e), e);
         } catch (Exception e) {
-            throw new RuntimeException("R2 delete failed for key: " + key, e);
+            throw new RuntimeException("R2 delete failed for key: " + key + " — " + e.getMessage(), e);
         }
     }
 
@@ -76,8 +107,10 @@ public class R2StorageService implements StorageService {
             return bytes.asByteArray();
         } catch (NoSuchKeyException e) {
             throw new RuntimeException("R2 object not found: " + key, e);
+        } catch (S3Exception e) {
+            throw new RuntimeException("R2 load failed for key: " + key + " — " + describe(e), e);
         } catch (Exception e) {
-            throw new RuntimeException("R2 load failed for key: " + key, e);
+            throw new RuntimeException("R2 load failed for key: " + key + " — " + e.getMessage(), e);
         }
     }
 
