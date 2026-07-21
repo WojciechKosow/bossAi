@@ -17,9 +17,10 @@ import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths;
+import java.time.Duration;
 import java.util.List;
 import java.util.UUID;
 
@@ -66,6 +67,17 @@ public class AssetController {
 
         if (asset.isEmpty()) {
             return ResponseEntity.notFound().build();
+        }
+
+        // Remote backend (R2): 302 to a short-lived presigned URL so bytes stream
+        // straight from storage/CDN instead of through the JVM. Local backend
+        // returns null here and we fall through to on-disk streaming below.
+        String presigned = storageService.presignedUrl(
+                asset.get().getStorageKey(), Duration.ofMinutes(30));
+        if (presigned != null) {
+            return ResponseEntity.status(HttpStatus.FOUND)
+                    .location(URI.create(presigned))
+                    .build();
         }
 
         // Resolve through StorageService so the configured storage root

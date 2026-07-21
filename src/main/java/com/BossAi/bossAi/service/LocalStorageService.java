@@ -1,15 +1,20 @@
 package com.BossAi.bossAi.service;
 
 import lombok.RequiredArgsConstructor;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.ArrayList;
 
+/**
+ * Local-disk storage backend. Active by default; disabled when
+ * {@code storage.provider=r2} selects the Cloudflare R2 backend instead.
+ */
 @Service
 @RequiredArgsConstructor
+@ConditionalOnProperty(name = "storage.provider", havingValue = "local", matchIfMissing = true)
 public class LocalStorageService implements StorageService {
 
     private final Path root = Paths.get("data/assets");

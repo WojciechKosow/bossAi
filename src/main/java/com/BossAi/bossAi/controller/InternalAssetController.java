@@ -10,12 +10,15 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.UrlResource;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -50,6 +53,14 @@ public class InternalAssetController {
             if (asset.getStorageUrl() == null) {
                 log.warn("[InternalAsset] Asset {} has no storage URL", assetId);
                 return ResponseEntity.notFound().build();
+            }
+
+            // Remote backend (R2): redirect Remotion straight to a presigned URL.
+            // Chromium (Remotion's <Video>) follows the 302 and issues Range
+            // requests against R2. Local backend returns null → stream from disk.
+            String presigned = storageService.presignedUrl(asset.getStorageUrl(), Duration.ofHours(1));
+            if (presigned != null) {
+                return ResponseEntity.status(HttpStatus.FOUND).location(URI.create(presigned)).build();
             }
 
             Path filePath = storageService.resolvePath(asset.getStorageUrl());
@@ -117,6 +128,12 @@ public class InternalAssetController {
             if (asset.getStorageKey() == null) {
                 log.warn("[InternalAsset] Raw asset {} has no storageKey", assetId);
                 return ResponseEntity.notFound().build();
+            }
+
+            // Remote backend (R2): redirect to a presigned URL (see getAssetFile).
+            String presigned = storageService.presignedUrl(asset.getStorageKey(), Duration.ofHours(1));
+            if (presigned != null) {
+                return ResponseEntity.status(HttpStatus.FOUND).location(URI.create(presigned)).build();
             }
 
             Path filePath = storageService.resolvePath(asset.getStorageKey());
