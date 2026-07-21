@@ -31,6 +31,7 @@
 		<spring-ai.version>1.0.0</spring-ai.version>
 		<jjwt.version>0.11.5</jjwt.version>
 		<resilience4j.version>2.2.0</resilience4j.version>
+		<awssdk.version>2.31.6</awssdk.version>
 	</properties>
 
 	<dependencyManagement>
@@ -39,6 +40,13 @@
 				<groupId>org.springframework.ai</groupId>
 				<artifactId>spring-ai-bom</artifactId>
 				<version>${spring-ai.version}</version>
+				<type>pom</type>
+				<scope>import</scope>
+			</dependency>
+			<dependency>
+				<groupId>software.amazon.awssdk</groupId>
+				<artifactId>bom</artifactId>
+				<version>${awssdk.version}</version>
 				<type>pom</type>
 				<scope>import</scope>
 			</dependency>
@@ -166,6 +174,22 @@
 			<groupId>com.stripe</groupId>
 			<artifactId>stripe-java</artifactId>
 			<version>33.1.1</version>
+		</dependency>
+
+		<!-- Cloudflare R2 object storage (S3-compatible API). Presigned GET URLs
+		     are generated in-house (SigV4, JDK crypto) so we don't pull the
+		     s3-presigner module. -->
+		<dependency>
+			<groupId>software.amazon.awssdk</groupId>
+			<artifactId>s3</artifactId>
+			<version>${awssdk.version}</version>
+		</dependency>
+		<!-- Lightweight sync HTTP client — avoids pulling Netty and clashing
+		     with the WebFlux reactor-netty already on the classpath. -->
+		<dependency>
+			<groupId>software.amazon.awssdk</groupId>
+			<artifactId>url-connection-client</artifactId>
+			<version>${awssdk.version}</version>
 		</dependency>
 
 	</dependencies>
