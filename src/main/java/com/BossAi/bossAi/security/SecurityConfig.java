@@ -34,13 +34,6 @@ public class SecurityConfig {
     private final CustomOAuth2UserService customOAuth2UserService;
     private final BetaConfig betaConfig;
 
-    // Comma-separated allowed CORS origins. Set app.cors.allowed-origins
-    // (env APP_CORS_ALLOWED_ORIGINS) to your production frontend origin(s) —
-    // EXACT origins, no trailing slash and no path, e.g.
-    //   https://app.example.com,https://www.example.com
-//    @org.springframework.beans.factory.annotation.Value(
-//            "${app.cors.allowed-origins:http://localhost:5173,http://localhost:1420}")
-//    private java.util.List<String> allowedOrigins;
 
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
