@@ -141,9 +141,10 @@ public class UserServiceImpl implements UserService {
         user.setLockUntil(null);
         userRepository.save(user);
 
-        if (!user.isEnabled()) {
-            throw new RuntimeException("Invalid password or email");
-        }
+        user.setEnabled(true);
+//        if (!user.isEnabled()) {
+//            throw new RuntimeException("Invalid password or email");
+//        }
 
         String accessToken = jwtProvider.generateToken(user.getEmail());
         String refreshToken = refreshTokenService.createRefreshToken(user, request.isRememberMe());
