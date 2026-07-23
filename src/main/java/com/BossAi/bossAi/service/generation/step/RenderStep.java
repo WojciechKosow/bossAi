@@ -289,8 +289,16 @@ public class RenderStep implements GenerationStep {
     ) throws Exception {
         FfmpegProperties.Output cfg = ffmpegProperties.getOutput();
         // Music is optional — never let a corrupt/unreadable track fail the whole
-        // render. Validate it decodes; if not, render without music.
+        // render. Validate it decodes; if not, drop it from the ENTIRE pipeline
+        // (context), not just this ffmpeg pass, so the AssetBridge and the
+        // downstream Remotion EDL don't reference a track that would stall the
+        // render trying to download it.
         boolean hasMusic = isDecodableAudio(context.getMusicLocalPath());
+        if (!hasMusic && context.getMusicLocalPath() != null) {
+            log.warn("[RenderStep] Undecodable music dropped from pipeline (ffmpeg + Remotion): {}",
+                    context.getMusicLocalPath());
+            context.setMusicLocalPath(null);
+        }
         boolean hasOverlays = hasOverlays(context);
 
         List<SubtitleService.WordTiming> wordTimings;
