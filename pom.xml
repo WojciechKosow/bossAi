@@ -184,11 +184,13 @@
 			<artifactId>s3</artifactId>
 			<version>${awssdk.version}</version>
 		</dependency>
-		<!-- Lightweight sync HTTP client — avoids pulling Netty and clashing
-		     with the WebFlux reactor-netty already on the classpath. -->
+		<!-- Apache sync HTTP client for the S3/R2 client: reliable for large
+		     PUTs (rendered MP4s) and supports real connect/socket timeouts, so
+		     an upload can never hang the render thread. Separate from the
+		     WebFlux reactor-netty stack — no conflict. -->
 		<dependency>
 			<groupId>software.amazon.awssdk</groupId>
-			<artifactId>url-connection-client</artifactId>
+			<artifactId>apache-client</artifactId>
 			<version>${awssdk.version}</version>
 		</dependency>
 
