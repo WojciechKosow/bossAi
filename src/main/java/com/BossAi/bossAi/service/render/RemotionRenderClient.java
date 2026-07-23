@@ -24,11 +24,21 @@ public class RemotionRenderClient {
     public RemotionRenderClient(RemotionRendererProperties properties, WebClient.Builder builder, ObjectMapper objectMapper) {
         this.properties = properties;
         this.objectMapper = objectMapper;
+
+        // Tolerate a base URL configured without a scheme (e.g. a bare Railway
+        // internal host "svc.railway.internal:3000"). reactor-netty otherwise
+        // fails with a cryptic "Host is not specified". A missing port is still
+        // on the operator to supply — we can't guess it.
+        String baseUrl = properties.getBaseUrl();
+        if (baseUrl != null && !baseUrl.isBlank() && !baseUrl.matches("(?i)^https?://.*")) {
+            baseUrl = "http://" + baseUrl.trim();
+        }
+
         this.webClient = builder
-                .baseUrl(properties.getBaseUrl())
+                .baseUrl(baseUrl)
                 .build();
 
-        log.info("[RemotionRenderClient] Initialized — baseUrl: {}", properties.getBaseUrl());
+        log.info("[RemotionRenderClient] Initialized — baseUrl: {}", baseUrl);
     }
 
     /**
