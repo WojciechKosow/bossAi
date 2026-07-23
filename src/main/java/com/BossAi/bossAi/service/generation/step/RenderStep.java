@@ -249,7 +249,7 @@ public class RenderStep implements GenerationStep {
 
         Path filterScript = workDir.resolve("transition_filter.txt");
         Files.writeString(filterScript, fc.toString());
-        cmd.addAll(List.of("-/filter_complex", filterScript.toString()));
+        cmd.addAll(List.of("-filter_complex_script", filterScript.toString()));
         cmd.addAll(List.of("-map", "[vout]", "-an"));
         cmd.addAll(List.of("-c:v", "libx264", "-preset", "ultrafast", "-crf", "20", "-pix_fmt", "yuv420p"));
 
@@ -355,7 +355,7 @@ public class RenderStep implements GenerationStep {
         Path filterScript = workDir.resolve("filter_complex.txt");
         Files.writeString(filterScript, filterComplex);
 
-        cmd.addAll(List.of("-/filter_complex", filterScript.toString())); // ← tylko raz
+        cmd.addAll(List.of("-filter_complex_script", filterScript.toString())); // ← tylko raz
         cmd.addAll(List.of("-map", "[vout]"));                             // ← tylko raz
         cmd.addAll(List.of("-map", hasMusic ? "[audio]" : "1:a"));        // ← tylko raz
 
