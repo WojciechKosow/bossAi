@@ -66,6 +66,7 @@ public class VideoProductionOrchestrator {
     private final OverlayPlacementEngine overlayPlacementEngine;
     private final ObjectMapper objectMapper;
     private final com.BossAi.bossAi.service.StorageService storageService;
+    private final com.BossAi.bossAi.repository.GenerationRepository generationRepository;
 
     /**
      * Uruchamia pelny przepływ produkcji wideo dla istniejacego projektu.
@@ -153,7 +154,7 @@ public class VideoProductionOrchestrator {
             EdlDto renderEdl = edlGeneratorService.buildRenderEdl(edl, projectAssets);
 
             // 11. Renderuj przez Remotion
-            renderViaRemotion(projectId, edlEntity, renderEdl);
+            renderViaRemotion(projectId, context.getGenerationId(), edlEntity, renderEdl);
 
         } catch (Exception e) {
             log.error("[Orchestrator] Video production failed for project {}", projectId, e);
@@ -172,7 +173,9 @@ public class VideoProductionOrchestrator {
             EditDecisionListEntity edlEntity = edlService.getCurrentEdl(projectId);
             EdlDto edl = objectMapper.readValue(edlEntity.getEdlJson(), EdlDto.class);
 
-            renderViaRemotion(projectId, edlEntity, edl);
+            // Timeline re-render (user edited the EDL) — updates the project's
+            // RenderJob; no originating Generation to repoint here.
+            renderViaRemotion(projectId, null, edlEntity, edl);
         } catch (Exception e) {
             log.error("[Orchestrator] Render failed for project {}", projectId, e);
             videoProjectService.updateStatus(projectId, ProjectStatus.FAILED);
@@ -469,7 +472,7 @@ public class VideoProductionOrchestrator {
     }
 
     @SuppressWarnings("unchecked")
-    private void renderViaRemotion(UUID projectId, EditDecisionListEntity edlEntity, EdlDto edl) {
+    private void renderViaRemotion(UUID projectId, UUID generationId, EditDecisionListEntity edlEntity, EdlDto edl) {
         // Utworz RenderJob
         RenderJob renderJob = renderJobService.createRenderJob(projectId, edlEntity, "high");
         String renderId = renderJob.getId().toString();
@@ -513,11 +516,13 @@ public class VideoProductionOrchestrator {
             // unchanged — we only relocate them. Served back via the UUID-keyed
             // /api/renders/{renderId}/file route (presigned-redirect on R2).
             String servedUrl = status.outputUrl();
+            boolean ingested = false;
             try {
                 byte[] videoBytes = remotionRenderClient.downloadOutput(status.outputUrl());
                 String storageKey = "renders/" + renderId + ".mp4";
                 storageService.save(videoBytes, storageKey);
                 servedUrl = "/api/renders/" + renderId + "/file";
+                ingested = true;
                 log.info("[Orchestrator] Rendered video stored — key: {}, {} bytes",
                         storageKey, videoBytes.length);
             } catch (Exception ingestEx) {
@@ -531,6 +536,15 @@ public class VideoProductionOrchestrator {
             renderJobService.markComplete(renderJob.getId(), servedUrl);
             renderProgressService.broadcast(projectId, RenderStatus.COMPLETE, 1.0, servedUrl);
             log.info("[Orchestrator] Render complete for project {} — output: {}", projectId, servedUrl);
+
+            // Promote the Remotion render to the Generation's final video. The
+            // legacy ffmpeg pass already set Generation.videoUrl to its baseline
+            // mp4; once Remotion produces the real cut and we've stored it, that
+            // becomes the video the user gets. Only when ingestion succeeded —
+            // never overwrite the working ffmpeg URL with an unreachable one.
+            if (ingested && generationId != null) {
+                updateGenerationVideoUrl(generationId, servedUrl);
+            }
 
         } catch (RemotionRenderClient.RenderFailedException e) {
             log.error("[Orchestrator] Render failed for project {}", projectId, e);
@@ -546,6 +560,24 @@ public class VideoProductionOrchestrator {
             log.error("[Orchestrator] Unexpected error during render for project {}", projectId, e);
             renderJobService.markFailed(renderJob.getId());
             renderProgressService.broadcast(projectId, RenderStatus.FAILED, 0.0, null);
+        }
+    }
+
+    /**
+     * Points the Generation's final video at the Remotion render (stored in R2).
+     * Best-effort on the async render thread — save() commits on its own; a
+     * failure here must not fail the render, which already completed.
+     */
+    private void updateGenerationVideoUrl(UUID generationId, String videoUrl) {
+        try {
+            generationRepository.findById(generationId).ifPresent(gen -> {
+                gen.setVideoUrl(videoUrl);
+                generationRepository.save(gen);
+                log.info("[Orchestrator] Generation {} final video → {}", generationId, videoUrl);
+            });
+        } catch (Exception e) {
+            log.warn("[Orchestrator] Could not update Generation {} videoUrl — {}",
+                    generationId, e.getMessage());
         }
     }
 }
