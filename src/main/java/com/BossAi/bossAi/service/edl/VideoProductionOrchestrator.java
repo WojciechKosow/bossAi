@@ -487,6 +487,14 @@ public class VideoProductionOrchestrator {
                 if (meta.getFps() <= 0) meta.setFps(30);
             }
 
+            // Point Remotion at direct presigned R2 URLs so it pulls assets
+            // straight from Cloudflare's CDN instead of round-tripping through
+            // Spring's /internal callback (the public Railway loopback stalls
+            // intermittently — "server sent no data for 20 seconds"). No-op on
+            // local storage. Only the ephemeral render EDL is mutated; the saved
+            // timeline EDL keeps its stable /internal URLs.
+            rewriteAssetUrlsToDirectR2(edl);
+
             Map<String, Object> edlMap = objectMapper.convertValue(edl, Map.class);
             RemotionRenderRequest request = RemotionRenderRequest.builder()
                     .renderId(renderId)
@@ -560,6 +568,42 @@ public class VideoProductionOrchestrator {
             log.error("[Orchestrator] Unexpected error during render for project {}", projectId, e);
             renderJobService.markFailed(renderJob.getId());
             renderProgressService.broadcast(projectId, RenderStatus.FAILED, 0.0, null);
+        }
+    }
+
+    /**
+     * Rewrites the render EDL's asset URLs to direct presigned R2 URLs so
+     * Remotion fetches assets straight from Cloudflare instead of through
+     * Spring's /internal callback. No-op when storage can't presign (local
+     * backend → keeps the callback URLs, which work locally).
+     */
+    private void rewriteAssetUrlsToDirectR2(EdlDto edl) {
+        if (edl == null) return;
+        if (edl.getSegments() != null) {
+            for (var seg : edl.getSegments()) {
+                String direct = presignedForAsset(seg.getAssetId());
+                if (direct != null) seg.setAssetUrl(direct);
+            }
+        }
+        if (edl.getAudioTracks() != null) {
+            for (var track : edl.getAudioTracks()) {
+                String direct = presignedForAsset(track.getAssetId());
+                if (direct != null) track.setAssetUrl(direct);
+            }
+        }
+    }
+
+    /** Presigned R2 URL for a ProjectAsset id, or null (unknown asset / local backend). */
+    private String presignedForAsset(String assetId) {
+        if (assetId == null || assetId.isBlank()) return null;
+        try {
+            ProjectAsset asset = projectAssetService.getAsset(UUID.fromString(assetId));
+            String key = asset.getStorageUrl();
+            if (key == null || key.isBlank()) return null;
+            return storageService.presignedUrl(key, java.time.Duration.ofHours(2));
+        } catch (Exception e) {
+            log.debug("[Orchestrator] Direct-R2 presign skipped for asset {} — {}", assetId, e.getMessage());
+            return null;
         }
     }
 
