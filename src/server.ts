@@ -147,6 +147,16 @@ async function startRender(
     serveUrl: bundled,
     codec: "h264",
     outputLocation: outputPath,
+    // Assets (scene videos) are fetched over the network during render via
+    // OffthreadVideo/getVideoMetadata, which delayRender() while loading. The
+    // default 30s per-frame timeout is too tight over Railway's network and
+    // fails intermittently ("Timeout exceeded rendering the component at frame
+    // N"). Give asset loading room to breathe.
+    timeoutInMilliseconds: 120000,
+    // Lower concurrency: the render container is modestly sized, and fewer
+    // parallel Chromium tabs means each frame's asset fetch/decode isn't
+    // starved (which is what pushed frames past the timeout).
+    concurrency: 2,
     onProgress: ({ progress }) => {
       job.progress = 0.2 + progress * 0.8; // Rendering is 20-100%
     },
