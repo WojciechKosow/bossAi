@@ -100,7 +100,11 @@ async function startRender(
   const job = renderJobs.get(renderId)!;
   job.status = "rendering";
 
-  const entryPoint = path.resolve(__dirname, "index.tsx");
+  // Resolve the Remotion entry from the SOURCE tree, not next to the running
+  // file. In dev (ts-node) __dirname is src/, but in the built image the server
+  // runs from dist/ where only index.js exists — the bundler needs the .tsx
+  // source at src/index.tsx. "../src/index.tsx" resolves correctly in both.
+  const entryPoint = path.resolve(__dirname, "..", "src", "index.tsx");
 
   // Bundle the Remotion project
   console.log(`[${renderId}] Bundling...`);
