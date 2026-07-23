@@ -22,11 +22,19 @@ public class AudioAnalysisClient {
     private final WebClient webClient;
 
     public AudioAnalysisClient(AudioAnalysisProperties properties, WebClient.Builder builder) {
+        // Tolerate a base URL configured without a scheme (e.g. a bare Railway
+        // internal host "svc.railway.internal:8000"); reactor-netty otherwise
+        // fails with "Host is not specified". A missing port stays on the operator.
+        String baseUrl = properties.getBaseUrl();
+        if (baseUrl != null && !baseUrl.isBlank() && !baseUrl.matches("(?i)^https?://.*")) {
+            baseUrl = "http://" + baseUrl.trim();
+        }
+
         this.webClient = builder
-                .baseUrl(properties.getBaseUrl())
+                .baseUrl(baseUrl)
                 .build();
 
-        log.info("[AudioAnalysisClient] Initialized — baseUrl: {}", properties.getBaseUrl());
+        log.info("[AudioAnalysisClient] Initialized — baseUrl: {}", baseUrl);
     }
 
     /**
