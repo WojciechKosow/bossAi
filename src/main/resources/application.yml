@@ -1,0 +1,16 @@
+# Non-secret defaults, safe to check in (application.properties holds the
+# per-environment secrets — DB creds, jwt.secret, OAuth client id/secret —
+# and is gitignored).
+
+server:
+  # Railway (and most PaaS reverse proxies) terminate TLS at the edge and
+  # forward plain HTTP to the container, attaching X-Forwarded-* headers.
+  # Without this, Spring builds absolute URLs (including the OAuth2
+  # redirect_uri sent to Google) from the internal request, i.e.
+  # http://localhost:8080 instead of the public https:// origin.
+  forward-headers-strategy: framework
+
+app:
+  # Base URL of the deployed frontend, used to redirect back after OAuth2
+  # login. Override with FRONTEND_URL in production.
+  frontend-url: ${FRONTEND_URL:http://localhost:5173}
