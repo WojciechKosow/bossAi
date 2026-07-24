@@ -17,6 +17,7 @@ import { useNavigate, Link } from "react-router-dom";
 import { AxiosError } from "axios";
 import { Loader2 } from "lucide-react";
 import { GoogleLoginButton } from "./GoogleLoginButton";
+import { GOOGLE_LOGIN_ENABLED } from "@/lib/featureFlags";
 
 export const RegisterForm = () => {
   const navigate = useNavigate();
@@ -182,14 +183,16 @@ export const RegisterForm = () => {
           )}
         />
 
-        <div className="space-y-4">
-          <GoogleLoginButton />
-          <div className="flex items-center gap-2">
-            <div className="h-px flex-1 bg-gray-200" />
-            <span className="text-xs text-gray-400">OR</span>
-            <div className="h-px flex-1 bg-gray-200" />
+        {GOOGLE_LOGIN_ENABLED && (
+          <div className="space-y-4">
+            <GoogleLoginButton />
+            <div className="flex items-center gap-2">
+              <div className="h-px flex-1 bg-gray-200" />
+              <span className="text-xs text-gray-400">OR</span>
+              <div className="h-px flex-1 bg-gray-200" />
+            </div>
           </div>
-        </div>
+        )}
 
         <Button
           type="submit"

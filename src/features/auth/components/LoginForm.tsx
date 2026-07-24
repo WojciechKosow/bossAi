@@ -19,6 +19,7 @@ import { AxiosError } from "axios";
 import { useAuth } from "../context/AuthContext";
 import { GoogleLoginButton } from "./GoogleLoginButton";
 import { BETA_MODE } from "@/lib/betaMode";
+import { GOOGLE_LOGIN_ENABLED } from "@/lib/featureFlags";
 
 export const LoginForm = () => {
   const navigate = useNavigate();
@@ -142,7 +143,7 @@ export const LoginForm = () => {
           </button>
         </div>
 
-        {!BETA_MODE && (
+        {GOOGLE_LOGIN_ENABLED && !BETA_MODE && (
           <div className="space-y-4">
             <GoogleLoginButton />
             <div className="flex items-center gap-2">
