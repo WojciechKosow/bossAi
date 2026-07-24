@@ -37,7 +37,7 @@ public class OAuth2SuccessHandler extends SimpleUrlAuthenticationSuccessHandler 
         User user = userRepository.findByEmail(email)
                 .orElseThrow();
 
-        String accessToken = jwtProvider.generateToken(user.getEmail());
+        String accessToken = jwtProvider.generateToken(user.getEmail(), true);
         String refreshToken = refreshTokenService.createRefreshToken(user, true);
 
         ResponseCookie cookie = ResponseCookie.from("refreshToken", refreshToken)
