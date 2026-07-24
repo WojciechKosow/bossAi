@@ -35,6 +35,7 @@ import { Progress } from "@/components/ui/progress";
 import { useToast } from "@/components/ui/toast";
 import type { EdlDto } from "@/features/video/types";
 import { absoluteUrl } from "@/features/video/api";
+import { DownloadLink } from "@/features/video/components/DownloadLink";
 import { cn } from "@/lib/utils";
 import { formatTime } from "@/features/video/components/timeline/timelineUtils";
 import {
@@ -331,14 +332,13 @@ const ProjectEditorPage = () => {
               />
 
               {previewVideoUrl && (
-                <a
-                  href={previewVideoUrl}
-                  download
-                  title="Download last render"
+                <DownloadLink
+                  url={previewVideoUrl}
+                  filename="video.mp4"
                   className="text-xs text-muted-foreground hover:text-foreground inline-flex items-center gap-1.5 transition"
                 >
                   <Download size={12} /> mp4
-                </a>
+                </DownloadLink>
               )}
             </div>
           </div>

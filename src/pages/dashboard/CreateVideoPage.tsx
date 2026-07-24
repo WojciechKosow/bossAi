@@ -20,6 +20,7 @@ import {
   GraduationCap,
 } from "lucide-react";
 import { OrderedAssetZone } from "@/features/video/components/OrderedAssetZone";
+import { DownloadLink } from "@/features/video/components/DownloadLink";
 import {
   useAssets,
   useGenerationProgress,
@@ -814,11 +815,11 @@ const ResultPanel = ({
     </div>
 
     <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
-      <a href={url} download target="_blank" rel="noreferrer">
+      <DownloadLink url={url} filename="video.mp4">
         <Button className="gradient-bg text-white shadow-glow">
           <Download size={16} /> Download
         </Button>
-      </a>
+      </DownloadLink>
       <Button variant="outline" onClick={onCreateAnother}>
         <Sparkles size={16} /> Create another
       </Button>

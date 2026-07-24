@@ -12,6 +12,7 @@ import { motion } from "framer-motion";
 import { absoluteUrl, assetFileUrl, getGeneration } from "@/features/video/api";
 import { useAssets, useProjects, useRenderStatus } from "@/features/video/hooks";
 import { AssetMedia } from "@/features/video/components/AssetMedia";
+import { DownloadLink } from "@/features/video/components/DownloadLink";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { computeItemTitle } from "@/features/video/components/libraryUtils";
@@ -151,13 +152,13 @@ const GenerationPreviewPage = () => {
           {(remotionUrl || videoAsset) && (
             <div className="px-3 py-2 border-t border-border flex items-center justify-between bg-card">
               <span className="text-xs text-muted-foreground">Preview</span>
-              <a
-                href={remotionUrl ?? assetFileUrl(videoAsset!.id)}
-                download
+              <DownloadLink
+                url={remotionUrl ?? assetFileUrl(videoAsset!.id)}
+                filename="video.mp4"
                 className="text-xs text-muted-foreground hover:text-foreground inline-flex items-center gap-1.5 transition"
               >
                 <Download size={12} /> mp4
-              </a>
+              </DownloadLink>
             </div>
           )}
         </div>
