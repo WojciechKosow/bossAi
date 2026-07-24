@@ -1,8 +1,9 @@
 import { Button } from "@/components/ui/button";
+import { baseURL } from "@/lib/axios";
 
 export const GoogleLoginButton = () => {
   const handleLogin = () => {
-    window.location.href = "http://localhost:8080/oauth2/authorization/google";
+    window.location.href = `${baseURL}/oauth2/authorization/google`;
   };
 
   return (
