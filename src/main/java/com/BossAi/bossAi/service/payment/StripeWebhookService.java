@@ -116,7 +116,8 @@ public class StripeWebhookService {
         order.setStripePaymentIntentId(session.getPaymentIntent());
 
         switch (order.getPurpose()) {
-            case TOP_UP -> walletService.topUp(order.getUserId(), order.getCredits());
+            case TOP_UP -> walletService.topUp(order.getUserId(), order.getCredits(),
+                    order.getId(), "stripe_topup");
             case PLAN -> assignPlanService.assignPlan(orderUser(order), order.getPlanType(),
                     order.getStripePaymentIntentId());
             case SUBSCRIPTION -> {

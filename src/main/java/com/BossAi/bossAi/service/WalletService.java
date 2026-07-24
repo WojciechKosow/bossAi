@@ -1,6 +1,11 @@
 package com.BossAi.bossAi.service;
 
+import com.BossAi.bossAi.entity.CreditEntryType;
+import com.BossAi.bossAi.entity.CreditSource;
+import com.BossAi.bossAi.entity.CreditTransaction;
 import com.BossAi.bossAi.entity.UserWallet;
+import com.BossAi.bossAi.repository.CreditTransactionRepository;
+import com.BossAi.bossAi.repository.UserRepository;
 import com.BossAi.bossAi.repository.UserWalletRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -14,8 +19,8 @@ import java.util.UUID;
  * The universal credit wallet. Top-ups land here (e.g. Stripe credit-pack
  * purchases); operations spend from it when plan credits are insufficient.
  *
- * Crediting is deliberately isolated from plan assignment so that a plan
- * purchase/renewal can never touch the wallet balance.
+ * Every top-up appends a TOPUP ledger entry so the wallet balance can be
+ * reconciled from the ledger alone.
  */
 @Slf4j
 @Service
@@ -23,20 +28,16 @@ import java.util.UUID;
 public class WalletService {
 
     private final UserWalletRepository userWalletRepository;
+    private final CreditTransactionRepository creditTransactionRepository;
+    private final UserRepository userRepository;
 
-    /**
-     * Adds credits to a user's wallet, creating it if absent.
-     *
-     * Joins the caller's transaction (REQUIRED). Concurrency is guarded by
-     * UserWallet's @Version: a conflicting write fails the transaction, so a
-     * caller such as the Stripe webhook simply lets Stripe re-deliver and retry.
-     */
+    /** Adds credits to a user's wallet under a row lock, and ledgers the top-up. */
     @Transactional
-    public UserWallet topUp(UUID userId, int credits) {
+    public UserWallet topUp(UUID userId, int credits, UUID referenceId, String reason) {
         if (credits <= 0) {
             throw new IllegalArgumentException("Top-up credits must be positive: " + credits);
         }
-        UserWallet wallet = userWalletRepository.findById(userId)
+        UserWallet wallet = userWalletRepository.findForUpdate(userId)
                 .orElseGet(() -> {
                     UserWallet w = new UserWallet();
                     w.setUserId(userId);
@@ -46,9 +47,25 @@ public class WalletService {
         wallet.setCreditsBalance(wallet.getCreditsBalance() + credits);
         wallet.setUpdatedAt(LocalDateTime.now());
         UserWallet saved = userWalletRepository.save(wallet);
+
+        CreditTransaction ledger = new CreditTransaction();
+        ledger.setUser(userRepository.getReferenceById(userId));
+        ledger.setType(CreditEntryType.TOPUP);
+        ledger.setAmount(credits);
+        ledger.setSource(CreditSource.WALLET);
+        ledger.setReferenceId(referenceId);
+        ledger.setReason(reason);
+        creditTransactionRepository.save(ledger);
+
         log.info("[WalletService] Topped up wallet {} with {} credits → balance {}",
                 userId, credits, saved.getCreditsBalance());
         return saved;
+    }
+
+    /** Convenience for non-purchase grants (no external reference). */
+    @Transactional
+    public UserWallet topUp(UUID userId, int credits) {
+        return topUp(userId, credits, null, "manual_topup");
     }
 
     @Transactional(readOnly = true)

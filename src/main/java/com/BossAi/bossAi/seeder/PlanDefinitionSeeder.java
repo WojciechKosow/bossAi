@@ -35,7 +35,7 @@ public class PlanDefinitionSeeder {
         // time (see AssignPlanService) so FREE is always the active fallback.
         upsert(PlanDefinition.builder()
                 .id(PlanType.FREE)
-                .monthlyCreditsTotal(65)          // 1 full ad
+                .monthlyCreditsTotal(240)         // v0.1
                 .maxConcurrentGenerations(1)
                 .watermark(true)
                 .priorityQueue(false)
@@ -54,7 +54,7 @@ public class PlanDefinitionSeeder {
         // TRIAL — cheap one-time taste, enough for a handful of ads. Watermarked.
         upsert(PlanDefinition.builder()
                 .id(PlanType.TRIAL)
-                .monthlyCreditsTotal(200)         // ~3 full ads
+                .monthlyCreditsTotal(400)         // v0.1
                 .maxConcurrentGenerations(1)
                 .watermark(true)
                 .priorityQueue(false)
@@ -74,7 +74,7 @@ public class PlanDefinitionSeeder {
         // No storage (videos live 24h), no asset reuse.
         upsert(PlanDefinition.builder()
                 .id(PlanType.BASIC)
-                .monthlyCreditsTotal(400)         // ~6 full ads
+                .monthlyCreditsTotal(1200)        // v0.1
                 .maxConcurrentGenerations(2)
                 .watermark(false)
                 .priorityQueue(false)
@@ -94,7 +94,7 @@ public class PlanDefinitionSeeder {
         // Videos retained while the plan is active, plus a 12h post-expiry grace.
         upsert(PlanDefinition.builder()
                 .id(PlanType.PRO)
-                .monthlyCreditsTotal(1000)        // ~15 full ads
+                .monthlyCreditsTotal(4000)        // v0.1
                 .maxConcurrentGenerations(3)
                 .watermark(false)
                 .priorityQueue(true)

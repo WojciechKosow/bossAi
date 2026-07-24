@@ -6,13 +6,12 @@ import com.BossAi.bossAi.repository.*;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
-import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.time.LocalDateTime;
-import java.util.Optional;
+import java.util.List;
 import java.util.UUID;
 
 @Slf4j
@@ -21,170 +20,140 @@ import java.util.UUID;
 public class CreditServiceImpl implements CreditService {
 
     private final UserPlanRepository userPlanRepository;
-    private final OperationCostRepository operationCostRepository;
     private final CreditTransactionRepository creditTransactionRepository;
-    private final GenerationRepository generationRepository;
     private final PlanSelectionService planSelectionService;
     private final UserWalletRepository userWalletRepository;
     private final BetaConfig betaConfig;
 
-    @Override
-    public CreditTransaction reserve(User user, OperationType operationType, UUID referenceId) {
-
-        int attempts = 0;
-
-        while (attempts < 3) {
-            try {
-                return reserveInternal(user, operationType, referenceId);
-            } catch (ObjectOptimisticLockingFailureException e) {
-                attempts++;
-                if (attempts >= 3) {
-                    throw e;
-                }
-            }
-        }
-
-        throw new IllegalStateException("Could not reserve credits.");
-    }
-
+    /**
+     * Deduct-and-charge. Runs inside the CALLER's transaction (the same one that
+     * creates the job) via @Transactional(REQUIRED), so the debit and the job
+     * row commit together or not at all.
+     */
     @Override
     @Transactional
-    public CreditTransaction reserveInternal(User user, OperationType operationType, UUID referenceId) {
+    public CreditTransaction charge(User user, UUID jobId, OperationType op, int cost, String reason) {
 
+        // Idempotency: this job was already charged — never charge twice.
+        if (creditTransactionRepository.existsByReferenceIdAndType(jobId, CreditEntryType.DEBIT)) {
+            log.info("[Credit] Job {} already charged — skipping (idempotent)", jobId);
+            return creditTransactionRepository.findByReferenceIdAndType(jobId, CreditEntryType.DEBIT)
+                    .stream().findFirst().orElse(null);
+        }
+
+        // Beta mode: unlimited, but still write a zero DEBIT for audit symmetry.
         if (betaConfig.isBetaMode()) {
-            log.info("[CreditService] Beta mode — unlimited access, skipping credit check for generation {}", referenceId);
-            CreditTransaction tx = new CreditTransaction();
-            tx.setUser(user);
-            tx.setOperationType(operationType);
-            tx.setAmount(0);
-            tx.setStatus(TransactionStatus.RESERVED);
-            tx.setReferenceId(referenceId);
-            return creditTransactionRepository.save(tx);
+            log.info("[Credit] Beta mode — zero-charge for job {}", jobId);
+            return append(user, jobId, op, 0, null, null, CreditEntryType.DEBIT, reason + " (beta)");
         }
 
-        Generation generation = generationRepository.findById(referenceId)
-                .orElseThrow(() -> new RuntimeException("Generation not found"));
-
-        UserPlan userPlan = generation.getUserPlan();
-
-        OperationCost operation = operationCostRepository.findById(operationType)
-                .orElseThrow(() -> new RuntimeException("Operation not found"));
-
-        if (!operation.isActive()) {
-            throw new IllegalStateException("Operation disabled");
+        // Free actions (e.g. upload = 0): audit-only DEBIT, no balance movement.
+        if (cost <= 0) {
+            return append(user, jobId, op, 0, null, null, CreditEntryType.DEBIT, reason);
         }
 
-        int cost = operation.getCreditsCost();
+        // Lock the plan + wallet rows for the duration of this transaction so two
+        // concurrent jobs can never both pass the balance check.
+        UserPlan planRef = planSelectionService.selectActivePlan(user); // highest active (FREE always present)
+        UserPlan plan = userPlanRepository.findForUpdate(planRef.getId()).orElse(null);
+        UserWallet wallet = userWalletRepository.findForUpdate(user.getId())
+                .orElseGet(() -> newWallet(user.getId()));
 
-        UserWallet wallet = userWalletRepository.findById(user.getId())
-                .orElseGet(() -> {
-                    UserWallet w = new UserWallet();
-                    w.setUserId(user.getId());
-                    w.setCreditsBalance(0);
-                    return w;
-                });
+        int planRemaining = plan == null ? 0 : Math.max(0, plan.getCreditsTotal() - plan.getCreditsUsed());
+        int walletBalance = wallet.getCreditsBalance();
 
-        // Funding order: plan credits first, wallet second. A single transaction
-        // is funded from ONE source (no split) — if the plan can't cover the full
-        // cost, the wallet pays it entirely. Keeps the ledger's `source` unambiguous.
-        CreditSource source;
-        if (userPlan != null && userPlan.isActive() && userPlan.hasEnoughCreditsLeft(cost)) {
-            userPlan.setCreditsUsed(userPlan.getCreditsUsed() + cost);
-            userPlanRepository.save(userPlan);
-            source = CreditSource.PLAN;
-        } else if (wallet.getCreditsBalance() >= cost) {
-            wallet.setCreditsBalance(wallet.getCreditsBalance() - cost);
+        if (planRemaining + walletBalance < cost) {
+            throw new ResponseStatusException(HttpStatus.PAYMENT_REQUIRED, "Not enough credits");
+        }
+
+        // Plan credits first, wallet for any remainder — one atomic operation.
+        int fromPlan = Math.min(planRemaining, cost);
+        int fromWallet = cost - fromPlan;
+
+        CreditTransaction last = null;
+        if (fromPlan > 0) {
+            plan.setCreditsUsed(plan.getCreditsUsed() + fromPlan);
+            userPlanRepository.save(plan);
+            last = append(user, jobId, op, -fromPlan, CreditSource.PLAN, plan.getId(),
+                    CreditEntryType.DEBIT, reason);
+        }
+        if (fromWallet > 0) {
+            wallet.setCreditsBalance(wallet.getCreditsBalance() - fromWallet);
             wallet.setUpdatedAt(LocalDateTime.now());
             userWalletRepository.save(wallet);
-            source = CreditSource.WALLET;
-        } else {
-            throw new ResponseStatusException(
-                    HttpStatus.PAYMENT_REQUIRED,
-                    "Not enough credits for this operation");
+            last = append(user, jobId, op, -fromWallet, CreditSource.WALLET, null,
+                    CreditEntryType.DEBIT, reason);
         }
-
-        CreditTransaction transaction = new CreditTransaction();
-        transaction.setUser(user);
-        transaction.setOperationType(operation.getOperationType());
-        transaction.setAmount(-cost);
-        transaction.setSource(source);
-        transaction.setStatus(TransactionStatus.RESERVED);
-        transaction.setReferenceId(referenceId);
-
-        return creditTransactionRepository.save(transaction);
+        log.info("[Credit] Charged job {} {} credits (plan {}, wallet {})", jobId, cost, fromPlan, fromWallet);
+        return last;
     }
 
     @Override
     @Transactional
-    public void confirm(UUID transactionId) {
-        CreditTransaction transaction = creditTransactionRepository.findById(transactionId)
-                .orElseThrow(() -> new RuntimeException("Transaction not found"));
-
-        if (transaction.getStatus() != TransactionStatus.RESERVED) {
-            throw new RuntimeException("Transaction is done");
-        }
-
-        transaction.setStatus(TransactionStatus.CONFIRMED);
-        creditTransactionRepository.save(transaction);
-    }
-
-    @Override
-    @Transactional
-    public void refund(UUID transactionId) {
-        CreditTransaction transaction = creditTransactionRepository.findById(transactionId)
-                .orElseThrow(() -> new RuntimeException("Transaction not found"));
-
-        if (transaction.getStatus() != TransactionStatus.RESERVED) {
-            throw new RuntimeException("Transaction is done");
-        }
-
-        if (betaConfig.isBetaMode()) {
-            log.info("[CreditService] Beta mode — skipping credit rollback for transaction {}", transactionId);
-            transaction.setStatus(TransactionStatus.REFUNDED);
-            creditTransactionRepository.save(transaction);
+    public void refundJob(UUID jobId, String reason) {
+        // Idempotency: refund a job at most once.
+        if (creditTransactionRepository.existsByReferenceIdAndType(jobId, CreditEntryType.REFUND)) {
+            log.info("[Credit] Job {} already refunded — skipping (idempotent)", jobId);
             return;
         }
 
-        int cost = Math.abs(transaction.getAmount());
-
-        // Return credits to the exact source they were drawn from.
-        if (transaction.getSource() == CreditSource.PLAN) {
-            Generation generation = generationRepository.findById(transaction.getReferenceId())
-                    .orElseThrow(() -> new RuntimeException("Generation not found"));
-            UserPlan userPlan = generation.getUserPlan();
-            if (userPlan != null) {
-                userPlan.setCreditsUsed(Math.max(0, userPlan.getCreditsUsed() - cost));
-                userPlanRepository.save(userPlan);
-            }
-        } else if (transaction.getSource() == CreditSource.WALLET) {
-            UserWallet wallet = userWalletRepository.findById(transaction.getUser().getId())
-                    .orElseGet(() -> {
-                        UserWallet w = new UserWallet();
-                        w.setUserId(transaction.getUser().getId());
-                        w.setCreditsBalance(0);
-                        return w;
-                    });
-            wallet.setCreditsBalance(wallet.getCreditsBalance() + cost);
-            wallet.setUpdatedAt(LocalDateTime.now());
-            userWalletRepository.save(wallet);
+        List<CreditTransaction> debits =
+                creditTransactionRepository.findByReferenceIdAndType(jobId, CreditEntryType.DEBIT);
+        if (debits.isEmpty()) {
+            return; // nothing was charged for this job
         }
 
-        transaction.setStatus(TransactionStatus.REFUNDED);
-        creditTransactionRepository.save(transaction);
+        for (CreditTransaction debit : debits) {
+            int amount = Math.abs(debit.getAmount());
+            if (amount > 0 && debit.getSource() == CreditSource.PLAN && debit.getPlanId() != null) {
+                userPlanRepository.findForUpdate(debit.getPlanId()).ifPresent(plan -> {
+                    plan.setCreditsUsed(Math.max(0, plan.getCreditsUsed() - amount));
+                    userPlanRepository.save(plan);
+                });
+            } else if (amount > 0 && debit.getSource() == CreditSource.WALLET) {
+                UserWallet wallet = userWalletRepository.findForUpdate(debit.getUser().getId())
+                        .orElseGet(() -> newWallet(debit.getUser().getId()));
+                wallet.setCreditsBalance(wallet.getCreditsBalance() + amount);
+                wallet.setUpdatedAt(LocalDateTime.now());
+                userWalletRepository.save(wallet);
+            }
+            // One REFUND row per debit source — reverses that exact bucket.
+            append(debit.getUser(), jobId, debit.getOperationType(), amount,
+                    debit.getSource(), debit.getPlanId(), CreditEntryType.REFUND, reason);
+        }
+        log.info("[Credit] Refunded job {} ({})", jobId, reason);
     }
 
     @Override
     @Transactional(readOnly = true)
     public int getAvailableCredits(User user) {
-        UserPlan userPlan = planSelectionService.selectHighestPlan(user);
-        int planCredits = userPlan == null
-                ? 0
-                : userPlan.getCreditsTotal() - userPlan.getCreditsUsed();
-
+        UserPlan plan = planSelectionService.selectHighestPlan(user);
+        int planCredits = plan == null ? 0 : Math.max(0, plan.getCreditsTotal() - plan.getCreditsUsed());
         int walletCredits = userWalletRepository.findById(user.getId())
                 .map(UserWallet::getCreditsBalance)
                 .orElse(0);
-
         return planCredits + walletCredits;
+    }
+
+    private CreditTransaction append(User user, UUID jobId, OperationType op, int amount,
+                                     CreditSource source, UUID planId,
+                                     CreditEntryType type, String reason) {
+        CreditTransaction tx = new CreditTransaction();
+        tx.setUser(user);
+        tx.setType(type);
+        tx.setOperationType(op);
+        tx.setAmount(amount);
+        tx.setSource(source);
+        tx.setPlanId(planId);
+        tx.setReferenceId(jobId);
+        tx.setReason(reason);
+        return creditTransactionRepository.save(tx);
+    }
+
+    private UserWallet newWallet(UUID userId) {
+        UserWallet w = new UserWallet();
+        w.setUserId(userId);
+        w.setCreditsBalance(0);
+        return w;
     }
 }
