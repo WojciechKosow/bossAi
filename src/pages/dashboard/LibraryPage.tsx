@@ -9,7 +9,6 @@ import {
   Pencil,
   Sparkles,
   Eye,
-  Download,
 } from "lucide-react";
 import {
   useAssets,
@@ -19,7 +18,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { AssetMedia } from "@/features/video/components/AssetMedia";
-import { assetFileUrl } from "@/features/video/api";
+import { ProjectThumbnail } from "@/features/video/components/ProjectThumbnail";
 import {
   computeItemTitle,
   computeRelativeTimestamp,
@@ -52,9 +51,6 @@ type LibraryItem = {
   generationId?: UUID;
   project?: VideoProjectDTO;
   asset?: AssetDTO;
-  /** The rendered VIDEO asset to preview inline (projects reuse their
-   *  generation's video asset so the card plays instead of showing a stub). */
-  previewAssetId?: UUID;
   status: ProjectStatus | "READY";
   title?: string;
   prompt?: string;
@@ -77,21 +73,21 @@ const buildItems = (
     const createdAt =
       p.createdAt ?? gen?.createdAt ?? new Date().toISOString();
 
-    const claimed = (assets ?? []).filter(
-      (a) =>
-        a.generationId && p.generationId && a.generationId === p.generationId,
-    );
-    claimed.forEach((a) => claimedAssetIds.add(a.id));
-    // Reuse the generation's rendered VIDEO asset so the project card plays
-    // the video inline instead of showing a stub.
-    const previewAsset = claimed.find((a) => a.type === "VIDEO");
+    // Claim this generation's assets so its ffmpeg VIDEO asset doesn't also
+    // surface as a separate card — the project card (which shows the Remotion
+    // render) represents it.
+    (assets ?? [])
+      .filter(
+        (a) =>
+          a.generationId && p.generationId && a.generationId === p.generationId,
+      )
+      .forEach((a) => claimedAssetIds.add(a.id));
 
     items.push({
       key: `project:${p.id}`,
       kind: "project",
       generationId: p.generationId,
       project: p,
-      previewAssetId: previewAsset?.id,
       status: p.status,
       title: computeItemTitle({ project: p, generation: gen, createdAt }),
       prompt: p.originalPrompt,
@@ -215,10 +211,6 @@ const ItemCard = ({ item, index }: { item: LibraryItem; index: number }) => {
     EDITOR_ENABLED && item.kind === "project"
       ? `/dashboard/projects/${item.project!.id}`
       : previewTarget;
-  const previewAssetId = item.asset?.id ?? item.previewAssetId;
-  const downloadHref = previewAssetId
-    ? assetFileUrl(previewAssetId)
-    : undefined;
 
   return (
     <motion.div
@@ -229,8 +221,16 @@ const ItemCard = ({ item, index }: { item: LibraryItem; index: number }) => {
     >
       <Link to={target} className="block">
         <div className="relative aspect-[9/16] bg-muted overflow-hidden">
-          {previewAssetId ? (
-            <AssetMedia assetId={previewAssetId} type="VIDEO" />
+          {/* Thumbnails only — a still frame, never an autoplaying <video>.
+              Projects show their Remotion render's first frame; legacy
+              asset-only items show the asset's first frame. */}
+          {item.kind === "project" && item.project ? (
+            <ProjectThumbnail
+              projectId={item.project.id}
+              status={item.project.status}
+            />
+          ) : item.asset ? (
+            <AssetMedia assetId={item.asset.id} type="VIDEO" poster />
           ) : isProcessing ? (
             <div className="size-full flex items-center justify-center bg-gradient-to-br from-primary/20 to-accent/40">
               <Loader2 className="size-6 text-primary animate-spin" />
@@ -273,17 +273,6 @@ const ItemCard = ({ item, index }: { item: LibraryItem; index: number }) => {
           {computeRelativeTimestamp(item.createdAt)}
         </span>
         <div className="flex items-center gap-2">
-          {downloadHref && (
-            <a
-              href={downloadHref}
-              download
-              onClick={(e) => e.stopPropagation()}
-              className="text-muted-foreground hover:text-foreground transition inline-flex items-center"
-              title="Download"
-            >
-              <Download size={12} />
-            </a>
-          )}
           <Link
             to={target}
             className="text-muted-foreground hover:text-primary transition inline-flex items-center gap-1"

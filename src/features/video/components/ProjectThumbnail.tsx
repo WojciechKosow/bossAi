@@ -1,4 +1,5 @@
 import { useRenderStatus } from "../hooks";
+import { absoluteUrl } from "../api";
 import type { ProjectStatus, UUID } from "../types";
 import { Loader2, Film } from "lucide-react";
 
@@ -12,11 +13,13 @@ export const ProjectThumbnail = ({ projectId, status }: Props) => {
   const { data } = useRenderStatus(projectId, { enabled });
 
   if (data?.outputUrl && data.status === "COMPLETE") {
+    const src = absoluteUrl(data.outputUrl) ?? data.outputUrl;
+    // Static first frame only — never autoplay/loop. A grid of playing videos
+    // eats memory; we just want a picture of the (Remotion) render.
     return (
       <video
-        src={data.outputUrl}
+        src={`${src}#t=0.1`}
         muted
-        loop
         playsInline
         preload="metadata"
         className="size-full object-cover"

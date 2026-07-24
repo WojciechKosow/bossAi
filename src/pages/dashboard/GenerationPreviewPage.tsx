@@ -9,8 +9,8 @@ import {
   Sparkles,
 } from "lucide-react";
 import { motion } from "framer-motion";
-import { assetFileUrl, getGeneration } from "@/features/video/api";
-import { useAssets, useProjects } from "@/features/video/hooks";
+import { absoluteUrl, assetFileUrl, getGeneration } from "@/features/video/api";
+import { useAssets, useProjects, useRenderStatus } from "@/features/video/hooks";
 import { AssetMedia } from "@/features/video/components/AssetMedia";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -41,6 +41,16 @@ const GenerationPreviewPage = () => {
     () => (projects ?? []).find((p) => p.generationId === id),
     [projects, id],
   );
+
+  // The real product is the Remotion render — its output URL, not the legacy
+  // ffmpeg asset. Fall back to the asset only when there's no render job.
+  const { data: render } = useRenderStatus(linkedProject?.id ?? null, {
+    enabled: !!linkedProject,
+  });
+  const remotionUrl =
+    render?.status === "COMPLETE" && render.outputUrl
+      ? (absoluteUrl(render.outputUrl) ?? render.outputUrl)
+      : null;
 
   /**
    * Generation.videoUrl points at a multi-segment storage-key path
@@ -111,7 +121,15 @@ const GenerationPreviewPage = () => {
       >
         <div className="rounded-xl border border-border bg-black overflow-hidden">
           <div className="aspect-[9/16] relative flex items-center justify-center bg-black">
-            {videoAsset ? (
+            {remotionUrl ? (
+              <video
+                src={remotionUrl}
+                controls
+                playsInline
+                preload="metadata"
+                className="size-full object-contain"
+              />
+            ) : videoAsset ? (
               <AssetMedia
                 assetId={videoAsset.id}
                 type="VIDEO"
@@ -130,11 +148,11 @@ const GenerationPreviewPage = () => {
               </div>
             )}
           </div>
-          {videoAsset && (
+          {(remotionUrl || videoAsset) && (
             <div className="px-3 py-2 border-t border-border flex items-center justify-between bg-card">
               <span className="text-xs text-muted-foreground">Preview</span>
               <a
-                href={assetFileUrl(videoAsset.id)}
+                href={remotionUrl ?? assetFileUrl(videoAsset!.id)}
                 download
                 className="text-xs text-muted-foreground hover:text-foreground inline-flex items-center gap-1.5 transition"
               >
