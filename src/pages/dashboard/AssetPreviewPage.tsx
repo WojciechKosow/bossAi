@@ -4,6 +4,7 @@ import { motion } from "framer-motion";
 import { ArrowLeft, Download, Loader2, Pencil, Sparkles } from "lucide-react";
 import { useAssets, useProjects } from "@/features/video/hooks";
 import { AssetMedia } from "@/features/video/components/AssetMedia";
+import { DownloadLink } from "@/features/video/components/DownloadLink";
 import { assetFileUrl } from "@/features/video/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -92,13 +93,13 @@ const AssetPreviewPage = () => {
           </div>
           <div className="px-3 py-2 border-t border-border flex items-center justify-between bg-card">
             <span className="text-xs text-muted-foreground">Preview</span>
-            <a
-              href={assetFileUrl(asset.id)}
-              download
+            <DownloadLink
+              url={assetFileUrl(asset.id)}
+              filename="video.mp4"
               className="text-xs text-muted-foreground hover:text-foreground inline-flex items-center gap-1.5 transition"
             >
               <Download size={12} /> mp4
-            </a>
+            </DownloadLink>
           </div>
         </div>
 

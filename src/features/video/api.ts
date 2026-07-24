@@ -74,6 +74,32 @@ export const absoluteUrl = (
 };
 
 /**
+ * Forces a real "Save As" download instead of a navigation.
+ *
+ * A plain `<a href={crossOriginUrl} download>` doesn't work here: these URLs
+ * are cross-origin (API host != frontend host) so the browser ignores the
+ * `download` attribute and just navigates the tab — and since that raw
+ * navigation bypasses axios, the request also goes out without the bearer
+ * token, so it can land on an error/login page instead of the file. Fetching
+ * through axios (auth header attached) and downloading the resulting blob
+ * avoids both problems and never leaves the current page.
+ */
+export const downloadFile = async (
+  url: string,
+  filename: string,
+): Promise<void> => {
+  const res = await axios.get(url, { responseType: "blob" });
+  const blobUrl = URL.createObjectURL(res.data as Blob);
+  const a = document.createElement("a");
+  a.href = blobUrl;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(blobUrl);
+};
+
+/**
  * Asset detail isn't a separate endpoint on the backend — every user-scoped
  * asset is in the /api/assets list. Pull from the list and find by id.
  */
