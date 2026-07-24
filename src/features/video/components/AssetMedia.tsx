@@ -17,6 +17,13 @@ interface Props {
   className?: string;
   /** when true, the rendered <video> autoplays muted (preview) */
   preview?: boolean;
+  /**
+   * when true, a VIDEO renders as a STATIC first frame — no autoplay, no
+   * loop, no controls, metadata-only. Used for library/grid thumbnails so we
+   * show a picture of the video (like YouTube/TikTok) without dozens of
+   * <video> elements actively decoding and eating memory.
+   */
+  poster?: boolean;
   alt?: string;
 }
 
@@ -33,6 +40,7 @@ export const AssetMedia = ({
   type,
   className,
   preview = true,
+  poster = false,
   alt,
 }: Props) => {
   const [failed, setFailed] = useState(false);
@@ -54,6 +62,19 @@ export const AssetMedia = ({
   const url = assetFileUrl(assetId);
 
   if (type === "VIDEO") {
+    // Static thumbnail: seek to the first frame and never play.
+    if (poster) {
+      return (
+        <video
+          src={`${url}#t=0.1`}
+          className={cn("size-full object-cover", className)}
+          muted
+          playsInline
+          preload="metadata"
+          onError={() => setFailed(true)}
+        />
+      );
+    }
     return (
       <video
         src={url}
