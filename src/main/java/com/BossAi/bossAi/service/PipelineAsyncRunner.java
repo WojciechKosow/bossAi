@@ -45,6 +45,7 @@ public class PipelineAsyncRunner {
     private final PipelineConfig.TikTokAdPipeline tikTokAdPipeline;
     private final com.BossAi.bossAi.service.edl.AssetBridgeService assetBridgeService;
     private final com.BossAi.bossAi.service.edl.VideoProductionOrchestrator videoProductionOrchestrator;
+    private final AssetRetentionService assetRetentionService;
 
     @Value("${rendering.use-new-pipeline:false}")
     private boolean useNewPipeline;
@@ -142,6 +143,20 @@ public class PipelineAsyncRunner {
                         }
                     }
                 }
+            }
+
+            // Enforce the storage/retention policy now that the video exists and
+            // every asset (incl. the bridged project copies) has been written:
+            //   - PRO keeps everything (assets + video).
+            //   - non-storage plans keep only the final video (short TTL) and have
+            //     their intermediate assets removed from R2 right away.
+            // Non-blocking: a retention hiccup must not fail a successful render —
+            // the periodic AssetCleanUpService is the safety net.
+            try {
+                assetRetentionService.applyPostGenerationRetention(generationId, projectId);
+            } catch (Exception ex) {
+                log.warn("[PipelineAsyncRunner] Post-generation retention failed (non-blocking) — {}",
+                        ex.getMessage(), ex);
             }
 
         } catch (Exception e) {

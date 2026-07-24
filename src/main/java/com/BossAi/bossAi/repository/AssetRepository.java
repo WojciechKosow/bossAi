@@ -17,6 +17,12 @@ public interface AssetRepository extends JpaRepository<Asset, UUID> {
     List<Asset> findByUserOrderByCreatedAtDesc(User user);
     List<Asset> findByExpiresAtBefore(LocalDateTime dateTime);
 
+    // Every asset produced by a single generation (scene images, TTS voice,
+    // animated scene clips and the final rendered video). Unlike the singular
+    // findByGenerationId above, a generation owns MANY assets, so the retention
+    // sweep needs the list form.
+    List<Asset> findAllByGenerationId(UUID generationId);
+
     // Storage-plan assets are kept with a null expiry while the plan is active;
     // the cleanup service uses this to manage the post-expiry grace window.
     List<Asset> findByExpiresAtIsNull();

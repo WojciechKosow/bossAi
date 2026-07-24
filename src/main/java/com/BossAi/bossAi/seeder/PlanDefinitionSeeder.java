@@ -42,7 +42,7 @@ public class PlanDefinitionSeeder {
                 .commercialUse(false)
                 .storage(false)
                 .assetReuse(false)
-                .generatedVideoRetentionHours(8)  // 5–10h window
+                .generatedVideoRetentionHours(5)  // non-PRO: video kept 5h, then purged
                 .postExpiryGraceHours(0)
                 .subscription(false)
                 .oneTime(true)
@@ -61,7 +61,7 @@ public class PlanDefinitionSeeder {
                 .commercialUse(false)
                 .storage(false)
                 .assetReuse(false)
-                .generatedVideoRetentionHours(8)
+                .generatedVideoRetentionHours(5)  // non-PRO: video kept 5h, then purged
                 .postExpiryGraceHours(0)
                 .subscription(false)
                 .oneTime(true)
@@ -71,7 +71,8 @@ public class PlanDefinitionSeeder {
                 .build());
 
         // BASIC — first paid subscription. No watermark, commercial use.
-        // No storage (videos live 24h), no asset reuse.
+        // Storage is a PRO-only perk, so BASIC does NOT store: uploaded/generated
+        // assets are dropped right after a generation and the video lives 5h.
         upsert(PlanDefinition.builder()
                 .id(PlanType.BASIC)
                 .monthlyCreditsTotal(400)         // ~6 full ads
@@ -81,7 +82,7 @@ public class PlanDefinitionSeeder {
                 .commercialUse(true)
                 .storage(false)
                 .assetReuse(false)
-                .generatedVideoRetentionHours(24)
+                .generatedVideoRetentionHours(5)  // non-PRO: video kept 5h, then purged
                 .postExpiryGraceHours(0)
                 .subscription(true)
                 .oneTime(false)
