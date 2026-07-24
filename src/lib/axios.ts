@@ -12,7 +12,7 @@ const authExcludedPaths = [
 // Single source of truth for the API origin. Accepts either env name so a
 // misconfigured .env (VITE_API_URL vs VITE_API_BASE) still resolves; falls
 // back to local dev.
-const baseURL =
+export const baseURL =
   (import.meta.env.VITE_API_BASE as string | undefined) ??
   (import.meta.env.VITE_API_URL as string | undefined) ??
   "http://localhost:8080";
