@@ -170,7 +170,7 @@ public class AuthController {
 
         RefreshToken token = refreshTokenService.validateRefreshToken(rawRefreshToken);
 
-        String newAccessToken = jwtProvider.generateToken(token.getUser().getEmail());
+        String newAccessToken = jwtProvider.generateToken(token.getUser().getEmail(), token.isRememberMe());
         RefreshTokenRotationResult rotation =
                 refreshTokenService.rotateToken(token);
 

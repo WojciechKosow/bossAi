@@ -146,7 +146,7 @@ public class UserServiceImpl implements UserService {
 //            throw new RuntimeException("Invalid password or email");
 //        }
 
-        String accessToken = jwtProvider.generateToken(user.getEmail());
+        String accessToken = jwtProvider.generateToken(user.getEmail(), request.isRememberMe());
         String refreshToken = refreshTokenService.createRefreshToken(user, request.isRememberMe());
         return new AuthResponse(accessToken, refreshToken, mapToDTO(user));
     }
