@@ -105,7 +105,13 @@ public class SecurityConfig {
         config.setAllowCredentials(true);
         // EXACT origins only (no trailing slash) — a trailing slash never matches
         // the browser's Origin header and silently blocks every request.
-        config.setAllowedOrigins(List.of("https://boss-ai-frontend-five.vercel.app", "http://localhost:1420", "http://localhost:5173"));
+        config.setAllowedOrigins(List.of(
+                "https://toucanmotion.com",
+                "https://www.toucanmotion.com",
+                "https://boss-ai-frontend-five.vercel.app",
+                "http://localhost:1420",
+                "http://localhost:5173"
+        ));
 
         config.setAllowedMethods(List.of(
                 "GET", "POST", "PUT", "DELETE", "OPTIONS"
