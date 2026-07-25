@@ -2,6 +2,7 @@ package com.BossAi.bossAi.service;
 
 import jakarta.mail.internet.MimeMessage;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.mail.javamail.MimeMessageHelper;
@@ -9,6 +10,7 @@ import org.springframework.stereotype.Service;
 
 import java.util.UUID;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class MailServiceImpl implements MailService {
@@ -34,6 +36,11 @@ public class MailServiceImpl implements MailService {
             helper.setText(content, true);
             mailSender.send(message);
         } catch (Exception e) {
+            // Swallowed by GlobalExceptionHandler into a generic 400 with no
+            // detail, so the real Postmark/SMTP rejection reason (bad token,
+            // unverified sender, trial-mode recipient restriction, etc.) is
+            // otherwise invisible — log it here so it shows up in Railway logs.
+            log.error("Failed to send email to {} (from={}): {}", to, mailFrom, e.getMessage(), e);
             throw new RuntimeException("error: cannot send an email", e);
         }
     }

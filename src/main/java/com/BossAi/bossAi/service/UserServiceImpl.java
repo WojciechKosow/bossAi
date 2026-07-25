@@ -14,6 +14,7 @@ import com.BossAi.bossAi.security.RequestContextUtil;
 import com.BossAi.bossAi.security.SecurityEventService;
 import com.BossAi.bossAi.security.SecurityEventType;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -24,6 +25,7 @@ import java.time.LocalDateTime;
 import java.util.Optional;
 import java.util.UUID;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class UserServiceImpl implements UserService {
@@ -76,7 +78,16 @@ public class UserServiceImpl implements UserService {
 
         userTokenRepository.save(token);
 
-        mailService.sendVerificationEmail(user.getEmail(), tokenId, rawToken);
+        try {
+            mailService.sendVerificationEmail(user.getEmail(), tokenId, rawToken);
+        } catch (Exception e) {
+            // The account is already created (and the token already stored) at
+            // this point — a mail-provider hiccup shouldn't turn the whole
+            // registration into a failure the frontend can't recover from.
+            // The user can still hit resend-verification-email once delivery
+            // is fixed.
+            log.error("Verification email failed to send for {}", user.getEmail(), e);
+        }
 
         return new AuthResponse(null, null,  mapToDTO(user));
     }
