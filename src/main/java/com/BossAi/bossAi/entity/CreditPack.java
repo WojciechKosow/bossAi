@@ -8,9 +8,9 @@ package com.BossAi.bossAi.entity;
  * Amounts are product decisions; tweak freely.
  */
 public enum CreditPack {
-    PACK_200(200, 499, "200 credits"),
-    PACK_500(500, 1099, "500 credits"),
-    PACK_1200(1200, 2399, "1200 credits");
+    PACK_150(150, 499, "150 credits"),   // $4.99
+    PACK_400(400, 1099, "400 credits"),  // $10.99
+    PACK_1000(1000, 2399, "1000 credits"); // $23.99
 
     private final int credits;
     private final int priceCents;
