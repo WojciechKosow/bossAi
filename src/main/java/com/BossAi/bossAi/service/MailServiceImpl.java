@@ -1,21 +1,25 @@
 package com.BossAi.bossAi.service;
 
-import jakarta.mail.internet.MimeMessage;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.mail.javamail.JavaMailSender;
-import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.stereotype.Service;
+import org.springframework.web.reactive.function.client.WebClient;
 
+import java.util.Map;
 import java.util.UUID;
 
+/**
+ * Sends through Postmark's HTTP API rather than SMTP — Railway (like most
+ * PaaS containers) blocks outbound SMTP ports outright, so port 587 to
+ * smtp.postmarkapp.com times out regardless of credentials. The API rides
+ * over plain HTTPS, which is never blocked.
+ */
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class MailServiceImpl implements MailService {
 
-    private final JavaMailSender mailSender;
+    private final WebClient postmarkWebClient;
 
     @Value("${app.mail.from}")
     private String mailFrom;
@@ -26,20 +30,29 @@ public class MailServiceImpl implements MailService {
     @Value("${app.backend-url}")
     private String backendUrl;
 
+    public MailServiceImpl(@Qualifier("postmarkWebClient") WebClient postmarkWebClient) {
+        this.postmarkWebClient = postmarkWebClient;
+    }
+
     private void send(String to, String subject, String content) {
         try {
-            MimeMessage message = mailSender.createMimeMessage();
-            MimeMessageHelper helper = new MimeMessageHelper(message, true);
-            helper.setFrom(mailFrom, "ToucanAI");
-            helper.setTo(to);
-            helper.setSubject(subject);
-            helper.setText(content, true);
-            mailSender.send(message);
+            postmarkWebClient.post()
+                    .uri("/email")
+                    .bodyValue(Map.of(
+                            "From", "ToucanAI <" + mailFrom + ">",
+                            "To", to,
+                            "Subject", subject,
+                            "HtmlBody", content,
+                            "MessageStream", "outbound"
+                    ))
+                    .retrieve()
+                    .toBodilessEntity()
+                    .block();
         } catch (Exception e) {
-            // Swallowed by GlobalExceptionHandler into a generic 400 with no
-            // detail, so the real Postmark/SMTP rejection reason (bad token,
-            // unverified sender, trial-mode recipient restriction, etc.) is
-            // otherwise invisible — log it here so it shows up in Railway logs.
+            // The WebClient's error-logging filter (see WebClientConfig) already
+            // logs Postmark's response body — the precise rejection reason (bad
+            // token, unverified sender, trial-mode recipient restriction, etc.)
+            // shows up there rather than in this generic message.
             log.error("Failed to send email to {} (from={}): {}", to, mailFrom, e.getMessage(), e);
             throw new RuntimeException("error: cannot send an email", e);
         }
