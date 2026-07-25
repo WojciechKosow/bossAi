@@ -6,12 +6,14 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
 import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
-import software.amazon.awssdk.http.urlconnection.UrlConnectionHttpClient;
+import software.amazon.awssdk.core.client.config.ClientOverrideConfiguration;
+import software.amazon.awssdk.http.apache.ApacheHttpClient;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.S3Configuration;
 
 import java.net.URI;
+import java.time.Duration;
 
 /**
  * Wires the S3 SDK against Cloudflare R2. Beans exist only when
@@ -40,7 +42,16 @@ public class R2Config {
                 .region(Region.of(props.getRegion()))
                 .credentialsProvider(credentials(props))
                 .serviceConfiguration(serviceConfig())
-                .httpClientBuilder(UrlConnectionHttpClient.builder())
+                .httpClientBuilder(ApacheHttpClient.builder()
+                        .connectionTimeout(Duration.ofSeconds(10))
+                        .socketTimeout(Duration.ofSeconds(120)))
+                // Hard ceiling so no S3 op (e.g. a large rendered-MP4 upload) can
+                // ever hang the render thread — on stall it fails and the caller's
+                // fallback + markComplete still run.
+                .overrideConfiguration(ClientOverrideConfiguration.builder()
+                        .apiCallTimeout(Duration.ofSeconds(240))
+                        .apiCallAttemptTimeout(Duration.ofSeconds(180))
+                        .build())
                 .build();
     }
 }

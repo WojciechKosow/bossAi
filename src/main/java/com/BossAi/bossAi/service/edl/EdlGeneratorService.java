@@ -1829,7 +1829,12 @@ public class EdlGeneratorService {
             return List.of();
         }
 
-        var words = context.getWordTimings();
+        // WhisperX alignment sometimes returns multi-word phrases as a single
+        // "word" (segment-level), which makes the karaoke subtitle highlight a
+        // whole phrase instead of the current word. Split any multi-word entry
+        // into individual words so highlighting is always word-by-word. Entries
+        // that are already single words pass through with their exact timing.
+        var words = expandToSingleWords(context.getWordTimings());
         List<EdlWhisperWord> result = new ArrayList<>();
         int sentenceIndex = 0;
         int wordsInCurrentSentence = 0;
@@ -1876,6 +1881,56 @@ public class EdlGeneratorService {
                 result.size(), sentenceIndex + 1);
 
         return result;
+    }
+
+    /**
+     * Expands word timings into single words. WhisperX sometimes returns a whole
+     * phrase as one entry (segment-level), which makes the karaoke highlight a
+     * full phrase instead of the current word. Each multi-word entry is split on
+     * whitespace and its [startMs, endMs] span distributed across the words by
+     * character length. Single-word entries pass through with exact timing.
+     */
+    private List<com.BossAi.bossAi.service.SubtitleService.WordTiming> expandToSingleWords(
+            List<com.BossAi.bossAi.service.SubtitleService.WordTiming> timings) {
+        List<com.BossAi.bossAi.service.SubtitleService.WordTiming> out = new ArrayList<>();
+        for (var wt : timings) {
+            if (wt == null || wt.word() == null) continue;
+            String text = wt.word().trim();
+            if (text.isEmpty()) continue;
+
+            String[] parts = text.split("\\s+");
+            if (parts.length <= 1) {
+                out.add(new com.BossAi.bossAi.service.SubtitleService.WordTiming(
+                        text, wt.startMs(), wt.endMs()));
+                continue;
+            }
+
+            int totalChars = 0;
+            for (String p : parts) totalChars += p.length();
+            if (totalChars == 0) {
+                out.add(new com.BossAi.bossAi.service.SubtitleService.WordTiming(
+                        text, wt.startMs(), wt.endMs()));
+                continue;
+            }
+
+            long span = Math.max(1, (long) wt.endMs() - wt.startMs());
+            int cursor = wt.startMs();
+            for (int i = 0; i < parts.length; i++) {
+                int end;
+                if (i == parts.length - 1) {
+                    end = wt.endMs();
+                } else {
+                    int dur = (int) Math.max(1,
+                            Math.round((double) parts[i].length() / totalChars * span));
+                    end = Math.min(wt.endMs(), cursor + dur);
+                }
+                if (end <= cursor) end = Math.min(wt.endMs(), cursor + 1);
+                out.add(new com.BossAi.bossAi.service.SubtitleService.WordTiming(
+                        parts[i], cursor, end));
+                cursor = end;
+            }
+        }
+        return out;
     }
 
     /** Default TikTok subtitle color palette — rotated per sentence. */

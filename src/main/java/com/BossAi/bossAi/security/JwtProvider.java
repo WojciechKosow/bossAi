@@ -26,21 +26,25 @@ public class JwtProvider {
     @Value("${jwt.expiration}")
     private long expiration;
 
+    @Value("${jwt.expiration.rememberMe:2592000000}")
+    private long rememberMeExpiration;
+
     private final UserRepository userRepository;
 
 
-    public String generateToken(String email) {
+    public String generateToken(String email, boolean rememberMe) {
 
         User user = userRepository.findByEmail(email).orElseThrow();
 
         Date now = new Date();
-        Date expiry = new Date(now.getTime() + expiration);
+        long validity = rememberMe ? rememberMeExpiration : expiration;
+        Date expiry = new Date(now.getTime() + validity);
 
         return Jwts.builder()
                 .setSubject(user.getId().toString())
                 .claim("credAt", user.getCredentialsUpdatedAt().toString())
                 .setIssuedAt(now)
-                .setExpiration(new Date(System.currentTimeMillis() + 15 * 60 * 1000))
+                .setExpiration(expiry)
                 .signWith(getSigningKey(), SignatureAlgorithm.HS256)
                 .compact();
     }

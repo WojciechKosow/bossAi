@@ -6,6 +6,7 @@ import com.BossAi.bossAi.service.RefreshTokenService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseCookie;
@@ -26,6 +27,9 @@ public class OAuth2SuccessHandler extends SimpleUrlAuthenticationSuccessHandler 
 
     private final @Lazy RefreshTokenService refreshTokenService;
 
+    @Value("${app.frontend-url}")
+    private String frontendUrl;
+
     @Override
     public void onAuthenticationSuccess(HttpServletRequest request,
                                         HttpServletResponse response,
@@ -37,7 +41,7 @@ public class OAuth2SuccessHandler extends SimpleUrlAuthenticationSuccessHandler 
         User user = userRepository.findByEmail(email)
                 .orElseThrow();
 
-        String accessToken = jwtProvider.generateToken(user.getEmail());
+        String accessToken = jwtProvider.generateToken(user.getEmail(), true);
         String refreshToken = refreshTokenService.createRefreshToken(user, true);
 
         ResponseCookie cookie = ResponseCookie.from("refreshToken", refreshToken)
@@ -50,7 +54,7 @@ public class OAuth2SuccessHandler extends SimpleUrlAuthenticationSuccessHandler 
 
         response.addHeader(HttpHeaders.SET_COOKIE, cookie.toString());
 
-        String redirectUrl = "http://localhost:5173/oauth-success?token=" + accessToken;
+        String redirectUrl = frontendUrl + "/oauth-success?token=" + accessToken;
         getRedirectStrategy().sendRedirect(request, response, redirectUrl);
     }
 }

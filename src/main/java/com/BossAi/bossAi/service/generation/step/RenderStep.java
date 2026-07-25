@@ -249,7 +249,7 @@ public class RenderStep implements GenerationStep {
 
         Path filterScript = workDir.resolve("transition_filter.txt");
         Files.writeString(filterScript, fc.toString());
-        cmd.addAll(List.of("-/filter_complex", filterScript.toString()));
+        cmd.addAll(List.of("-filter_complex_script", filterScript.toString()));
         cmd.addAll(List.of("-map", "[vout]", "-an"));
         cmd.addAll(List.of("-c:v", "libx264", "-preset", "ultrafast", "-crf", "20", "-pix_fmt", "yuv420p"));
 
@@ -288,7 +288,17 @@ public class RenderStep implements GenerationStep {
             Path output
     ) throws Exception {
         FfmpegProperties.Output cfg = ffmpegProperties.getOutput();
-        boolean hasMusic = context.getMusicLocalPath() != null;
+        // Music is optional — never let a corrupt/unreadable track fail the whole
+        // render. Validate it decodes; if not, drop it from the ENTIRE pipeline
+        // (context), not just this ffmpeg pass, so the AssetBridge and the
+        // downstream Remotion EDL don't reference a track that would stall the
+        // render trying to download it.
+        boolean hasMusic = isDecodableAudio(context.getMusicLocalPath());
+        if (!hasMusic && context.getMusicLocalPath() != null) {
+            log.warn("[RenderStep] Undecodable music dropped from pipeline (ffmpeg + Remotion): {}",
+                    context.getMusicLocalPath());
+            context.setMusicLocalPath(null);
+        }
         boolean hasOverlays = hasOverlays(context);
 
         List<SubtitleService.WordTiming> wordTimings;
@@ -355,7 +365,7 @@ public class RenderStep implements GenerationStep {
         Path filterScript = workDir.resolve("filter_complex.txt");
         Files.writeString(filterScript, filterComplex);
 
-        cmd.addAll(List.of("-/filter_complex", filterScript.toString())); // ← tylko raz
+        cmd.addAll(List.of("-filter_complex_script", filterScript.toString())); // ← tylko raz
         cmd.addAll(List.of("-map", "[vout]"));                             // ← tylko raz
         cmd.addAll(List.of("-map", hasMusic ? "[audio]" : "1:a"));        // ← tylko raz
 
@@ -1108,6 +1118,43 @@ public class RenderStep implements GenerationStep {
      */
     private String f(double value) {
         return String.format(Locale.US, "%.3f", value);
+    }
+
+    /**
+     * True only if {@code path} is a real, non-trivial file that ffmpeg can
+     * actually decode as audio. Guards the final render against a corrupt music
+     * track (e.g. a truncated/misformatted mp3) — music is optional, so a bad
+     * file is dropped with a warning instead of failing the generation.
+     */
+    private boolean isDecodableAudio(String path) {
+        if (path == null) {
+            return false;
+        }
+        try {
+            java.io.File f = new java.io.File(path);
+            if (!f.isFile() || f.length() < 256) {
+                log.warn("[RenderStep] Music file missing or too small — rendering without music: {}", path);
+                return false;
+            }
+            List<String> probe = List.of(
+                    ffmpegProperties.getBinary().getPath(),
+                    "-v", "error", "-i", path, "-f", "null", "-");
+            ProcessBuilder pb = new ProcessBuilder(probe);
+            pb.redirectErrorStream(true);
+            Process p = pb.start();
+            try (BufferedReader r = new BufferedReader(new InputStreamReader(p.getInputStream()))) {
+                while (r.readLine() != null) { /* drain */ }
+            }
+            if (p.waitFor() != 0) {
+                log.warn("[RenderStep] Music file not decodable by ffmpeg — rendering without music: {}", path);
+                return false;
+            }
+            return true;
+        } catch (Exception e) {
+            log.warn("[RenderStep] Music validation failed — rendering without music: {} ({})",
+                    path, e.getMessage());
+            return false;
+        }
     }
 
     private void runCommand(List<String> cmd, String phase) throws Exception {

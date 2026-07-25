@@ -3,6 +3,8 @@ package com.BossAi.bossAi.service.storage;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
+import java.time.ZoneOffset;
+import java.time.ZonedDateTime;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -36,6 +38,26 @@ class SigV4PresignerTest {
         assertEquals("a%2Fb%2Fc.jpg", SigV4Presigner.uriEncode("a/b/c.jpg", true));
         // space and '+' must be percent-encoded, tilde must not
         assertEquals("x%20y~z", SigV4Presigner.uriEncode("x y~z", true));
+    }
+
+    /**
+     * Cross-checks the full presign signature against an independent reference
+     * implementation (Python stdlib hmac/hashlib) for fixed inputs and a fixed
+     * signing timestamp. If this passes, the signature algorithm is correct and
+     * any SignatureDoesNotMatch in prod is a credential/input problem, not a
+     * bug in this signer.
+     */
+    @Test
+    void signatureMatchesIndependentReference() {
+        ZonedDateTime fixed = ZonedDateTime.of(2026, 7, 21, 20, 59, 12, 0, ZoneOffset.UTC);
+        String url = SigV4Presigner.presignGet(
+                "https://acct.r2.cloudflarestorage.com",
+                "auto", "AKIDEXAMPLE", "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY",
+                "my-bucket", "user/videos/clip.mp4", Duration.ofSeconds(3600), fixed);
+
+        assertTrue(url.contains(
+                "&X-Amz-Signature=3c8ba8aa7bce705ba5be654e7de28a0a6f59feac6d4c3a3cdabb37de756d8b1e"),
+                url);
     }
 
     @Test

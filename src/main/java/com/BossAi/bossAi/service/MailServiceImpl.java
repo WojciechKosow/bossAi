@@ -2,6 +2,7 @@ package com.BossAi.bossAi.service;
 
 import jakarta.mail.internet.MimeMessage;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.stereotype.Service;
@@ -14,11 +15,33 @@ public class MailServiceImpl implements MailService {
 
     private final JavaMailSender mailSender;
 
+    @Value("${app.mail.from}")
+    private String mailFrom;
+
+    @Value("${app.frontend-url}")
+    private String frontendUrl;
+
+    @Value("${app.backend-url}")
+    private String backendUrl;
+
+    private void send(String to, String subject, String content) {
+        try {
+            MimeMessage message = mailSender.createMimeMessage();
+            MimeMessageHelper helper = new MimeMessageHelper(message, true);
+            helper.setFrom(mailFrom, "ToucanAI");
+            helper.setTo(to);
+            helper.setSubject(subject);
+            helper.setText(content, true);
+            mailSender.send(message);
+        } catch (Exception e) {
+            throw new RuntimeException("error: cannot send an email", e);
+        }
+    }
 
     @Override
     public void sendVerificationEmail(String to, UUID tokenId, String token) {
         String subject = "Verify your email to activate your account";
-        String confirmationUrl = "http://localhost:5173/verify?tokenId=" + tokenId + "&token=" + token;
+        String confirmationUrl = frontendUrl + "/verify?tokenId=" + tokenId + "&token=" + token;
         String content = """
                  <div style="font-family: Arial, sans-serif; background-color: #f5f6fa; padding: 40px;">
                             <table align="center" width="600" style="background: #ffffff; border-radius: 8px; padding: 40px;">
@@ -67,22 +90,13 @@ public class MailServiceImpl implements MailService {
                             </table>
                         </div>
                 """.formatted(confirmationUrl, confirmationUrl, confirmationUrl);
-        try {
-            MimeMessage message = mailSender.createMimeMessage();
-            MimeMessageHelper helper = new MimeMessageHelper(message, true);
-            helper.setTo(to);
-            helper.setSubject(subject);
-            helper.setText(content, true);
-            mailSender.send(message);
-        } catch (Exception e) {
-            throw new RuntimeException("error: cannot send an email", e);
-        }
+        send(to, subject, content);
     }
 
     @Override
     public void sendPasswordResetEmail(String to, UUID tokenId, String token) {
         String subject = "Reset your password";
-        String passwordResetUrl = "http://localhost:5173/reset-password?tokenId=" + tokenId + "&token=" + token;
+        String passwordResetUrl = frontendUrl + "/reset-password?tokenId=" + tokenId + "&token=" + token;
         String content = """
                 <div style="font-family: Arial, sans-serif; background-color: #f5f6fa; padding: 40px;">
                     <table align="center" width="600" style="background: #ffffff; border-radius: 8px; padding: 40px;">
@@ -132,22 +146,13 @@ public class MailServiceImpl implements MailService {
                     </table>
                 </div>
                 """.formatted(passwordResetUrl, passwordResetUrl, passwordResetUrl);
-        try {
-            MimeMessage message = mailSender.createMimeMessage();
-            MimeMessageHelper helper = new MimeMessageHelper(message, true);
-            helper.setTo(to);
-            helper.setSubject(subject);
-            helper.setText(content, true);
-            mailSender.send(message);
-        } catch (Exception e) {
-            throw new RuntimeException("error: cannot send message", e);
-        }
+        send(to, subject, content);
     }
 
     @Override
     public void sendEmailChangeEmail(String to, UUID tokenId, String token) {
         String subject = "Change your email";
-        String emailChangeUrl = "http://localhost:8080/api/auth/change-email?tokenId=" + tokenId + "&token=" + token;
+        String emailChangeUrl = backendUrl + "/api/auth/change-email?tokenId=" + tokenId + "&token=" + token;
         String content = """
                     <div style="font-family: Arial, sans-serif; background-color: #f5f6fa; padding: 40px;">
                         <table align="center" width="600" style="background: #ffffff; border-radius: 8px; padding: 40px;">
@@ -197,22 +202,13 @@ public class MailServiceImpl implements MailService {
                         </table>
                     </div>
                 """.formatted(emailChangeUrl, emailChangeUrl, emailChangeUrl);
-        try {
-            MimeMessage message = mailSender.createMimeMessage();
-            MimeMessageHelper helper = new MimeMessageHelper(message, true);
-            helper.setTo(to);
-            helper.setSubject(subject);
-            helper.setText(content, true);
-            mailSender.send(message);
-        } catch (Exception e) {
-            throw new RuntimeException("Error: cannot send email", e);
-        }
+        send(to, subject, content);
     }
 
     @Override
     public void sendEmailChangeConfirmation(String to, UUID tokenId, String token) {
         String subject = "Confirm your new email";
-        String emailChangeConfirmationUrl = "http://localhost:8080/api/auth/change-email-confirmation?tokenId=" + tokenId + "&token=" + token;
+        String emailChangeConfirmationUrl = backendUrl + "/api/auth/change-email-confirmation?tokenId=" + tokenId + "&token=" + token;
         String content = """
                 <div style="font-family: Arial, sans-serif; background-color: #f5f6fa; padding: 40px;">
                     <table align="center" width="600" style="background: #ffffff; border-radius: 8px; padding: 40px;">
@@ -262,15 +258,6 @@ public class MailServiceImpl implements MailService {
                     </table>
                 </div>
                 """.formatted(emailChangeConfirmationUrl, emailChangeConfirmationUrl, emailChangeConfirmationUrl);
-        try {
-            MimeMessage message = mailSender.createMimeMessage();
-            MimeMessageHelper helper = new MimeMessageHelper(message, true);
-            helper.setTo(to);
-            helper.setSubject(subject);
-            helper.setText(content, true);
-            mailSender.send(message);
-        } catch (Exception e) {
-            throw new RuntimeException("Error: cannot send email", e);
-        }
+        send(to, subject, content);
     }
 }

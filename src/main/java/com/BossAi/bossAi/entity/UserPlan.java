@@ -9,6 +9,11 @@ import java.util.UUID;
 @Entity
 @Data
 @Table(name = "user_plans")
+// Plan credits used can never exceed the total granted, nor go negative — the
+// remaining balance (creditsTotal - creditsUsed) therefore stays >= 0.
+@org.hibernate.annotations.Check(
+        name = "chk_plan_credits_bounds",
+        constraints = "credits_used >= 0 and credits_used <= credits_total")
 @NoArgsConstructor
 @AllArgsConstructor
 public class UserPlan {

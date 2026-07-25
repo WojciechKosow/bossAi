@@ -1,0 +1,46 @@
+# Non-secret defaults, safe to check in (application.properties holds the
+# per-environment secrets — DB creds, jwt.secret, OAuth client id/secret —
+# and is gitignored).
+
+server:
+  # Railway (and most PaaS reverse proxies) terminate TLS at the edge and
+  # forward plain HTTP to the container, attaching X-Forwarded-* headers.
+  # Without this, Spring builds absolute URLs (including the OAuth2
+  # redirect_uri sent to Google) from the internal request, i.e.
+  # http://localhost:8080 instead of the public https:// origin.
+  forward-headers-strategy: framework
+
+spring:
+  mail:
+    # Postmark's SMTP relay — the Server API Token doubles as both the
+    # SMTP username and password. Set POSTMARK_SERVER_TOKEN in Railway;
+    # left blank locally so the app still boots without it (sends will
+    # just fail auth, which is fine for local dev).
+    host: ${MAIL_HOST:smtp.postmarkapp.com}
+    port: ${MAIL_PORT:587}
+    username: ${POSTMARK_SERVER_TOKEN:}
+    password: ${POSTMARK_SERVER_TOKEN:}
+    properties:
+      mail:
+        smtp:
+          auth: true
+          starttls:
+            enable: true
+          connectiontimeout: 5000
+          timeout: 5000
+          writetimeout: 5000
+
+app:
+  # Base URL of the deployed frontend, used to redirect back after OAuth2
+  # login. Override with FRONTEND_URL in production.
+  frontend-url: ${FRONTEND_URL:http://localhost:5173}
+
+  # Base URL of this backend itself, used for links that point back at our
+  # own endpoints (e.g. the email-change confirmation links). Override with
+  # BACKEND_URL in production.
+  backend-url: ${BACKEND_URL:http://localhost:8080}
+
+  mail:
+    # Must be a Sender Signature or a domain verified in Postmark, or every
+    # send gets rejected. Set MAIL_FROM in Railway.
+    from: ${MAIL_FROM:no-reply@localhost}
