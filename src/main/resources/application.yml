@@ -10,25 +10,14 @@ server:
   # http://localhost:8080 instead of the public https:// origin.
   forward-headers-strategy: framework
 
-spring:
-  mail:
-    # Postmark's SMTP relay — the Server API Token doubles as both the
-    # SMTP username and password. Set POSTMARK_SERVER_TOKEN in Railway;
-    # left blank locally so the app still boots without it (sends will
-    # just fail auth, which is fine for local dev).
-    host: ${MAIL_HOST:smtp.postmarkapp.com}
-    port: ${MAIL_PORT:587}
-    username: ${POSTMARK_SERVER_TOKEN:}
-    password: ${POSTMARK_SERVER_TOKEN:}
-    properties:
-      mail:
-        smtp:
-          auth: true
-          starttls:
-            enable: true
-          connectiontimeout: 5000
-          timeout: 5000
-          writetimeout: 5000
+postmark:
+  api:
+    # Postmark's HTTP API over HTTPS — not SMTP. Railway (like most PaaS
+    # containers) blocks outbound SMTP ports outright, so smtp.postmarkapp.com
+    # on 587 times out no matter what; plain HTTPS never has that problem.
+    # Set POSTMARK_SERVER_TOKEN in Railway; left blank locally so the app
+    # still boots without it (sends will just fail auth).
+    server-token: ${POSTMARK_SERVER_TOKEN:}
 
 app:
   # Base URL of the deployed frontend, used to redirect back after OAuth2
