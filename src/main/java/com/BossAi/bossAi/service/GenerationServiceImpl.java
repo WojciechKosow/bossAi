@@ -75,9 +75,19 @@ public class GenerationServiceImpl implements GenerationService {
                         .build()
         );
 
-        CreditTransaction tx = creditService.reserve(user, OperationType.TIKTOK_AD_FULL, generation.getId());
-
         List<Asset> userAssets = resolveUserAssets(request.getAssetIds(), user);
+
+        // Charge BEFORE any compute, in THIS transaction (same as the Generation
+        // row). Cost = 4 credits per source minute (ceil, 1-minute floor). If the
+        // user can't cover it, charge() throws 402 and the whole transaction rolls
+        // back → no Generation, no pipeline, no paid compute on an unpaid job.
+        int sourceSeconds = userAssets.stream()
+                .map(Asset::getDurationSeconds)
+                .filter(java.util.Objects::nonNull)
+                .mapToInt(Integer::intValue)
+                .sum();
+        int cost = com.BossAi.bossAi.config.CreditCosts.processVideo(sourceSeconds);
+        creditService.charge(user, generation.getId(), OperationType.TIKTOK_AD_FULL, cost, "process_video");
 
 //        // Jeśli user przesłał plik muzyki bezpośrednio — uploaduj jako asset
 //        if (request.getMusicFile() != null && !request.getMusicFile().isEmpty()) {
@@ -127,11 +137,10 @@ public class GenerationServiceImpl implements GenerationService {
         // @Async odpala nowy wątek natychmiast — jeśli zrobimy to tutaj,
         // wątek może wystartować zanim INSERT Generation się commituje → findById() = empty.
         UUID genId = generation.getId();
-        UUID txId = tx.getId();
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
             @Override
             public void afterCommit() {
-                pipelineAsyncRunner.runPipelineAsync(genId, context, txId);
+                pipelineAsyncRunner.runPipelineAsync(genId, context);
             }
         });
 
@@ -161,11 +170,8 @@ public class GenerationServiceImpl implements GenerationService {
                         .build()
         );
 
-        CreditTransaction tx = creditService.reserve(user, OperationType.IMAGE_GENERATION, generation.getId());
-
-//        processImageAsync(generation.getId(), request, tx);
-//        runPipelineAsync(generation, request, tx);
-
+        // Image generation is a disabled stub — no compute runs here, so it is
+        // not charged. Add creditService.charge(...) here if/when it does work.
         return new GenerationResponse(generation.getId(), generation.getGenerationStatus());
     }
 
@@ -190,16 +196,18 @@ public class GenerationServiceImpl implements GenerationService {
                         .build()
         );
 
-        CreditTransaction tx = creditService.reserve(user, OperationType.VIDEO_GENERATION, generation.getId());
+        // No source duration available for standalone video gen → 1-minute floor.
+        int cost = com.BossAi.bossAi.config.CreditCosts.processVideo(0);
+        creditService.charge(user, generation.getId(), OperationType.VIDEO_GENERATION, cost, "process_video");
 
-        processVideoAsync(generation.getId(), request, tx);
+        processVideoAsync(generation.getId(), request);
 
         return new GenerationResponse(generation.getId(), generation.getGenerationStatus());
     }
 
 
     @Async("aiExecutor")
-    void processImageAsync(UUID generationId, GenerateImageRequest request, CreditTransaction tx) {
+    void processImageAsync(UUID generationId, GenerateImageRequest request) {
         Generation generation = generationRepository.findById(generationId).orElseThrow();
         try {
             generation.setGenerationStatus(GenerationStatus.PROCESSING);
@@ -210,30 +218,21 @@ public class GenerationServiceImpl implements GenerationService {
                     request.getImageUrl()
             );
 
-//            String imageUrl = imageStorageService.saveImage(
-//                    imageBytes,
-//                    generation.getId()
-//            );
-
             generation.setGenerationStatus(GenerationStatus.DONE);
             generation.setFinishedAt(LocalDateTime.now());
-
-//            AssetDTO asset = assetService.createAsset(generation.getUser().getEmail(), AssetType.IMAGE, imageBytes, generationId);
-//            generation.setImageUrl(asset.getUrl());
-//            System.out.println(asset.getUrl());
-            creditService.confirm(tx.getId());
+            // success — already charged upfront, nothing to settle
         } catch (Exception e) {
             generation.setGenerationStatus(GenerationStatus.FAILED);
             generation.setErrorMessage(e.getMessage());
 
-            creditService.refund(tx.getId());
+            creditService.refundJob(generationId, "image_generation_failed");
         }
 
         generationRepository.save(generation);
     }
 
     @Async("aiExecutor")
-    void processVideoAsync(UUID generationId, GenerateVideoRequest request, CreditTransaction tx) {
+    void processVideoAsync(UUID generationId, GenerateVideoRequest request) {
         Generation generation = generationRepository.findById(generationId).orElseThrow();
         try {
             generation.setGenerationStatus(GenerationStatus.PROCESSING);
@@ -247,13 +246,12 @@ public class GenerationServiceImpl implements GenerationService {
             generation.setVideoUrl(videoUrl);
             generation.setGenerationStatus(GenerationStatus.DONE);
             generation.setFinishedAt(LocalDateTime.now());
-
-            creditService.confirm(tx.getId());
+            // success — already charged upfront, nothing to settle
         } catch (Exception e) {
             generation.setGenerationStatus(GenerationStatus.FAILED);
             generation.setErrorMessage(e.getMessage());
 
-            creditService.refund(tx.getId());
+            creditService.refundJob(generationId, "video_generation_failed");
         }
         generationRepository.save(generation);
     }

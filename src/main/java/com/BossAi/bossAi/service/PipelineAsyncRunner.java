@@ -52,8 +52,7 @@ public class PipelineAsyncRunner {
     @Async("aiExecutor")
     public void runPipelineAsync(
             UUID generationId,
-            GenerationContext context,
-            UUID txId
+            GenerationContext context
     ) {
         // Załaduj świeżą encję z DB + eagerly fetch User (unikamy LazyInitializationException w async)
         Generation generation = generationRepository.findByIdWithUser(generationId)
@@ -83,7 +82,8 @@ public class PipelineAsyncRunner {
             generation.setFinishedAt(LocalDateTime.now());
 
             updateUserLastGeneration(generation.getUser().getId());
-            creditService.confirm(txId);
+            // Success — the job was already charged upfront; nothing to settle.
+            // No refund on a completed job the user simply dislikes.
 
             progressService.broadcast(generationId, GenerationStepName.DONE);
 
@@ -151,7 +151,9 @@ public class PipelineAsyncRunner {
             generation.setGenerationStatus(GenerationStatus.FAILED);
             generation.setErrorMessage(e.getMessage());
 
-            creditService.refund(txId);
+            // Automatic refund on any failure on our side (transcription, render,
+            // timeout, exception). Idempotent per job id — refunds at most once.
+            creditService.refundJob(generationId, "pipeline_failed: " + e.getMessage());
             progressService.broadcast(generationId, GenerationStepName.FAILED,
                     0, "Generacja nieudana: " + e.getMessage());
 
