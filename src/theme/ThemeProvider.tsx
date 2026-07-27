@@ -23,7 +23,8 @@ function getInitialTheme(): Theme {
     .find((row) => row.startsWith(`${THEME_COOKIE}=`))
     ?.split("=")[1];
 
-  return cookie === "dark" ? "dark" : "light";
+  // Dark is the default; light is opt-in (explicit cookie or the toggle).
+  return cookie === "light" ? "light" : "dark";
 }
 
 export const ThemeProvider = ({ children }: { children: ReactNode }) => {

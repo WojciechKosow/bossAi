@@ -10,7 +10,7 @@ export const GoogleLoginButton = () => {
     <Button
       type="button"
       onClick={handleLogin}
-      className="w-full flex items-center justify-center gap-2 border border-gray-300 bg-white text-black hover:bg-gray-50"
+      className="w-full flex items-center justify-center gap-2 border border-border bg-card text-foreground hover:bg-muted"
     >
       <img
         src="https://www.svgrepo.com/show/475656/google-color.svg"
