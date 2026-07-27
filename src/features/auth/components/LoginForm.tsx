@@ -122,7 +122,7 @@ export const LoginForm = () => {
             control={form.control}
             name="rememberMe"
             render={({ field }) => (
-              <label className="flex text-black items-center gap-2 cursor-pointer">
+              <label className="flex text-foreground items-center gap-2 cursor-pointer">
                 <input
                   type="checkbox"
                   checked={field.value}
@@ -137,7 +137,7 @@ export const LoginForm = () => {
           <button
             type="button"
             onClick={() => navigate("/forgot-password")}
-            className="text-black hover:underline"
+            className="text-foreground hover:underline"
           >
             Forgot password?
           </button>
@@ -147,9 +147,9 @@ export const LoginForm = () => {
           <div className="space-y-4">
             <GoogleLoginButton />
             <div className="flex items-center gap-2">
-              <div className="h-px flex-1 bg-gray-200" />
-              <span className="text-xs text-gray-400">OR</span>
-              <div className="h-px flex-1 bg-gray-200" />
+              <div className="h-px flex-1 bg-border" />
+              <span className="text-xs text-muted-foreground">OR</span>
+              <div className="h-px flex-1 bg-border" />
             </div>
           </div>
         )}
@@ -157,7 +157,7 @@ export const LoginForm = () => {
         <Button
           type="submit"
           disabled={loginMutation.isPending}
-          className="w-full flex items-center justify-center gap-2 bg-black text-white hover:bg-black"
+          className="w-full flex items-center justify-center gap-2 bg-foreground text-background hover:bg-foreground/90"
         >
           {loginMutation.isPending && (
             <Loader2 className="h-4 w-4 animate-spin" />
@@ -166,11 +166,11 @@ export const LoginForm = () => {
         </Button>
 
         {!BETA_MODE && (
-          <p className="text-sm text-center text-gray-600">
+          <p className="text-sm text-center text-muted-foreground">
             Don't have an account?{" "}
             <Link
               to="/register"
-              className="text-black hover:underline font-medium"
+              className="text-foreground hover:underline font-medium"
             >
               Create one
             </Link>

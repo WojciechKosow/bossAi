@@ -187,16 +187,16 @@ export const RegisterForm = () => {
           <div className="space-y-4">
             <GoogleLoginButton />
             <div className="flex items-center gap-2">
-              <div className="h-px flex-1 bg-gray-200" />
-              <span className="text-xs text-gray-400">OR</span>
-              <div className="h-px flex-1 bg-gray-200" />
+              <div className="h-px flex-1 bg-border" />
+              <span className="text-xs text-muted-foreground">OR</span>
+              <div className="h-px flex-1 bg-border" />
             </div>
           </div>
         )}
 
         <Button
           type="submit"
-          className="w-full bg-black text-white hover:bg-black"
+          className="w-full bg-foreground text-background hover:bg-foreground/90"
           disabled={registerMutation.isPending}
         >
           {registerMutation.isPending && (
@@ -219,9 +219,9 @@ export const RegisterForm = () => {
         </Button>
       </form> */}
 
-        <p className="text-sm text-center text-muted-foreground text-gray-600">
+        <p className="text-sm text-center text-muted-foreground">
           Already have an account?{" "}
-          <Link to="/login" className="font-medium text-black hover:underline">
+          <Link to="/login" className="font-medium text-foreground hover:underline">
             Sign in
           </Link>
         </p>

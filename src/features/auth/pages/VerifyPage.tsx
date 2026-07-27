@@ -41,7 +41,7 @@ const VerifyPage = () => {
               Your account has been activated 🎉
             </p>
             <Button
-              className="bg-black text-white hover:bg-black"
+              className="bg-foreground text-background hover:bg-foreground/90"
               onClick={() => navigate("/login")}
             >
               Go to login
@@ -55,7 +55,7 @@ const VerifyPage = () => {
               Invalid or expired verification link.
             </p>
             <Button
-              className="bg-black text-white hover:bg-black"
+              className="bg-foreground text-background hover:bg-foreground/90"
               onClick={() => navigate("/register")}
             >
               Register again
