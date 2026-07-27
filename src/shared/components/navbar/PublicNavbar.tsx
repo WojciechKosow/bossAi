@@ -46,7 +46,7 @@ const PublicNavbar = () => {
           {BETA_MODE ? (
             <button
               onClick={scrollToWaitlist}
-              className="group inline-flex items-center gap-1.5 px-4 py-2 rounded-lg gradient-bg text-white text-[13px] font-semibold hover:opacity-90 active:scale-[0.97] transition-all duration-200 shadow-glow"
+              className="group inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-foreground text-background text-[13px] font-semibold hover:bg-foreground/90 active:scale-[0.97] transition-all duration-200"
             >
               Request access
               <ArrowRight
@@ -64,7 +64,7 @@ const PublicNavbar = () => {
               </Link>
               <Link
                 to="/register"
-                className="group inline-flex items-center gap-1.5 px-4 py-2 rounded-lg gradient-bg text-white text-[13px] font-semibold hover:opacity-90 active:scale-[0.97] transition-all duration-200 shadow-glow"
+                className="group inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-foreground text-background text-[13px] font-semibold hover:bg-foreground/90 active:scale-[0.97] transition-all duration-200"
               >
                 Get started
                 <ArrowRight

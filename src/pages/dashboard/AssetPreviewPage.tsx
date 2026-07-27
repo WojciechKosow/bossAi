@@ -56,7 +56,7 @@ const AssetPreviewPage = () => {
         </p>
         <Button
           onClick={() => navigate("/dashboard/library")}
-          className="mt-6 gradient-bg text-white shadow-glow"
+          className="mt-6 bg-foreground text-background hover:bg-foreground/90"
         >
           <ArrowLeft size={14} /> Back to library
         </Button>
@@ -148,7 +148,7 @@ const AssetPreviewPage = () => {
                 onClick={() =>
                   navigate(`/dashboard/projects/${linkedProject.id}`)
                 }
-                className="mt-4 gradient-bg text-white shadow-glow"
+                className="mt-4 bg-foreground text-background hover:bg-foreground/90"
               >
                 <Pencil size={14} /> Open editor
               </Button>
@@ -170,7 +170,7 @@ const AssetPreviewPage = () => {
               </p>
               <Button
                 onClick={() => navigate("/dashboard/create")}
-                className="mt-4 gradient-bg text-white shadow-glow"
+                className="mt-4 bg-foreground text-background hover:bg-foreground/90"
               >
                 <Sparkles size={14} /> Create new video
               </Button>

@@ -1048,7 +1048,7 @@ export const InspectorActions = ({
     <Button
       onClick={onSave}
       disabled={!dirty || saving}
-      className="gradient-bg text-white shadow-glow"
+      className="bg-foreground text-background hover:bg-foreground/90"
     >
       {saving ? "Saving…" : "Save & re-render"}
     </Button>

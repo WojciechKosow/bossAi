@@ -395,7 +395,7 @@ const ProjectEditorPage = () => {
             size="sm"
             onClick={onSave}
             disabled={saveMut.isPending}
-            className="gradient-bg text-white shadow-glow"
+            className="bg-foreground text-background hover:bg-foreground/90"
           >
             {saveMut.isPending ? "Saving…" : "Save & re-render"}
           </Button>
@@ -424,7 +424,7 @@ const ErrorState = ({
     <p className="text-sm text-muted-foreground mt-2">{description}</p>
     <Button
       onClick={onBack}
-      className="mt-6 gradient-bg text-white shadow-glow"
+      className="mt-6 bg-foreground text-background hover:bg-foreground/90"
     >
       <ArrowLeft size={14} /> Back to library
     </Button>

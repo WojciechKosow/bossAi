@@ -4,87 +4,89 @@
 
 @layer base {
   :root {
-    --background: 30 15% 99%;
-    --foreground: 220 15% 9%;
+    /* Blueprint — Studio Ink, recolored to electric blue.
+       --primary is the brand/live blue; ink slabs use --foreground/--background. */
+    --background: 225 38% 97%;
+    --foreground: 222 40% 10%;
 
     --card: 0 0% 100%;
-    --card-foreground: 220 15% 9%;
+    --card-foreground: 222 40% 10%;
 
     --popover: 0 0% 100%;
-    --popover-foreground: 220 15% 9%;
+    --popover-foreground: 222 40% 10%;
 
-    --primary: 22 100% 56%;
+    --primary: 222 100% 62%;
     --primary-foreground: 0 0% 100%;
 
-    --secondary: 30 10% 95%;
-    --secondary-foreground: 220 15% 12%;
+    --secondary: 222 24% 94%;
+    --secondary-foreground: 222 34% 16%;
 
-    --muted: 30 10% 95%;
-    --muted-foreground: 220 8% 48%;
+    --muted: 222 24% 94%;
+    --muted-foreground: 220 13% 42%;
 
-    --accent: 22 60% 94%;
-    --accent-foreground: 22 100% 34%;
+    --accent: 222 100% 95%;
+    --accent-foreground: 222 83% 52%;
 
     --destructive: 0 78% 60%;
     --destructive-foreground: 0 0% 100%;
 
-    --border: 220 10% 88%;
-    --input: 220 10% 88%;
-    --ring: 22 100% 56%;
+    --border: 222 24% 90%;
+    --input: 222 24% 90%;
+    --ring: 222 100% 62%;
 
-    --gradient-from: 22 100% 56%;
-    --gradient-via: 358 88% 60%;
-    --gradient-to: 328 85% 60%;
+    --gradient-from: 222 100% 62%;
+    --gradient-via: 222 100% 66%;
+    --gradient-to: 197 88% 54%;
 
-    --surface-1: 30 15% 99%;
-    --surface-2: 30 12% 97%;
-    --surface-3: 30 8% 94%;
+    --surface-1: 225 38% 98%;
+    --surface-2: 224 30% 96%;
+    --surface-3: 222 24% 92%;
 
-    --chart-1: 22 100% 56%;
-    --chart-2: 188 70% 50%;
-    --chart-3: 332 70% 60%;
-    --chart-4: 43 90% 60%;
-    --chart-5: 162 70% 45%;
+    --chart-1: 222 100% 62%;
+    --chart-2: 197 88% 54%;
+    --chart-3: 250 84% 66%;
+    --chart-4: 210 92% 56%;
+    --chart-5: 178 64% 44%;
 
     --radius: 0.75rem;
   }
 
   .dark {
-    --background: 220 20% 5%;
-    --foreground: 30 8% 96%;
+    --background: 222 32% 6%;
+    --foreground: 222 44% 95%;
 
-    --card: 220 20% 8%;
-    --card-foreground: 30 8% 96%;
+    --card: 222 28% 11%;
+    --card-foreground: 222 44% 95%;
 
-    --popover: 220 20% 8%;
-    --popover-foreground: 30 8% 96%;
+    --popover: 222 28% 11%;
+    --popover-foreground: 222 44% 95%;
 
-    --primary: 22 100% 62%;
-    --primary-foreground: 220 20% 5%;
+    --primary: 216 100% 71%;
+    --primary-foreground: 222 40% 8%;
 
-    --secondary: 220 20% 13%;
-    --secondary-foreground: 30 8% 96%;
+    --secondary: 222 26% 16%;
+    --secondary-foreground: 222 44% 95%;
 
-    --muted: 220 20% 11%;
-    --muted-foreground: 220 10% 58%;
+    --muted: 222 26% 15%;
+    --muted-foreground: 220 15% 62%;
 
-    --accent: 22 40% 18%;
-    --accent-foreground: 22 100% 88%;
+    --accent: 222 44% 16%;
+    --accent-foreground: 220 100% 86%;
 
     --destructive: 0 62% 50%;
     --destructive-foreground: 0 0% 100%;
 
-    --border: 220 20% 15%;
-    --input: 220 20% 15%;
-    --ring: 22 100% 62%;
+    --border: 222 22% 18%;
+    --input: 222 22% 18%;
+    --ring: 216 100% 71%;
 
-    --gradient-from: 22 100% 62%;
-    --gradient-via: 358 88% 64%;
-    --gradient-to: 328 85% 64%;
+    --gradient-from: 219 100% 68%;
+    --gradient-via: 216 100% 71%;
+    --gradient-to: 196 100% 63%;
 
-    --surface-1: 220 20% 6%;
-    --surface-2: 220 20% 9%;
-    --surface-3: 220 20% 13%;
+    --surface-1: 222 30% 7%;
+    --surface-2: 222 28% 11%;
+    --surface-3: 222 24% 16%;
   }
 
   * {

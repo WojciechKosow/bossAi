@@ -43,8 +43,8 @@ const Hero = () => {
       {/* Background orbs */}
       <div className="absolute inset-0 pointer-events-none overflow-hidden">
         <div className="animate-orb-1 absolute -top-48 -left-48 w-[700px] h-[700px] rounded-full bg-primary/10 blur-[120px]" />
-        <div className="animate-orb-2 absolute -bottom-32 -right-32 w-[500px] h-[500px] rounded-full bg-[hsl(358_88%_60%/0.08)] blur-[100px]" />
-        <div className="animate-orb-3 absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[300px] h-[300px] rounded-full bg-[hsl(328_85%_60%/0.06)] blur-[80px]" />
+        <div className="animate-orb-2 absolute -bottom-32 -right-32 w-[500px] h-[500px] rounded-full bg-[hsl(var(--gradient-via)/0.10)] blur-[100px]" />
+        <div className="animate-orb-3 absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[300px] h-[300px] rounded-full bg-[hsl(var(--gradient-to)/0.07)] blur-[80px]" />
       </div>
 
       {/* Grid overlay */}
@@ -97,7 +97,7 @@ const Hero = () => {
               {BETA_MODE ? (
                 <button
                   onClick={scrollToWaitlist}
-                  className="group inline-flex items-center gap-2.5 px-7 py-3.5 rounded-xl gradient-bg text-white font-semibold shadow-glow hover:opacity-90 active:scale-[0.98] transition-all duration-200 text-[15px]"
+                  className="group inline-flex items-center gap-2.5 px-7 py-3.5 rounded-xl bg-foreground text-background font-semibold hover:bg-foreground/90 active:scale-[0.98] transition-all duration-200 text-[15px]"
                 >
                   Request beta access
                   <ArrowRight
@@ -109,7 +109,7 @@ const Hero = () => {
                 <>
                   <a
                     href="/register"
-                    className="group inline-flex items-center gap-2.5 px-7 py-3.5 rounded-xl gradient-bg text-white font-semibold shadow-glow hover:opacity-90 active:scale-[0.98] transition-all duration-200 text-[15px]"
+                    className="group inline-flex items-center gap-2.5 px-7 py-3.5 rounded-xl bg-foreground text-background font-semibold hover:bg-foreground/90 active:scale-[0.98] transition-all duration-200 text-[15px]"
                   >
                     Get started free
                     <ArrowRight
@@ -181,7 +181,7 @@ const PhoneMockup = () => {
       </div>
 
       {/* Video area */}
-      <div className="mx-2.5 h-[360px] rounded-2xl overflow-hidden relative bg-gradient-to-br from-primary/25 via-[hsl(358_88%_60%/0.2)] to-[hsl(328_85%_60%/0.25)]">
+      <div className="mx-2.5 h-[360px] rounded-2xl overflow-hidden relative bg-gradient-to-br from-primary/25 via-[hsl(var(--gradient-via)/0.2)] to-[hsl(var(--gradient-to)/0.25)]">
         {/* Fake scene blocks */}
         <div className="absolute inset-0">
           <div className="absolute top-6 left-6 right-6 h-20 rounded-xl bg-white/8" />

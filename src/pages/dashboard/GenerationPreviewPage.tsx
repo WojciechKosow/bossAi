@@ -198,7 +198,7 @@ const GenerationPreviewPage = () => {
                 onClick={() =>
                   navigate(`/dashboard/projects/${linkedProject.id}`)
                 }
-                className="mt-4 gradient-bg text-white shadow-glow"
+                className="mt-4 bg-foreground text-background hover:bg-foreground/90"
               >
                 <Pencil size={14} /> Open editor
               </Button>
@@ -221,7 +221,7 @@ const GenerationPreviewPage = () => {
               <div className="mt-4 flex items-center gap-2">
                 <Button
                   onClick={() => navigate("/dashboard/create")}
-                  className="gradient-bg text-white shadow-glow"
+                  className="bg-foreground text-background hover:bg-foreground/90"
                 >
                   <Sparkles size={14} /> Create new video
                 </Button>
