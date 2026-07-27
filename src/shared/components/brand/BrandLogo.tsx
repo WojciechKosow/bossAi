@@ -65,7 +65,7 @@ export function BrandLogo({
 
   return (
     <span className={cn("inline-flex items-center gap-2.5", className)}>
-      <ToucanLogo tone={tone} className={iconClassName ?? "size-9"} />
+      <ToucanLogo tone={tone} className={iconClassName ?? "size-10"} />
       {withText && (
         <span
           className={cn(

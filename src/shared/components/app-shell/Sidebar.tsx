@@ -78,7 +78,7 @@ const SidebarContent = ({
       {/* Brand */}
       <div className="px-5 py-5 border-b border-border flex items-center justify-between">
         <div className="flex items-center gap-2.5">
-          <ToucanLogo className="size-9" />
+          <ToucanLogo className="size-10" />
           <div>
             <p className="text-sm font-bold leading-none">
               Toucan
