@@ -10,6 +10,7 @@ import {
   X,
 } from "lucide-react";
 import { useAuth } from "../../../features/auth/context/AuthContext";
+import { BrandLogo } from "@/shared/components/brand/BrandLogo";
 
 const navItems = [
   { name: "Dashboard", path: "/dashboard", icon: LayoutDashboard },
@@ -52,7 +53,7 @@ export const Sidebar = ({ mobile, isOpen, onClose }: Props) => {
           ${isOpen ? "translate-x-0" : "-translate-x-full"}`}
         >
           <div className="flex items-center justify-between px-6 py-6 border-b border-border">
-            <span className="text-xl font-semibold">BossAI</span>
+            <BrandLogo />
             <button onClick={onClose}>
               <X size={20} />
             </button>
@@ -67,8 +68,8 @@ export const Sidebar = ({ mobile, isOpen, onClose }: Props) => {
   return (
     <aside className="w-64 h-screen bg-card border-r border-border flex flex-col justify-between sticky top-0">
       <div>
-        <div className="px-6 py-6 text-xl font-semibold border-b border-border">
-          BossAI
+        <div className="px-6 py-6 border-b border-border">
+          <BrandLogo />
         </div>
         <NavContent handleLogout={handleLogout} />
       </div>

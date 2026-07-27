@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 import { ArrowRight } from "lucide-react";
 import { BETA_MODE } from "@/lib/betaMode";
+import { BrandLogo } from "@/shared/components/brand/BrandLogo";
 
 const PublicNavbar = () => {
   const scrollToWaitlist = () => {
@@ -12,13 +13,8 @@ const PublicNavbar = () => {
       <div className="max-w-7xl mx-auto px-6 md:px-10 py-3.5 flex items-center justify-between gap-6">
 
         {/* Logo */}
-        <Link to="/" className="flex items-center gap-2.5 flex-shrink-0">
-          <div className="w-8 h-8 rounded-lg gradient-bg flex items-center justify-center shadow-glow flex-shrink-0">
-            <span className="text-white font-black text-[15px] leading-none">T</span>
-          </div>
-          <span className="text-[17px] font-bold tracking-tight text-foreground">
-            Toucan
-          </span>
+        <Link to="/" className="flex-shrink-0">
+          <BrandLogo />
         </Link>
 
         {/* Nav links */}
