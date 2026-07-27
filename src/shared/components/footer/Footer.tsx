@@ -1,4 +1,5 @@
 import { BETA_MODE } from "@/lib/betaMode";
+import { BrandLogo } from "@/shared/components/brand/BrandLogo";
 
 const Footer = () => {
   return (
@@ -7,13 +8,8 @@ const Footer = () => {
         <div className="flex flex-col md:flex-row justify-between gap-12">
           {/* Brand */}
           <div className="max-w-xs">
-            <div className="flex items-center gap-2.5 mb-4">
-              <div className="w-8 h-8 rounded-lg gradient-bg flex items-center justify-center shadow-glow flex-shrink-0">
-                <span className="text-white font-black text-[14px] leading-none">T</span>
-              </div>
-              <span className="text-[16px] font-bold tracking-tight text-foreground">
-                Toucan
-              </span>
+            <div className="mb-4">
+              <BrandLogo textClassName="text-[16px]" />
             </div>
             <p className="text-[13px] text-muted-foreground leading-relaxed">
               Turn your ideas and assets into TikTok-ready videos — automatically.
@@ -51,7 +47,7 @@ const Footer = () => {
         </div>
 
         <div className="mt-12 pt-6 border-t border-border/50 flex flex-col sm:flex-row justify-between gap-4 text-[12px] text-muted-foreground">
-          <p>© {new Date().getFullYear()} Toucan. All rights reserved.</p>
+          <p>© {new Date().getFullYear()} Toucan Motion. All rights reserved.</p>
           <p>Made in Poland 🇵🇱</p>
         </div>
       </div>

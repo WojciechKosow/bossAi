@@ -1,4 +1,5 @@
 import { Link } from "react-router-dom";
+import { BrandLogo } from "@/shared/components/brand/BrandLogo";
 
 type Props = {
   children: React.ReactNode;
@@ -17,11 +18,8 @@ const AuthLayout = ({ children, title }: Props) => {
       <div className="w-full max-w-md bg-white p-8 rounded-2xl shadow-sm border border-gray-200">
         {/* LOGO */}
         <div className="flex justify-center mb-6">
-          <Link to="/" className="flex items-center gap-2">
-            <div className="w-9 h-9 rounded-xl bg-gray-900 flex items-center justify-center text-white font-semibold">
-              T
-            </div>
-            <span className="text-lg font-semibold">Toucan Ai</span>
+          <Link to="/">
+            <BrandLogo chipClassName="size-9 rounded-xl" textClassName="text-lg" />
           </Link>
         </div>
 

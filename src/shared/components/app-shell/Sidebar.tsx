@@ -9,6 +9,7 @@ import {
   X,
 } from "lucide-react";
 import { useAuth } from "../../../features/auth/context/AuthContext";
+import { LogoChip } from "@/shared/components/brand/BrandLogo";
 import { cn } from "@/lib/utils";
 
 const navItems = [
@@ -77,11 +78,12 @@ const SidebarContent = ({
       {/* Brand */}
       <div className="px-5 py-5 border-b border-border flex items-center justify-between">
         <div className="flex items-center gap-2.5">
-          <div className="size-8 rounded-lg gradient-bg flex items-center justify-center shadow-glow">
-            <Sparkles className="size-4 text-white" />
-          </div>
+          <LogoChip />
           <div>
-            <p className="text-sm font-bold leading-none">BossAI</p>
+            <p className="text-sm font-bold leading-none">
+              Toucan
+              <span className="font-semibold text-muted-foreground"> Motion</span>
+            </p>
             <p className="text-[10px] text-muted-foreground mt-0.5">
               TikTok Studio
             </p>
