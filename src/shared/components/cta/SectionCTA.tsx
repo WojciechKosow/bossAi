@@ -83,7 +83,7 @@ const SectionCTA = () => {
         >
           <Link
             to="/register"
-            className="group inline-flex items-center justify-center gap-2 px-7 py-3.5 rounded-xl bg-white text-foreground font-semibold hover:bg-white/90 active:scale-[0.98] transition-all duration-200 text-[15px]"
+            className="group inline-flex items-center justify-center gap-2 px-7 py-3.5 rounded-xl bg-white text-slate-900 font-semibold hover:bg-white/90 active:scale-[0.98] transition-all duration-200 text-[15px]"
           >
             Get started free
             <ArrowRight
