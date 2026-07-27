@@ -9,7 +9,7 @@ import {
   X,
 } from "lucide-react";
 import { useAuth } from "../../../features/auth/context/AuthContext";
-import { LogoChip } from "@/shared/components/brand/BrandLogo";
+import { ToucanLogo } from "@/shared/components/brand/BrandLogo";
 import { cn } from "@/lib/utils";
 
 const navItems = [
@@ -78,7 +78,7 @@ const SidebarContent = ({
       {/* Brand */}
       <div className="px-5 py-5 border-b border-border flex items-center justify-between">
         <div className="flex items-center gap-2.5">
-          <LogoChip />
+          <ToucanLogo className="size-9" />
           <div>
             <p className="text-sm font-bold leading-none">
               Toucan
