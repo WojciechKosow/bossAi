@@ -70,7 +70,7 @@ const DashboardPage = () => {
               <Button variant="outline">View library</Button>
             </Link>
             <Link to="/dashboard/create">
-              <Button className="gradient-bg text-white shadow-glow">
+              <Button className="bg-foreground text-background hover:bg-foreground/90">
                 <Sparkles size={14} /> New video
                 <ArrowRight size={14} />
               </Button>
@@ -253,7 +253,7 @@ const EmptyRecent = () => (
       Create your first video to see it here.
     </p>
     <Link to="/dashboard/create" className="inline-block mt-4">
-      <Button size="sm" className="gradient-bg text-white shadow-glow">
+      <Button size="sm" className="bg-foreground text-background hover:bg-foreground/90">
         <Sparkles size={12} /> Get started
       </Button>
     </Link>

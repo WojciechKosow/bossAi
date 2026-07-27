@@ -166,7 +166,7 @@ const LibraryPage = () => {
           </p>
         </div>
         <Link to="/dashboard/create">
-          <Button className="gradient-bg text-white shadow-glow">
+          <Button className="bg-foreground text-background hover:bg-foreground/90">
             <Plus size={16} /> New video
           </Button>
         </Link>
@@ -303,7 +303,7 @@ const EmptyState = () => (
       Spin up your first AI-edited TikTok in under a minute.
     </p>
     <Link to="/dashboard/create" className="inline-block mt-6">
-      <Button className="gradient-bg text-white shadow-glow">
+      <Button className="bg-foreground text-background hover:bg-foreground/90">
         <Sparkles size={16} /> Create your first video
       </Button>
     </Link>

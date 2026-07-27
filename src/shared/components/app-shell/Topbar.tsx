@@ -21,7 +21,7 @@ export const Topbar = ({ onMenuClick }: Props) => {
       <div className="flex items-center gap-2">
         <ThemeToggle />
         <Link to="/dashboard/create">
-          <Button size="sm" className="gradient-bg text-white shadow-glow">
+          <Button size="sm" className="bg-foreground text-background hover:bg-foreground/90">
             <Sparkles size={14} /> New video
           </Button>
         </Link>

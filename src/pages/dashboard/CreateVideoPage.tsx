@@ -386,7 +386,7 @@ const CreateVideoPage = () => {
                 <Button
                   onClick={onGenerate}
                   disabled={!canGenerate}
-                  className="w-full gradient-bg hover:opacity-90 text-white shadow-glow"
+                  className="w-full bg-foreground text-background hover:bg-foreground/90"
                 >
                   {startMut.isPending ? (
                     <Loader2 className="size-4 animate-spin" />
@@ -736,7 +736,7 @@ const FailedPanel = ({
     <p className="text-xs text-muted-foreground mt-1">
       Your credits for this run have been refunded.
     </p>
-    <Button onClick={onRetry} className="mt-6 gradient-bg text-white shadow-glow">
+    <Button onClick={onRetry} className="mt-6 bg-foreground text-background hover:bg-foreground/90">
       <RotateCcw size={14} /> Back & try again
     </Button>
   </div>
@@ -816,7 +816,7 @@ const ResultPanel = ({
 
     <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
       <DownloadLink url={url} filename="video.mp4">
-        <Button className="gradient-bg text-white shadow-glow">
+        <Button className="bg-foreground text-background hover:bg-foreground/90">
           <Download size={16} /> Download
         </Button>
       </DownloadLink>

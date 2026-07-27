@@ -151,7 +151,7 @@ const Pricing = () => {
               <button
                 className={`w-full py-2.5 rounded-xl text-[14px] font-semibold transition-all duration-200 active:scale-[0.98] ${
                   plan.highlighted
-                    ? "gradient-bg text-white hover:opacity-90 shadow-glow"
+                    ? "bg-foreground text-background hover:opacity-90"
                     : "border border-border text-foreground hover:bg-muted/60"
                 }`}
               >

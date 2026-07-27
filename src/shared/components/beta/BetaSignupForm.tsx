@@ -134,7 +134,7 @@ const BetaSignupForm = () => {
           <button
             type="submit"
             disabled={state === "loading" || !email.trim()}
-            className="w-full flex items-center justify-center gap-2 px-6 py-3 rounded-xl gradient-bg text-white font-semibold shadow-glow hover:opacity-90 transition disabled:opacity-50 disabled:cursor-not-allowed"
+            className="w-full flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-foreground text-background font-semibold hover:bg-foreground/90 transition disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {state === "loading" ? (
               <>
