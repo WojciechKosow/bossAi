@@ -7,6 +7,7 @@ import jakarta.servlet.Filter;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
@@ -68,6 +69,10 @@ public class SecurityConfig {
                                 // AuthorizationDeniedException on every timeout.
                                 "/api/generations/*/progress"
                         ).permitAll()
+                        // Plan catalog (pricing) is public so the marketing/landing
+                        // page can show tiers to logged-out visitors. GET only —
+                        // read-only, no mutating plan endpoints are exposed.
+                        .requestMatchers(HttpMethod.GET, "/api/plans").permitAll()
                         .anyRequest().authenticated()
                 )
                 .httpBasic(basic -> basic.disable())
