@@ -2,6 +2,7 @@ package com.BossAi.bossAi.config;
 
 import com.BossAi.bossAi.config.properties.FalAiProperties;
 import com.BossAi.bossAi.config.properties.OpenAiProperties;
+import com.BossAi.bossAi.config.properties.PostmarkProperties;
 import io.netty.channel.ChannelOption;
 import io.netty.handler.timeout.ReadTimeoutHandler;
 import lombok.RequiredArgsConstructor;
@@ -38,6 +39,7 @@ public class WebClientConfig {
 
     private final OpenAiProperties openAiProperties;
     private final FalAiProperties falAiProperties;
+    private final PostmarkProperties postmarkProperties;
 
     @Bean(name = "openAiWebClient")
     public WebClient openAiWebClient() {
@@ -79,6 +81,23 @@ public class WebClientConfig {
                         MediaType.APPLICATION_JSON_VALUE)
                 .clientConnector(new ReactorClientHttpConnector(httpClient))
                 .filter(logErrorResponse("fal.ai"))
+                .build();
+    }
+
+    @Bean(name = "postmarkWebClient")
+    public WebClient postmarkWebClient() {
+        HttpClient httpClient = buildHttpClient(
+                postmarkProperties.getTimeout().getConnect(),
+                postmarkProperties.getTimeout().getRead()
+        );
+
+        return WebClient.builder()
+                .baseUrl(postmarkProperties.getApi().getBaseUrl())
+                .defaultHeader("X-Postmark-Server-Token", postmarkProperties.getApi().getServerToken())
+                .defaultHeader(HttpHeaders.ACCEPT, MediaType.APPLICATION_JSON_VALUE)
+                .defaultHeader(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
+                .clientConnector(new ReactorClientHttpConnector(httpClient))
+                .filter(logErrorResponse("Postmark"))
                 .build();
     }
 
