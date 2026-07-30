@@ -6,7 +6,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 
 /**
- * Typo-safe binding właściwości FFmpeg z application.properties.
+ * Typo-safe binding of FFmpeg properties from application.properties.
  * Prefix: ffmpeg
  */
 @Getter

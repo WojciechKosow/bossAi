@@ -8,30 +8,30 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * Konfiguracja systemu GIF overlays.
  * Prefix: gif
  *
- * Giphy Stickers API (bezpłatne):
- *   Klucz: https://developers.giphy.com/dashboard/ → Create App → SDK key (bezpłatny)
+ * Giphy Stickers API (free):
+ *   Key: https://developers.giphy.com/dashboard/ → Create App → SDK key (free)
  *   Endpoint: GET https://api.giphy.com/v1/stickers/search?api_key={key}&q={query}&limit=5&rating=g
  *
- * Jeśli apiKey nie jest skonfigurowany, GIF overlays są wyłączone.
+ * If apiKey is not configured, GIF overlays are disabled.
  */
 @Getter
 @Setter
 @ConfigurationProperties(prefix = "gif")
 public class GifProperties {
 
-    /** Giphy API key. Wymagany do pobierania GIF-ów. */
+    /** Giphy API key. Required to fetch GIFs. */
     private String apiKey = "";
 
-    /** Czy system GIF overlays jest aktywny. */
+    /** Whether the GIF overlays system is active. */
     private boolean enabled = true;
 
-    /** Max liczba wyników z Giphy (bierzemy pierwszy) */
+    /** Max number of results from Giphy (we take the first one) */
     private int searchLimit = 5;
 
-    /** Preferowany rating GIF-ów: g = bezpieczny dla każdego */
+    /** Preferred GIF rating: g = safe for everyone */
     private String rating = "g";
 
-    /** Cache TTL per kategoria w minutach (0 = bez TTL, cache ważny do restartu) */
+    /** Cache TTL per category in minutes (0 = no TTL, cache valid until restart) */
     private int cacheTtlMinutes = 0;
 
     public boolean isConfigured() {

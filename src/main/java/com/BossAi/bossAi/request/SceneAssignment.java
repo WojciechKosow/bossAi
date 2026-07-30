@@ -9,10 +9,10 @@ import lombok.NoArgsConstructor;
 import java.util.UUID;
 
 /**
- * Mapowanie sceneIndex → assetId od usera (Phase 2 z CLAUDE.md).
+ * sceneIndex → assetId mapping supplied by the user (Phase 2 from CLAUDE.md).
  *
- * Kolejność na liście wewnątrz TikTokAdRequest.sceneAssignments nie ma znaczenia —
- * wiąże sceneIndex.
+ * The order of the list inside TikTokAdRequest.sceneAssignments does not matter —
+ * it binds by sceneIndex.
  */
 @Data
 @NoArgsConstructor

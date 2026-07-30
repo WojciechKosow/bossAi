@@ -29,39 +29,39 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * GenerationContext — żywy stan całego pipeline TikTok Ad.
+ * GenerationContext — the live state of the entire TikTok Ad pipeline.
  *
- * Każdy GenerationStep czyta dane wejściowe z kontekstu
- * i zapisuje swoje wyniki z powrotem do kontekstu.
+ * Each GenerationStep reads its input data from the context
+ * and writes its results back to the context.
  *
- * Przepływ danych:
+ * Data flow:
  *
  *   GenerationService
- *       └── buduje GenerationContext z requestu usera
+ *       └── builds GenerationContext from the user's request
  *
  *   ScriptStep
  *       └── czyta: prompt, userImageAssets, planType
- *       └── zapisuje: script, scenes (lista SceneAsset z wypełnionymi promptami)
+ *       └── writes: script, scenes (a list of SceneAsset with prompts filled in)
  *
  *   ImageStep
  *       └── czyta: scenes[].imagePrompt, planType
- *       └── zapisuje: scenes[].imageUrl
+ *       └── writes: scenes[].imageUrl
  *
- *   VoiceStep (równolegle z VideoStep)
+ *   VoiceStep (in parallel with VideoStep)
  *       └── czyta: script.narration, userVoiceAsset
- *       └── zapisuje: voiceLocalPath
+ *       └── writes: voiceLocalPath
  *
- *   VideoStep (równolegle z VoiceStep)
+ *   VideoStep (in parallel with VoiceStep)
  *       └── czyta: scenes[].imageUrl, scenes[].motionPrompt, planType
- *       └── zapisuje: scenes[].videoUrl, scenes[].videoLocalPath
+ *       └── writes: scenes[].videoUrl, scenes[].videoLocalPath
  *
  *   MusicStep
  *       └── czyta: userMusicAsset
- *       └── zapisuje: musicLocalPath
+ *       └── writes: musicLocalPath
  *
  *   RenderStep
  *       └── czyta: scenes[].videoLocalPath, voiceLocalPath, musicLocalPath, script
- *       └── zapisuje: finalVideoLocalPath, finalVideoUrl
+ *       └── writes: finalVideoLocalPath, finalVideoUrl
  */
 @Data
 @Builder
@@ -81,43 +81,43 @@ public class GenerationContext {
     // -------------------------------------------------------------------------
 
     /**
-     * Główny prompt — opis reklamy, produktu, grupy docelowej.
-     * Obowiązkowy.
+     * The main prompt — a description of the ad, product, target audience.
+     * Required.
      */
     private String prompt;
 
     /**
-     * Plan użytkownika — decyduje o wyborze modeli AI.
-     * FREE/STARTER → tańsze modele, PRO/CREATOR → premium.
+     * The user's plan — determines the choice of AI models.
+     * FREE/STARTER → cheaper models, PRO/CREATOR → premium.
      */
     private PlanType planType;
 
     /**
-     * Czy na finalnym filmie nakładamy watermark (plany FREE/STARTER).
+     * Whether we overlay a watermark on the final video (FREE/STARTER plans).
      */
     private boolean watermarkEnabled;
 
     /**
-     * Assety uploadowane przez usera jako input do tej generacji.
-     * Mogą zawierać obrazy, wideo, muzykę lub nagrany voice-over.
+     * Assets uploaded by the user as input to this generation.
+     * May contain images, videos, music, or a recorded voice-over.
      */
     @Builder.Default
     private List<Asset> userInputAssets = new ArrayList<>();
 
     /**
-     * Asset muzyki usera (MP3) — jeśli null, MusicStep pomija muzykę.
-     * Wyciągany z userInputAssets przez GenerationService przed startem pipeline.
+     * The user's music asset (MP3) — if null, MusicStep skips the music.
+     * Extracted from userInputAssets by GenerationService before the pipeline starts.
      */
     private Asset userMusicAsset;
 
     /**
-     * Asset voice-over usera (MP3) — jeśli null, VoiceStep generuje AI TTS.
+     * The user's voice-over asset (MP3) — if null, VoiceStep generates AI TTS.
      */
     private Asset userVoiceAsset;
 
     /**
-     * Obrazy uploadowane przez usera jako materiał do generacji scen.
-     * Używane przez ScriptStep jako kontekst przy budowaniu promptów.
+     * Images uploaded by the user as material for scene generation.
+     * Used by ScriptStep as context when building prompts.
      */
     @Builder.Default
     private List<Asset> userImageAssets = new ArrayList<>();
@@ -143,8 +143,8 @@ public class GenerationContext {
     private boolean useGptOrdering;
 
     /**
-     * Czy pipeline próbuje ponownie wykorzystać wcześniejsze assety.
-     * true = domyślnie ON (oszczędność kredytów). Dostępne dla planów > BASIC.
+     * Whether the pipeline tries to reuse earlier assets.
+     * true = ON by default (saves credits). Available for plans > BASIC.
      */
     private boolean reuseAssets;
 
@@ -156,16 +156,16 @@ public class GenerationContext {
     private boolean forceReuseForTesting;
 
     /**
-     * Assety (IMAGE) dopasowane tematycznie do nowego promptu przez AssetReuseService.
+     * Assets (IMAGE) thematically matched to the new prompt by AssetReuseService.
      * Mapowanie: imagePrompt → Asset z poprzednich generacji.
-     * Jeśli scena ma match w tej mapie, ImageStep pomija generację i używa istniejącego URL.
+     * If a scene has a match in this map, ImageStep skips generation and uses the existing URL.
      */
     @Builder.Default
     private java.util.Map<String, Asset> reusedImageAssets = new java.util.HashMap<>();
 
     /**
-     * Assety (VIDEO) dopasowane tematycznie.
-     * Mapowanie: imagePrompt (klucz sceny) → Asset VIDEO z poprzednich generacji.
+     * Assets (VIDEO) thematically matched.
+     * Mapping: imagePrompt (scene key) → VIDEO Asset from previous generations.
      */
     @Builder.Default
     private java.util.Map<String, Asset> reusedVideoAssets = new java.util.HashMap<>();
@@ -175,17 +175,17 @@ public class GenerationContext {
     // -------------------------------------------------------------------------
 
     /**
-     * Pełny scenariusz wygenerowany przez GPT-4o.
-     * Zawiera narrację, sceny, styl, CTA.
-     * Null przed wykonaniem ScriptStep.
+     * The full script generated by GPT-4o.
+     * Contains the narration, scenes, style, CTA.
+     * Null before ScriptStep runs.
      */
     private ScriptResult script;
 
     /**
-     * Lista assetów per scena — wypełniana stopniowo przez kolejne Stepy.
-     * ScriptStep tworzy listę z pustymi assetami (tylko prompty).
-     * ImageStep wypełnia imageUrl.
-     * VideoStep wypełnia videoUrl i videoLocalPath.
+     * A list of assets per scene — filled in gradually by the subsequent Steps.
+     * ScriptStep creates a list with empty assets (prompts only).
+     * ImageStep fills in imageUrl.
+     * VideoStep fills in videoUrl and videoLocalPath.
      */
     @Builder.Default
     private List<SceneAsset> scenes = new ArrayList<>();
@@ -195,15 +195,15 @@ public class GenerationContext {
     // -------------------------------------------------------------------------
 
     /**
-     * Lokalna ścieżka pliku MP3 z voice-over (AI lub user upload).
-     * Używana przez RenderStep.
+     * Local path of the MP3 voice-over file (AI or user upload).
+     * Used by RenderStep.
      */
     private String voiceLocalPath;
 
     /**
-     * Dokładne timestampy per słowo z Whisper transcription.
-     * Jeśli dostępne, RenderStep używa ich zamiast szacunkowych z SubtitleService.
-     * Null/puste = fallback do szacunkowych timingów.
+     * Precise per-word timestamps from the Whisper transcription.
+     * If available, RenderStep uses them instead of the estimates from SubtitleService.
+     * Null/empty = fallback to the estimated timings.
      */
     @Builder.Default
     private List<SubtitleService.WordTiming> wordTimings = new ArrayList<>();
@@ -222,28 +222,28 @@ public class GenerationContext {
     // -------------------------------------------------------------------------
 
     /**
-     * Lokalna ścieżka pliku MP3 z muzyką.
-     * Null = brak muzyki w finalnym filmie.
+     * Local path of the MP3 music file.
+     * Null = no music in the final video.
      */
     private String musicLocalPath;
 
     /**
-     * Wynik analizy struktury muzyki (energy profile, segmenty, BPM).
-     * Null jeśli brak muzyki lub analiza nie powiodła się.
+     * Result of the music structure analysis (energy profile, segments, BPM).
+     * Null if there is no music or the analysis failed.
      */
     private MusicAnalysisResult musicAnalysis;
 
     /**
      * Raw response z Python audio-analysis-service.
-     * Cachowany po pierwszym uzyciu (BeatDetection lub MusicAnalysis),
-     * zeby nie wolac Pythona wielokrotnie dla tego samego pliku.
+     * Cached after the first use (BeatDetection or MusicAnalysis),
+     * so we don't call Python multiple times for the same file.
      */
     private com.BossAi.bossAi.service.audio.AudioAnalysisResponse cachedAudioAnalysis;
 
     /**
-     * Offset startu muzyki w ms — od tego momentu muzyka zaczyna grać.
-     * Np. 43000 = zacznij od 43. sekundy muzyki (FFmpeg -ss).
-     * Obliczany przez MusicAlignmentService na podstawie analizy muzyki + scenariusza.
+     * Music start offset in ms — the music starts playing from this point.
+     * E.g. 43000 = start from the 43rd second of the music (FFmpeg -ss).
+     * Computed by MusicAlignmentService based on the music analysis + the script.
      */
     private int musicStartOffsetMs;
 
@@ -252,12 +252,12 @@ public class GenerationContext {
     // -------------------------------------------------------------------------
 
     /**
-     * Lokalna ścieżka do finalnego pliku MP4 (po FFmpeg).
+     * Local path of the final MP4 file (after FFmpeg).
      */
     private String finalVideoLocalPath;
 
     /**
-     * Publiczny URL finalnego MP4 (po zapisie przez StorageService).
+     * The public URL of the final MP4 (after it's saved by StorageService).
      * Zwracany do usera.
      */
     private String finalVideoUrl;
@@ -267,18 +267,18 @@ public class GenerationContext {
     // -------------------------------------------------------------------------
 
     /**
-     * Aktualnie wykonywany krok pipeline.
-     * Używany przez ProgressService do SSE stream.
+     * The pipeline step currently being executed.
+     * Used by ProgressService for the SSE stream.
      */
     private GenerationStepName currentStep;
 
     /**
-     * Postęp w procentach (0–100).
+     * Progress in percent (0–100).
      */
     private int progressPercent;
 
     /**
-     * Komunikat do wyświetlenia userowi (np. "Generuję sceny (2/3)...").
+     * Message to display to the user (e.g. "Generating scenes (2/3)...").
      */
     private String progressMessage;
 
@@ -289,50 +289,50 @@ public class GenerationContext {
     private DirectorPlan directorPlan;
 
     // -------------------------------------------------------------------------
-    // WYNIKI NARRATION ANALYSIS (warstwa A — analiza semantyczna narracji)
+    // NARRATION ANALYSIS RESULTS (layer A — semantic narration analysis)
     // -------------------------------------------------------------------------
 
     /**
-     * Analiza semantyczna narracji — segmenty z topic/energy/importance + EditingIntent.
-     * Generowana przez NarrationAnalyzer (GPT) przed generowaniem EditDna i EDL.
-     * Null jeśli analiza nie została wykonana lub się nie powiodła.
+     * Semantic narration analysis — segments with topic/energy/importance + EditingIntent.
+     * Generated by NarrationAnalyzer (GPT) before generating the EditDna and EDL.
+     * Null if the analysis was not performed or failed.
      */
     private NarrationAnalysis narrationAnalysis;
 
     /**
-     * Analiza timingów mowy z WhisperX — pauzy, granice zdań, tempo.
-     * Generowana przez SpeechAnalyzer po VoiceStep (potrzebuje wordTimings).
-     * Null jeśli brak word timings lub analiza nie została wykonana.
+     * Speech timing analysis from WhisperX — pauses, sentence boundaries, tempo.
+     * Generated by SpeechAnalyzer after VoiceStep (needs wordTimings).
+     * Null if there are no word timings or the analysis was not performed.
      */
     private SpeechTimingAnalysis speechTimingAnalysis;
 
     /**
-     * Lista uzasadnionych cięć wygenerowana przez CutEngine.
-     * Każde cięcie ma powód (dlaczego ciąć teraz?) i klasyfikację (HARD/SOFT/MICRO).
-     * Używana przez EdlGeneratorService do budowy segmentów EDL.
-     * Null jeśli CutEngine nie został uruchomiony.
+     * List of justified cuts generated by CutEngine.
+     * Each cut has a reason (why cut now?) and a classification (HARD/SOFT/MICRO).
+     * Used by EdlGeneratorService to build the EDL segments.
+     * Null if CutEngine was not run.
      */
     @Builder.Default
     private List<JustifiedCut> justifiedCuts = new ArrayList<>();
 
     // -------------------------------------------------------------------------
-    // WYNIKI ASSET ANALYSIS + USER INTENT (nowe warstwy)
+    // ASSET ANALYSIS + USER INTENT RESULTS (new layers)
     // -------------------------------------------------------------------------
 
     /**
-     * Profile wizualne custom media assetów usera.
-     * Każdy profil opisuje CO jest na assecie, jaką ma ROLĘ i NASTRÓJ.
-     * Generowane przez AssetAnalyzer PRZED ScriptStep.
-     * Puste jeśli user nie dostarczył custom media.
+     * Visual profiles of the user's custom media assets.
+     * Each profile describes WHAT is in the asset, what ROLE it has, and its MOOD.
+     * Generated by AssetAnalyzer BEFORE ScriptStep.
+     * Empty if the user did not provide custom media.
      */
     @Builder.Default
     private List<AssetProfile> assetProfiles = new ArrayList<>();
 
     /**
-     * Sparsowana intencja montażowa usera.
-     * Wyciągnięta z prompta przez UserIntentParser.
-     * Definiuje: role assetów, kolejność, pacing, styl.
-     * Null jeśli UserIntentParser nie został uruchomiony.
+     * The parsed user editing intent.
+     * Extracted from the prompt by UserIntentParser.
+     * Defines: asset roles, order, pacing, style.
+     * Null if UserIntentParser was not run.
      */
     private UserEditIntent userEditIntent;
 
@@ -376,8 +376,8 @@ public class GenerationContext {
     // -------------------------------------------------------------------------
 
     /**
-     * Aktualizuje progress i loguje aktualny krok.
-     * Wywoływany przez każdy Step na początku execute().
+     * Updates the progress and logs the current step.
+     * Called by every Step at the start of execute().
      */
     public void updateProgress(GenerationStepName step, int percent, String message) {
         this.currentStep = step;
@@ -386,45 +386,45 @@ public class GenerationContext {
     }
 
     /**
-     * Zwraca true jeśli user dostarczył własny voice-over.
-     * VoiceStep używa tego do decyzji: AI TTS vs user MP3.
+     * Returns true if the user provided their own voice-over.
+     * VoiceStep uses this to decide: AI TTS vs user MP3.
      */
     public boolean hasUserVoice() {
         return userVoiceAsset != null;
     }
 
     /**
-     * Zwraca true jeśli user dostarczył muzykę.
-     * MusicStep używa tego do decyzji: muzyka w filmie vs cisza.
+     * Returns true if the user provided music.
+     * MusicStep uses this to decide: music in the video vs silence.
      */
     public boolean hasUserMusic() {
         return userMusicAsset != null;
     }
 
     /**
-     * Zwraca true jeśli user dostarczył własne media (images/videos) do scen.
+     * Returns true if the user provided their own media (images/videos) for the scenes.
      */
     public boolean hasCustomMedia() {
         return customMediaAssets != null && !customMediaAssets.isEmpty();
     }
 
     /**
-     * Zwraca true jeśli user dostarczył overlay images do nałożenia na wideo.
+     * Returns true if the user provided overlay images to lay over the video.
      */
     public boolean hasOverlayAssets() {
         return overlayAssets != null && !overlayAssets.isEmpty();
     }
 
     /**
-     * Zwraca true jeśli user dostarczył własne TTS voice-over.
-     * VoiceStep używa tego do decyzji: user TTS vs AI TTS.
+     * Returns true if the user provided their own TTS voice-over.
+     * VoiceStep uses this to decide: user TTS vs AI TTS.
      */
     public boolean hasCustomTts() {
         return customTtsAssets != null && !customTtsAssets.isEmpty();
     }
 
     /**
-     * Zwraca liczbę scen — używane w komunikatach progress.
+     * Returns the number of scenes — used in progress messages.
      */
     public int sceneCount() {
         return scenes != null ? scenes.size() : 0;

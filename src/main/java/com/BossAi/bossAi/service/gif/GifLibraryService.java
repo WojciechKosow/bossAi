@@ -16,15 +16,15 @@ import java.util.Optional;
 import java.util.concurrent.ThreadLocalRandom;
 
 /**
- * Pobiera URL-e GIF-ów z Giphy Stickers API i cachuje wyniki.
+ * Fetches GIF URLs from the Giphy Stickers API and caches the results.
  *
- * Giphy Stickers API (bezpłatne):
+ * Giphy Stickers API (free):
  *   GET https://api.giphy.com/v1/stickers/search?api_key={key}&q={query}&limit=5&rating=g
- *   Odpowiedź: data[0].images.original.url → URL do GIF-a z przezroczystym tłem
+ *   Response: data[0].images.original.url → the URL of the GIF with a transparent background
  *
- * Cache: in-memory per kategoria (refreshuje się po restarcie aplikacji).
- * Jeśli Giphy jest niedostępne lub klucz nie skonfigurowany → zwraca Optional.empty()
- * i EdlGeneratorService pomija GIF overlay dla tej sceny.
+ * Cache: in-memory per category (refreshes after the app restarts).
+ * If Giphy is unavailable or the key is not configured → returns Optional.empty()
+ * and EdlGeneratorService skips the GIF overlay for that scene.
  */
 @Slf4j
 @Service
@@ -36,16 +36,16 @@ public class GifLibraryService {
     private final GifProperties gifProperties;
     private final ObjectMapper objectMapper;
 
-    /** In-memory cache: kategoria → lista URL-i GIF-ów (losowany przy każdym wywołaniu) */
+    /** In-memory cache: category → list of GIF URLs (randomized on each call) */
     private final Map<GifCategory, List<String>> cache = new EnumMap<>(GifCategory.class);
 
     /**
-     * Zwraca URL GIF-a dla podanej kategorii.
+     * Returns the GIF URL for the given category.
      *
-     * Kolejność:
-     *   1. Cache (jeśli istnieje)
-     *   2. Giphy API (jeśli skonfigurowany klucz)
-     *   3. Optional.empty() (brak GIF-a)
+     * Order:
+     *   1. Cache (if it exists)
+     *   2. Giphy API (if a key is configured)
+     *   3. Optional.empty() (no GIF)
      */
     public Optional<String> getGifUrl(GifCategory category) {
         if (!gifProperties.isConfigured()) {
@@ -62,7 +62,7 @@ public class GifLibraryService {
     }
 
     /**
-     * Czyści cache — przydatne gdy admin chce odświeżyć GIF-y.
+     * Clears the cache — useful when an admin wants to refresh the GIFs.
      */
     public void clearCache() {
         cache.clear();
@@ -70,7 +70,7 @@ public class GifLibraryService {
     }
 
     /**
-     * Czyści cache dla konkretnej kategorii.
+     * Clears the cache for a specific category.
      */
     public void clearCache(GifCategory category) {
         cache.remove(category);

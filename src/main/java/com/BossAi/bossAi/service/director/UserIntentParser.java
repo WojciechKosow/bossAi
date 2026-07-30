@@ -38,12 +38,12 @@ public class UserIntentParser {
     private final ObjectMapper objectMapper;
 
     /**
-     * Parsuje prompt usera + listę assetów na UserEditIntent.
+     * Parses the user's prompt + asset list into a UserEditIntent.
      *
-     * @param userPrompt      główny prompt od usera
-     * @param customAssets     custom media assety (jeśli są)
-     * @param assetProfiles    profile wizualne assetów (z AssetAnalyzer, jeśli dostępne)
-     * @return sparsowana intencja montażowa
+     * @param userPrompt      the main prompt from the user
+     * @param customAssets     custom media assets (if any)
+     * @param assetProfiles    visual asset profiles (from AssetAnalyzer, if available)
+     * @return the parsed editing intent
      */
     public UserEditIntent parseIntent(String userPrompt,
                                        List<Asset> customAssets,
@@ -86,8 +86,8 @@ public class UserIntentParser {
 
     /**
      * Pilnuje niezmiennika: liczba SceneDirectives nigdy nie przekracza assetCount,
-     * a scene_index każdej dyrektywy mieści się w [0, assetCount). GPT bywa kreatywny —
-     * usuwamy dyrektywy poza zakresem zamiast pozwolić im rozsadzić mapowanie 1:1
+     * and the scene_index of each directive falls within [0, assetCount). GPT can get creative —
+     * we drop out-of-range directives instead of letting them break the 1:1 mapping
      * scene→asset (CRITICAL RULE z CLAUDE.md).
      */
     private void sanitizeSceneDirectives(UserEditIntent intent, int assetCount) {
@@ -439,7 +439,7 @@ public class UserIntentParser {
     }
 
     /**
-     * Default intent — brak wskazówek, tryb auto.
+     * Default intent — no hints, auto mode.
      */
     private UserEditIntent buildDefaultIntent() {
         return UserEditIntent.builder()

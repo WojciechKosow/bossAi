@@ -7,18 +7,18 @@ import lombok.*;
 import java.util.List;
 
 /**
- * Analiza narracji — GPT rozkłada scenariusz na segmenty semantyczne.
+ * Narration analysis — GPT breaks the script down into semantic segments.
  *
- * Każdy segment ma:
- *   - text: fragment narracji
- *   - type: rola w narracji (hook, point, transition, cta, emphasis, setup)
- *   - importance: 0.0-1.0 — jak ważny jest ten fragment dla przekazu
- *   - energy: 0.0-1.0 — dynamika/tempo tego fragmentu
- *   - topic: klucz tematyczny (np. "intro", "automation", "summary")
- *   - keyword: najważniejsze słowo w segmencie (na które warto ciąć)
+ * Each segment has:
+ *   - text: a fragment of the narration
+ *   - type: its role in the narration (hook, point, transition, cta, emphasis, setup)
+ *   - importance: 0.0-1.0 — how important this fragment is to the message
+ *   - energy: 0.0-1.0 — the dynamics/tempo of this fragment
+ *   - topic: a thematic key (e.g. "intro", "automation", "summary")
+ *   - keyword: the most important word in the segment (a good place to cut on)
  *
- * To jest FUNDAMENT do uzasadnionych cięć — zamiast "kiedy ciąć"
- * odpowiada na pytanie "DLACZEGO ciąć teraz?"
+ * This is the FOUNDATION for justified cuts — instead of "when to cut"
+ * it answers the question "WHY cut now?"
  */
 @Data
 @Builder
@@ -40,52 +40,52 @@ public class NarrationAnalysis {
     @JsonIgnoreProperties(ignoreUnknown = true)
     public static class NarrationSegment {
 
-        /** Fragment tekstu narracji */
+        /** A fragment of the narration text */
         @JsonProperty("text")
         private String text;
 
         /**
-         * Rola segmentu:
-         *   hook — otwieracz, scroll-stopper
-         *   setup — kontekst, wprowadzenie
-         *   point — główny punkt/argument
-         *   emphasis — podkreślenie, wzmocnienie
-         *   transition — przejście między tematami
+         * Segment role:
+         *   hook — opener, scroll-stopper
+         *   setup — context, introduction
+         *   point — main point/argument
+         *   emphasis — emphasis, reinforcement
+         *   transition — transition between topics
          *   cta — call to action
-         *   climax — punkt kulminacyjny
-         *   cooldown — wyciszenie po szczycie
+         *   climax — climactic point
+         *   cooldown — wind-down after the peak
          */
         @JsonProperty("type")
         private String type;
 
-        /** Jak ważny jest ten fragment (0.0-1.0). Wyższy = bardziej wart wizualnego wyróżnienia */
+        /** How important this fragment is (0.0-1.0). Higher = more worth highlighting visually */
         @JsonProperty("importance")
         private double importance;
 
-        /** Dynamika/tempo tego fragmentu (0.0-1.0). Wyższy = szybsze cięcia */
+        /** The dynamics/tempo of this fragment (0.0-1.0). Higher = faster cuts */
         @JsonProperty("energy")
         private double energy;
 
-        /** Klucz tematyczny — zmiana topic = potencjalny HARD CUT */
+        /** Thematic key — a topic change = a potential HARD CUT */
         @JsonProperty("topic")
         private String topic;
 
-        /** Najważniejsze słowo — potencjalny punkt cięcia lub podkreślenia */
+        /** The most important word — a potential cut or emphasis point */
         @JsonProperty("keyword")
         private String keyword;
 
-        /** Indeks segmentu w narracji (0-based) */
+        /** Index of the segment in the narration (0-based) */
         @JsonProperty("index")
         private int index;
     }
 
     /**
-     * Intent-Based Editing — GPT decyduje o CHARAKTERZE montażu.
+     * Intent-Based Editing — GPT decides the CHARACTER of the edit.
      *
-     * Zamiast losowego stylu, GPT analizuje treść + muzykę + nastrój
-     * i wybiera konkretną strategię montażową.
+     * Instead of a random style, GPT analyzes the content + music + mood
+     * and picks a specific editing strategy.
      *
-     * Przykłady:
+     * Examples:
      *   intent=build_tension, pattern=slow_to_fast
      *   intent=rhythmic_pulse, pattern=on_beat_consistent
      *   intent=contrast_shock, pattern=long_hold_then_burst
@@ -99,41 +99,41 @@ public class NarrationAnalysis {
     public static class EditingIntent {
 
         /**
-         * Główna intencja montażu:
-         *   build_tension — narastające napięcie, coraz szybsze cięcia
-         *   rhythmic_pulse — cięcia w rytm muzyki, taneczne
-         *   contrast_shock — długie ujęcia przerwane nagłymi cięciami
-         *   flowing_narrative — płynne przejścia, oddech między myślami
-         *   staccato_energy — szybkie, ostre cięcia na każde zdanie
-         *   emotional_wave — cięcia podążające za emocją narratora
-         *   reveal_punctuate — długie budowanie do momentu odsłonięcia
+         * Main editing intent:
+         *   build_tension — rising tension, progressively faster cuts
+         *   rhythmic_pulse — cuts on the music beat, dance-like
+         *   contrast_shock — long shots broken by sudden cuts
+         *   flowing_narrative — smooth transitions, breathing between thoughts
+         *   staccato_energy — fast, sharp cuts on every sentence
+         *   emotional_wave — cuts following the narrator's emotion
+         *   reveal_punctuate — a long build-up to the reveal moment
          */
         @JsonProperty("intent")
         private String intent;
 
         /**
-         * Wzorzec tempa:
-         *   slow_to_fast — zaczyna wolno, przyspiesza
-         *   fast_to_slow — otwiera mocno, zwalnia
-         *   wave — fale szybko-wolno-szybko
-         *   constant_high — ciągle szybko
-         *   on_beat_consistent — stałe, w rytm
-         *   long_hold_then_burst — długie ujęcia, potem seria szybkich
-         *   breathing_with_pauses — naturalne oddechy
+         * Tempo pattern:
+         *   slow_to_fast — starts slow, speeds up
+         *   fast_to_slow — opens strong, slows down
+         *   wave — fast-slow-fast waves
+         *   constant_high — consistently fast
+         *   on_beat_consistent — steady, on the beat
+         *   long_hold_then_burst — long shots, then a burst of quick ones
+         *   breathing_with_pauses — natural breaths
          */
         @JsonProperty("pattern")
         private String pattern;
 
         /**
-         * Łuk montażowy — jak zmienia się gęstość cięć w czasie.
-         * GPT definiuje fazy filmu z ich nastrojem i gęstością.
+         * Editing arc — how the cut density changes over time.
+         * GPT defines the film's phases with their mood and density.
          */
         @JsonProperty("arc")
         private List<EditingArc> arc;
 
         /**
-         * Krótkie uzasadnienie dlaczego ten intent/pattern pasuje
-         * do tej konkretnej treści + muzyki.
+         * A short justification for why this intent/pattern fits
+         * this specific content + music.
          */
         @JsonProperty("reasoning")
         private String reasoning;
@@ -146,19 +146,19 @@ public class NarrationAnalysis {
     @JsonIgnoreProperties(ignoreUnknown = true)
     public static class EditingArc {
 
-        /** Faza filmu: opening, buildup, middle, climax, resolution, outro */
+        /** Film phase: opening, buildup, middle, climax, resolution, outro */
         @JsonProperty("phase")
         private String phase;
 
-        /** Gęstość cięć: very_low, low, medium, high, very_high */
+        /** Cut density: very_low, low, medium, high, very_high */
         @JsonProperty("density")
         private String density;
 
-        /** Nastrój fazy: curious, building, intense, euphoric, reflective, urgent */
+        /** Phase mood: curious, building, intense, euphoric, reflective, urgent */
         @JsonProperty("mood")
         private String mood;
 
-        /** Przybliżony procent filmu, w którym zaczyna się ta faza (0.0-1.0) */
+        /** Approximate percentage of the film at which this phase begins (0.0-1.0) */
         @JsonProperty("start_pct")
         private double startPct;
     }

@@ -137,11 +137,11 @@ public class ProjectAssetService {
     }
 
     /**
-     * Generuje thumbnail dla assetu video (pierwszy frame) lub obrazu (resize).
-     * Używa FFmpeg do ekstrakcji.
+     * Generates a thumbnail for a video asset (first frame) or an image (resize).
+     * Uses FFmpeg for extraction.
      *
      * @param assetId   ID assetu
-     * @param localPath ścieżka lokalna do pliku źródłowego
+     * @param localPath local path to the source file
      */
     public void generateThumbnail(UUID assetId, String localPath) {
         try {

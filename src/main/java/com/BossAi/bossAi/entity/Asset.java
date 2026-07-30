@@ -48,8 +48,8 @@ public class Asset {
     private Integer orderIndex;
 
     /**
-     * Prompt/opis użyty do wygenerowania tego assetu.
-     * Używany przez AssetReuseService do tematycznego dopasowania.
+     * Prompt/description used to generate this asset.
+     * Used by AssetReuseService for thematic matching.
      */
     @Column(length = 2000)
     private String prompt;

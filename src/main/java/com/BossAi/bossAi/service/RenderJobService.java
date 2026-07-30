@@ -23,7 +23,7 @@ public class RenderJobService {
     private final VideoProjectRepository projectRepository;
 
     /**
-     * Tworzy nowy job renderingu dla aktualnego EDL projektu.
+     * Creates a new render job for the project's current EDL.
      */
     @Transactional
     public RenderJob createRenderJob(UUID projectId, EditDecisionListEntity edl, String quality) {

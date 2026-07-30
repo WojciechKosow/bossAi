@@ -6,11 +6,11 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 
 /**
- * Typo-safe binding właściwości OpenAI z application.properties.
+ * Typo-safe binding of OpenAI properties from application.properties.
  * Prefix: openai
  *
- * Zamiast @Value("${openai.api.key}") w każdym serwisie —
- * wstrzykujemy jeden obiekt i mamy autouzupełnianie w IDE.
+ * Instead of @Value("${openai.api.key}") in every service —
+ * we inject a single object and get autocompletion in the IDE.
  */
 @Getter
 @Setter

@@ -11,7 +11,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 /**
  * HTTP client do mikroserwisu remotion-renderer (Node.js/Remotion).
  *
- * Zleca renderowanie EDL → MP4 i polluje status aż do zakończenia.
+ * Requests rendering EDL → MP4 and polls the status until completion.
  */
 @Slf4j
 @Service
@@ -42,10 +42,10 @@ public class RemotionRenderClient {
     }
 
     /**
-     * Zleca renderowanie wideo na podstawie EDL.
+     * Requests video rendering based on the EDL.
      *
-     * @param request RemotionRenderRequest z EDL i konfiguracją outputu
-     * @return RemotionRenderResponse z render_id i statusem początkowym
+     * @param request a RemotionRenderRequest with the EDL and output configuration
+     * @return a RemotionRenderResponse with the render_id and initial status
      */
     public RemotionRenderResponse triggerRender(RemotionRenderRequest request) {
         log.info("[RemotionRenderClient] Triggering render — renderId: {}", request.renderId());
@@ -85,11 +85,11 @@ public class RemotionRenderClient {
     }
 
     /**
-     * Pobiera surowe bajty wyrenderowanego pliku z Remotiona.
+     * Fetches the raw bytes of the rendered file from Remotion.
      *
-     * @param outputPath ścieżka zwrócona przez Remotion (np. "/output/{renderId}.mp4"),
-     *                   względna do baseUrl renderera
-     * @return bajty pliku MP4
+     * @param outputPath the path returned by Remotion (e.g. "/output/{renderId}.mp4"),
+     *                   relative to the renderer's baseUrl
+     * @return the MP4 file bytes
      */
     public byte[] downloadOutput(String outputPath) {
         log.info("[RemotionRenderClient] Downloading rendered output — path: {}", outputPath);
@@ -106,7 +106,7 @@ public class RemotionRenderClient {
     }
 
     /**
-     * Pobiera aktualny status renderowania.
+     * Fetches the current render status.
      *
      * @param renderId identyfikator renderowania
      * @return RemotionRenderStatusResponse z progress i outputUrl
@@ -120,22 +120,22 @@ public class RemotionRenderClient {
     }
 
     /**
-     * Polluje status renderowania aż do zakończenia (completed/failed).
-     * Używa konfiguracji z RemotionRendererProperties (maxAttempts, intervalMs).
+     * Polls the render status until completion (completed/failed).
+     * Uses the configuration from RemotionRendererProperties (maxAttempts, intervalMs).
      * Odporny na transient network errors (Connection reset, timeout) — retry do 3 razy per attempt.
      *
      * @param renderId identyfikator renderowania
      * @return ostateczny RemotionRenderStatusResponse
      * @throws RenderTimeoutException gdy przekroczono maxAttempts
-     * @throws RenderFailedException gdy render zakończył się błędem
+     * @throws RenderFailedException when the render finished with an error
      */
     public RemotionRenderStatusResponse pollUntilComplete(String renderId) {
         return pollUntilComplete(renderId, null);
     }
 
     /**
-     * Wariant z callbackiem postępu — wywoływany po każdym odczycie statusu
-     * "in progress" (wartość 0.0–1.0). Pozwala streamować postęp do edytora.
+     * Variant with a progress callback — called after each status read
+     * "in progress" (value 0.0–1.0). Allows streaming progress to the editor.
      */
     public RemotionRenderStatusResponse pollUntilComplete(
             String renderId, java.util.function.DoubleConsumer onProgress) {
@@ -197,8 +197,8 @@ public class RemotionRenderClient {
     }
 
     /**
-     * Pobiera status z retry na transient errors (Connection reset, timeout).
-     * Zwraca null jeśli wszystkie próby zawiodły (caller decyduje co dalej).
+     * Fetches the status with retry on transient errors (Connection reset, timeout).
+     * Returns null if all attempts failed (the caller decides what next).
      */
     private RemotionRenderStatusResponse getStatusWithRetry(String renderId) {
         int retries = 3;

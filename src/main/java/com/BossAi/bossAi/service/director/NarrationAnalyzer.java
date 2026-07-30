@@ -15,16 +15,16 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Warstwa A — ANALIZA SCENARIUSZA przez GPT.
+ * Layer A — SCRIPT ANALYSIS via GPT.
  *
- * Analizuje narrację i rozbija ją na semantyczne segmenty,
- * każdy z typem, ważnością, energią, tematem.
+ * Analyzes the narration and breaks it into semantic segments,
+ * each with a type, importance, energy, and topic.
  *
- * Jednocześnie generuje EditingIntent — intencję montażu,
- * która definiuje CHARAKTER cięć (nie losowy pattern,
- * ale przemyślany wybór bazujący na treści + muzyce + nastroju).
+ * At the same time it generates the EditingIntent — the editing intent,
+ * which defines the CHARACTER of the cuts (not a random pattern,
+ * but a deliberate choice based on content + music + mood).
  *
- * To jest FUNDAMENT do cięć: nie "kiedy ciąć" ale "DLACZEGO ciąć teraz?"
+ * This is the FOUNDATION for cuts: not "when to cut" but "WHY cut now?"
  */
 @Slf4j
 @Service
@@ -35,7 +35,7 @@ public class NarrationAnalyzer {
     private final ObjectMapper objectMapper;
 
     /**
-     * Analizuje narrację i zwraca strukturę semantyczną + intencję montażu.
+     * Analyzes the narration and returns the semantic structure + editing intent.
      */
     public NarrationAnalysis analyze(GenerationContext context, AudioAnalysisResponse audioAnalysis) {
         log.info("[NarrationAnalyzer] Analyzing narration — {} scenes, contentType: {}",

@@ -10,11 +10,11 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import java.util.UUID;
 
 /**
- * ProgressController — SSE stream postępu generacji.
+ * ProgressController — SSE stream of generation progress.
  *
  * GET /api/generations/{id}/progress
  *
- * Frontend otwiera EventSource:
+ * The frontend opens an EventSource:
  *   const es = new EventSource('/api/generations/{id}/progress');
  *   es.addEventListener('progress', (e) => {
  *     const data = JSON.parse(e.data);
@@ -23,8 +23,8 @@ import java.util.UUID;
  *     if (data.step === 'DONE') es.close();
  *   });
  *
- * Produkuje MediaType TEXT_EVENT_STREAM_VALUE.
- * Spring MVC obsługuje SseEmitter natywnie (bez WebFlux).
+ * Produces MediaType TEXT_EVENT_STREAM_VALUE.
+ * Spring MVC supports SseEmitter natively (without WebFlux).
  */
 @RestController
 @RequestMapping("/api/generations")
@@ -41,8 +41,8 @@ public class ProgressController {
             @PathVariable UUID id,
             Authentication authentication
     ) {
-        // TODO: dodaj walidację że generacja należy do usera (authentication.getName())
-        // Na razie wystarczy że user jest zalogowany (Spring Security filtruje)
+        // TODO: add validation that the generation belongs to the user (authentication.getName())
+        // For now it's enough that the user is logged in (Spring Security filters it)
         return progressService.subscribe(id);
     }
 }

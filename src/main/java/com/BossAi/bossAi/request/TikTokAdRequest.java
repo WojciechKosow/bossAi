@@ -35,9 +35,9 @@ public class TikTokAdRequest {
     private VideoStyle style;
 
     /**
-     * Czy pipeline ma próbować ponownie wykorzystać wcześniej wygenerowane assety
-     * (obrazy, wideo) dopasowane tematycznie do nowego promptu.
-     * Domyślnie true — oszczędza kredyty. Dostępne dla planów > BASIC.
+     * Whether the pipeline should try to reuse previously generated assets
+     * (images, videos) thematically matched to the new prompt.
+     * Defaults to true — saves credits. Available for plans > BASIC.
      */
     private boolean reuseAssets = true;
 
@@ -78,21 +78,21 @@ public class TikTokAdRequest {
     private UUID musicAssetId;
 
     /**
-     * Explicit scene → asset mapping (Phase 2 z CLAUDE.md).
+     * Explicit scene → asset mapping (Phase 2 from CLAUDE.md).
      *
-     * Każdy element wiąże sceneIndex z assetId. Gdy lista jest niepusta,
-     * pipeline układa customMediaAssets w kolejności scen według tej mapy
-     * — pomija domyślne sortowanie po orderIndex (które reprezentuje kolejność
-     * uploadu, nie zamiar użytkownika).
+     * Each element binds a sceneIndex to an assetId. When the list is non-empty,
+     * the pipeline arranges customMediaAssets in scene order according to this map
+     * — skipping the default sort by orderIndex (which represents upload order,
+     * not the user's intent).
      *
-     * Reguły:
-     *   - sceneIndex w [0, customMediaAssetIds.size())
-     *   - assetId musi należeć do customMediaAssetIds
-     *   - puste pozycje (sceny bez wpisu) są dopełniane pozostałymi assetami
-     *     w kolejności orderIndex
+     * Rules:
+     *   - sceneIndex in [0, customMediaAssetIds.size())
+     *   - assetId must belong to customMediaAssetIds
+     *   - empty slots (scenes without an entry) are filled with the remaining assets
+     *     in orderIndex order
      *
-     * Endpoint POST /api/generations/assign-assets ustawia to pole zanim
-     * przekaże request do generateTikTokAd.
+     * The POST /api/generations/assign-assets endpoint sets this field before
+     * passing the request to generateTikTokAd.
      */
     private List<SceneAssignment> sceneAssignments;
 

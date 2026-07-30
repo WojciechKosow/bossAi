@@ -21,24 +21,24 @@ import java.util.*;
 import java.util.stream.Collectors;
 
 /**
- * Autonomiczny system kompozycji wielowarstwowej — działa jak montażysta.
+ * An autonomous multi-layer composition system — works like an editor.
  *
  * Na podstawie:
- *   - AssetProfile (co jest na każdym assecie)
- *   - NarrationAnalysis (co narrator mówi w danym momencie)
- *   - JustifiedCuts (kiedy i dlaczego następuje cięcie)
- *   - DNA preset (jaki styl/szablon jest aktywny)
+ *   - AssetProfile (what is in each asset)
+ *   - NarrationAnalysis (what the narrator is saying at a given moment)
+ *   - JustifiedCuts (when and why a cut happens)
+ *   - DNA preset (which style/template is active)
  *
- * System decyduje autonomicznie kiedy i jak nakładać warstwy assetów.
- * NIE wymaga żadnych instrukcji od usera.
+ * The system autonomously decides when and how to layer assets.
+ * It does NOT require any instructions from the user.
  *
- * Wynik: SceneAsset.layerAssetIds wypełnione dla scen wymagających kompozycji.
- * Istniejąca infrastruktura (appendLayerSegments w EdlGeneratorService) obsługuje resztę.
+ * Result: SceneAsset.layerAssetIds populated for scenes that need composition.
+ * The existing infrastructure (appendLayerSegments in EdlGeneratorService) handles the rest.
  *
- * Reguły dla Problem/Payoff DNA:
- *   TalkingHeadBg  — testimonial/person jako primary + b-roll/background jako tło
- *   ProductReveal  — product-shot jako overlay w momencie kulminacji/reveal
- *   CtaOverlay     — CTA asset jako nakładka na ostatnich scenach
+ * Rules for the Problem/Payoff DNA:
+ *   TalkingHeadBg  — testimonial/person as primary + b-roll/background as the background
+ *   ProductReveal  — product-shot as an overlay at the climax/reveal moment
+ *   CtaOverlay     — CTA asset as an overlay on the last scenes
  */
 @Slf4j
 @Service
@@ -49,13 +49,13 @@ public class AutonomousCompositionDecider {
     private final ObjectMapper objectMapper;
     private final DnaPresetService dnaPresetService;
 
-    private static final int DEFAULT_MAX_LAYERED_SCENES_PCT = 40; // max 40% scen może mieć warstwy
+    private static final int DEFAULT_MAX_LAYERED_SCENES_PCT = 40; // max 40% of scenes may have layers
 
     /**
-     * Główna metoda — decyduje o kompozycji i wypełnia SceneAsset.layerAssetIds.
+     * The main method — decides the composition and fills SceneAsset.layerAssetIds.
      *
-     * @param context        aktywny GenerationContext (musi mieć profiles, narration, cuts)
-     * @param projectAssets  lista ProjectAsset z bazy (VIDEO/IMAGE w kolejności scen)
+     * @param context        the active GenerationContext (must have profiles, narration, cuts)
+     * @param projectAssets  list of ProjectAssets from the DB (VIDEO/IMAGE in scene order)
      */
     public void decide(GenerationContext context, List<ProjectAsset> projectAssets) {
         if (!canDecide(context)) {

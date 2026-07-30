@@ -6,7 +6,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 
 /**
- * Typo-safe binding właściwości fal.ai z application.properties.
+ * Typo-safe binding of fal.ai properties from application.properties.
  * Prefix: falai
  */
 @Getter
@@ -52,9 +52,9 @@ public class FalAiProperties {
     @Getter
     @Setter
     public static class Polling {
-        /** Maksymalna liczba prób pollingu statusu joba */
+        /** Maximum number of job-status polling attempts */
         private int maxAttempts = 60;
-        /** Przerwa między pollami w ms */
+        /** Interval between polls in ms */
         private long intervalMs = 3_000;
     }
 

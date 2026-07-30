@@ -10,7 +10,7 @@ import lombok.NoArgsConstructor;
 import java.util.Map;
 
 /**
- * Sciezka audio na timeline — voiceover, muzyka, SFX.
+ * Audio track on the timeline — voiceover, music, SFX.
  */
 @Data
 @Builder
@@ -25,7 +25,7 @@ public class EdlAudioTrack {
     @JsonProperty("asset_id")
     private String assetId;
 
-    /** URL do pliku audio — Remotion pobiera asset z tego URL */
+    /** URL of the audio file — Remotion fetches the asset from this URL */
     @JsonProperty("asset_url")
     private String assetUrl;
 

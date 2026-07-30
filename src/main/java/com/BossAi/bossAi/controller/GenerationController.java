@@ -47,13 +47,13 @@ public class GenerationController {
     }
 
     /**
-     * Phase 2.1 — preview proponowanego scenariusza bez tworzenia Generation.
+     * Phase 2.1 — preview the proposed script without creating a Generation.
      *
-     * Body: PromptAnalysisRequest (prompt + opcjonalny style + customMediaAssetIds).
-     * Response: PromptAnalysisResponse (sceny, intencja usera, lista dostępnych assetów).
+     * Body: PromptAnalysisRequest (prompt + optional style + customMediaAssetIds).
+     * Response: PromptAnalysisResponse (scenes, user intent, list of available assets).
      *
-     * Stateless — żaden stan nie zostaje zapisany. Klient pokazuje preview, użytkownik
-     * decyduje o przypisaniu assetów do scen, potem wysyła POST /assign-assets.
+     * Stateless — no state is persisted. The client shows the preview, the user
+     * decides how to assign assets to scenes, then sends POST /assign-assets.
      */
     @PostMapping(value = "/analyze-prompt", consumes = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<PromptAnalysisResponse> analyzePrompt(
@@ -66,14 +66,14 @@ public class GenerationController {
     }
 
     /**
-     * Phase 2.2 — startuje generację z explicit scene→asset mapping.
+     * Phase 2.2 — starts generation with an explicit scene→asset mapping.
      *
-     * To wariant POST /tiktok-ad gdzie request niesie sceneAssignments. Backend
-     * waliduje mapping (zakres sceneIndex, ownership, brak duplikatów), układa
-     * customMediaAssets w kolejności scen i odpala istniejący pipeline.
+     * This is a variant of POST /tiktok-ad where the request carries sceneAssignments.
+     * The backend validates the mapping (sceneIndex range, ownership, no duplicates),
+     * arranges customMediaAssets in scene order and runs the existing pipeline.
      *
-     * Mapping potrafi być częściowy — sceny bez wpisu są dopełniane pozostałymi
-     * (nieprzypisanymi) assetami w kolejności orderIndex.
+     * The mapping can be partial — scenes without an entry are filled with the
+     * remaining (unassigned) assets in orderIndex order.
      */
     @PostMapping(value = "/assign-assets", consumes = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<GenerationResponse> assignAssetsAndGenerate(

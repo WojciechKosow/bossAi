@@ -3,18 +3,18 @@ package com.BossAi.bossAi.service.music;
 import java.util.List;
 
 /**
- * Wynik analizy struktury muzyki — energy profile, segmenty (drop, build, peak, quiet).
+ * Result of the music structure analysis — energy profile, segments (drop, build, peak, quiet).
  *
- * Używany przez MusicAlignmentService do inteligentnego dopasowania momentu muzyki
- * do kontekstu wideo (hook → drop, narracja → quiet, CTA → peak).
+ * Used by MusicAlignmentService to intelligently align the music moment
+ * to the video context (hook → drop, narration → quiet, CTA → peak).
  */
 public record MusicAnalysisResult(
 
-        /** Czas trwania muzyki w ms */
+        /** Music duration in ms */
         int totalDurationMs,
 
         /**
-         * Profil energii co 500ms — wartość 0.0-1.0 (znormalizowana).
+         * Energy profile every 500ms — value 0.0-1.0 (normalized).
          * Index i = energia w przedziale [i*500ms, (i+1)*500ms).
          */
         List<Double> energyProfile,
@@ -22,35 +22,35 @@ public record MusicAnalysisResult(
         /** Wykryte segmenty muzyczne (drop, build-up, peak, quiet) */
         List<MusicSegment> segments,
 
-        /** Średnia energia całego utworu */
+        /** Average energy of the whole track */
         double averageEnergy,
 
-        /** Tempo w BPM (przybliżone z beat detection) */
+        /** Tempo in BPM (approximate, from beat detection) */
         int estimatedBpm
 
 ) {
 
     /**
-     * Segment muzyczny — ciągły fragment o określonym charakterze.
+     * Music segment — a continuous fragment with a specific character.
      */
     public record MusicSegment(
             int startMs,
             int endMs,
             SegmentType type,
-            /** Średnia energia segmentu 0.0-1.0 */
+            /** Average segment energy 0.0-1.0 */
             double energy
     ) {}
 
     public enum SegmentType {
-        /** Cichy fragment — niska energia, dobry pod narrację */
+        /** Quiet fragment — low energy, good under narration */
         QUIET,
-        /** Build-up — rosnąca energia, prowadzi do dropu */
+        /** Build-up — rising energy, leads to the drop */
         BUILD_UP,
-        /** Drop — nagły wzrost energii, moment kulminacyjny */
+        /** Drop — a sudden energy increase, the climactic moment */
         DROP,
         /** Peak — utrzymana wysoka energia */
         PEAK,
-        /** Normalny fragment — średnia energia */
+        /** Normal fragment — average energy */
         NORMAL
     }
 }

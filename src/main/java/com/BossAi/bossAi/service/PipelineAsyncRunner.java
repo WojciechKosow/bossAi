@@ -18,19 +18,19 @@ import java.time.LocalDateTime;
 import java.util.UUID;
 
 /**
- * Osobny bean do asynchronicznego uruchamiania pipeline.
+ * A separate bean for running the pipeline asynchronously.
  *
- * DLACZEGO OSOBNY BEAN:
- * Spring @Async działa przez proxy. Gdy metoda @Async jest wywoływana
- * z tego samego beanu (self-invocation), proxy nie przechwytuje wywołania
- * i metoda działa SYNCHRONICZNIE — wewnątrz transakcji wywołującej.
+ * WHY A SEPARATE BEAN:
+ * Spring @Async works via a proxy. When an @Async method is called
+ * from the same bean (self-invocation), the proxy doesn't intercept the call
+ * and the method runs SYNCHRONOUSLY — inside the calling transaction.
  *
- * DLACZEGO UUID zamiast Generation entity:
- * generateTikTokAd() jest @Transactional — entity jest managed w tej transakcji.
- * Po powrocie z metody transakcja commituje i entity staje się DETACHED.
- * Async thread próbujący save() detached entity dostaje
+ * WHY UUID instead of the Generation entity:
+ * generateTikTokAd() is @Transactional — the entity is managed within that transaction.
+ * After the method returns, the transaction commits and the entity becomes DETACHED.
+ * An async thread trying to save() a detached entity gets
  * StaleObjectStateException (optimistic lock na merge).
- * Rozwiązanie: przekazujemy UUID i robimy findById() na świeżym persistence context.
+ * Solution: we pass the UUID and do a findById() on a fresh persistence context.
  */
 @Service
 @Slf4j
@@ -54,7 +54,7 @@ public class PipelineAsyncRunner {
             UUID generationId,
             GenerationContext context
     ) {
-        // Załaduj świeżą encję z DB + eagerly fetch User (unikamy LazyInitializationException w async)
+        // Load a fresh entity from the DB + eagerly fetch User (avoids LazyInitializationException in async)
         Generation generation = generationRepository.findByIdWithUser(generationId)
                 .orElseThrow(() -> new IllegalStateException(
                         "Generation not found: " + generationId));
@@ -90,7 +90,7 @@ public class PipelineAsyncRunner {
             log.info("[PipelineAsyncRunner] Pipeline DONE — generationId: {}, url: {}",
                     generationId, context.getFinalVideoUrl());
 
-            // Zapisz DONE status PRZED bridge
+            // Save DONE status BEFORE the bridge
             generationRepository.save(generation);
 
             // Always bootstrap a VideoProject + ProjectAssets so the user can find
@@ -155,7 +155,7 @@ public class PipelineAsyncRunner {
             // timeout, exception). Idempotent per job id — refunds at most once.
             creditService.refundJob(generationId, "pipeline_failed: " + e.getMessage());
             progressService.broadcast(generationId, GenerationStepName.FAILED,
-                    0, "Generacja nieudana: " + e.getMessage());
+                    0, "Generation failed: " + e.getMessage());
 
         } finally {
             generationRepository.save(generation);

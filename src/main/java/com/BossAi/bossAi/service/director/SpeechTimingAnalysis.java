@@ -5,16 +5,16 @@ import lombok.*;
 import java.util.List;
 
 /**
- * Analiza timingów mowy z WhisperX — wykrywa pauzy, granice zdań, tempo.
+ * Speech timing analysis from WhisperX — detects pauses, sentence boundaries, tempo.
  *
- * Warstwa B systemu cięć:
- *   - Dokładne timestampy słów (z WhisperX, <20ms dokładności)
- *   - Wykrywanie pauz > 300-500ms
- *   - Wykrywanie końców zdań (interpunkcja + pauza)
- *   - Tempo mowy (słowa/sekundę) w oknach czasowych
+ * Layer B of the cutting system:
+ *   - Precise word timestamps (from WhisperX, <20ms accuracy)
+ *   - Detection of pauses > 300-500ms
+ *   - Detection of sentence endings (punctuation + pause)
+ *   - Speech tempo (words/second) in time windows
  *
- * To dane do CutEngine — mówią WHERE ciąć (na pauzie, na końcu zdania),
- * nie WHY (to daje NarrationAnalysis).
+ * This is data for CutEngine — it tells WHERE to cut (on a pause, at a sentence end),
+ * not WHY (that comes from NarrationAnalysis).
  */
 @Data
 @Builder
@@ -22,22 +22,22 @@ import java.util.List;
 @AllArgsConstructor
 public class SpeechTimingAnalysis {
 
-    /** Wykryte pauzy w mowie */
+    /** Detected pauses in the speech */
     private List<SpeechPause> pauses;
 
-    /** Indeksy słów na których kończą się zdania */
+    /** Indices of the words at which sentences end */
     private List<Integer> sentenceBoundaryWordIndices;
 
-    /** Tempo mowy w oknach czasowych */
+    /** Speech tempo in time windows */
     private List<TempoWindow> tempoWindows;
 
-    /** Średnie tempo mowy (słowa/sekundę) */
+    /** Average speech tempo (words/second) */
     private double averageTempo;
 
-    /** Całkowity czas trwania mowy w ms */
+    /** Total speech duration in ms */
     private int totalDurationMs;
 
-    /** Łączna liczba słów */
+    /** Total number of words */
     private int totalWords;
 
     @Data
@@ -46,29 +46,29 @@ public class SpeechTimingAnalysis {
     @AllArgsConstructor
     public static class SpeechPause {
 
-        /** Indeks słowa PO którym jest pauza (0-based) */
+        /** Index of the word AFTER which the pause occurs (0-based) */
         private int afterWordIndex;
 
-        /** Czas trwania pauzy w ms */
+        /** Pause duration in ms */
         private int durationMs;
 
-        /** Timestamp początku pauzy (ms) */
+        /** Timestamp of the pause start (ms) */
         private int startMs;
 
-        /** Timestamp końca pauzy (ms) */
+        /** Timestamp of the pause end (ms) */
         private int endMs;
 
         /**
-         * Typ pauzy:
-         *   sentence_end — po interpunkcji kończącej zdanie (. ! ? ;)
-         *   enumeration — po przecinku/średniku w wyliczeniu
-         *   breath — naturalna pauza oddechowa (bez interpunkcji)
-         *   dramatic — długa pauza (>800ms) — dramatyczna
-         *   topic_shift — pauza przy zmianie tematu (koreluje z NarrationAnalysis)
+         * Pause type:
+         *   sentence_end — after sentence-ending punctuation (. ! ? ;)
+         *   enumeration — after a comma/semicolon in a list
+         *   breath — a natural breathing pause (no punctuation)
+         *   dramatic — a long pause (>800ms) — dramatic
+         *   topic_shift — a pause on a topic change (correlates with NarrationAnalysis)
          */
         private String type;
 
-        /** Czy na tej pauzie jest granica zdania */
+        /** Whether this pause coincides with a sentence boundary */
         private boolean sentenceBoundary;
     }
 
@@ -78,17 +78,17 @@ public class SpeechTimingAnalysis {
     @AllArgsConstructor
     public static class TempoWindow {
 
-        /** Początek okna (ms) */
+        /** Window start (ms) */
         private int startMs;
 
-        /** Koniec okna (ms) */
+        /** Window end (ms) */
         private int endMs;
 
-        /** Tempo w tym oknie (słowa/sekundę) */
+        /** Tempo in this window (words/second) */
         private double wordsPerSecond;
 
         /**
-         * Klasyfikacja tempa:
+         * Tempo classification:
          *   slow — < 2.0 wps
          *   normal — 2.0-3.5 wps
          *   fast — > 3.5 wps

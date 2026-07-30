@@ -10,10 +10,10 @@ import org.springframework.web.reactive.function.BodyInserters;
 import org.springframework.web.reactive.function.client.WebClient;
 
 /**
- * HTTP client do mikroserwisu audio-analysis-service (Python/FastAPI).
+ * HTTP client for the audio-analysis-service microservice (Python/FastAPI).
  *
- * Wysyła plik audio (MP3/WAV/M4A) → odbiera AudioAnalysisResponse
- * z beat map, energy curve, nastrojem i sekcjami.
+ * Sends an audio file (MP3/WAV/M4A) → receives an AudioAnalysisResponse
+ * with a beat map, energy curve, mood, and sections.
  */
 @Slf4j
 @Service
@@ -38,11 +38,11 @@ public class AudioAnalysisClient {
     }
 
     /**
-     * Analizuje plik audio i zwraca pełny profil: beats, energy, mood, sections.
+     * Analyzes the audio file and returns a full profile: beats, energy, mood, sections.
      *
-     * @param audioBytes  zawartość pliku audio
-     * @param filename    nazwa pliku (np. "music.mp3") — potrzebna dla multipart
-     * @return AudioAnalysisResponse z wynikami analizy
+     * @param audioBytes  the audio file contents
+     * @param filename    the file name (e.g. "music.mp3") — needed for multipart
+     * @return an AudioAnalysisResponse with the analysis results
      */
     public AudioAnalysisResponse analyzeAudio(byte[] audioBytes, String filename) {
         log.info("[AudioAnalysisClient] Analyzing audio — file: {}, size: {} bytes", filename, audioBytes.length);
@@ -75,13 +75,13 @@ public class AudioAnalysisClient {
     }
 
     /**
-     * WhisperX forced alignment — precyzyjne per-word timestamps (<20ms).
+     * WhisperX forced alignment — precise per-word timestamps (<20ms).
      *
-     * @param audioBytes  plik audio TTS (MP3)
-     * @param filename    nazwa pliku (np. "voice.mp3")
-     * @param language    kod języka (np. "en", "pl") — null = auto-detect
-     * @param transcript  znany tekst narracji (z TTS) — null = pełna transkrypcja
-     * @return WhisperXAlignResponse z per-word timestamps
+     * @param audioBytes  the TTS audio file (MP3)
+     * @param filename    the file name (e.g. "voice.mp3")
+     * @param language    the language code (e.g. "en", "pl") — null = auto-detect
+     * @param transcript  the known narration text (from TTS) — null = full transcription
+     * @return a WhisperXAlignResponse with per-word timestamps
      */
     public WhisperXAlignResponse alignWords(
             byte[] audioBytes,

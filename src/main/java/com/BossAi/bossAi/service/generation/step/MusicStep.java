@@ -19,16 +19,16 @@ import java.nio.file.Paths;
 import java.util.List;
 
 /**
- * MusicStep — dostarcza plik MP3 z muzyką + analizuje strukturę do dopasowania.
+ * MusicStep — provides the MP3 music file + analyzes its structure for alignment.
  *
- * Przepływ:
- *   1. Kopiuj MP3 usera z storage do temp dir (jeśli jeszcze nie ustawiony)
- *   2. Analizuj strukturę muzyki (energy profile, segmenty: DROP, BUILD_UP, PEAK, QUIET)
- *   3. Dopasuj moment muzyki do kontekstu wideo (MusicAlignmentService):
- *      - Oblicz optymalny offset startu (np. drop na hook, peak na CTA)
- *      - Generuj dynamiczne musicDirections bazowane na analizie, nie na domyśle GPT
+ * Flow:
+ *   1. Copy the user's MP3 from storage to the temp dir (if not already set)
+ *   2. Analyze the music structure (energy profile, segments: DROP, BUILD_UP, PEAK, QUIET)
+ *   3. Align the music moment to the video context (MusicAlignmentService):
+ *      - Compute the optimal start offset (e.g. drop on the hook, peak on the CTA)
+ *      - Generate dynamic musicDirections based on analysis, not GPT guesswork
  *
- * Input:  context.userMusicAsset (może być null)
+ * Input:  context.userMusicAsset (may be null)
  * Output: context.musicLocalPath, context.musicAnalysis, context.musicStartOffsetMs,
  *         context.script.musicDirections (zaktualizowane)
  */
@@ -52,11 +52,11 @@ public class MusicStep implements GenerationStep {
                 GenerationStepName.MUSIC.getDisplayMessage()
         );
 
-        // --- Krok 1: Pobierz/kopiuj muzykę ---
+        // --- Step 1: Download/copy the music ---
 
         if (context.getMusicLocalPath() == null && context.hasUserMusic()) {
             String storageKey = context.getUserMusicAsset().getStorageKey();
-            log.info("[MusicStep] Kopiuję muzykę usera — storageKey: {}", storageKey);
+            log.info("[MusicStep] Copying the user's music — storageKey: {}", storageKey);
 
             byte[] musicBytes = storageService.load(storageKey);
 
@@ -70,48 +70,48 @@ public class MusicStep implements GenerationStep {
         }
 
         if (context.getMusicLocalPath() == null) {
-            log.info("[MusicStep] Brak muzyki — film bez muzyki. generationId: {}",
+            log.info("[MusicStep] No music — video without music. generationId: {}",
                     context.getGenerationId());
             return;
         }
 
-        // --- Krok 2: Analiza struktury muzyki ---
+        // --- Step 2: Music structure analysis ---
         analyzeAndAlign(context);
     }
 
     /**
-     * Analizuje strukturę muzyki (energy profile, segmenty) i dopasowuje
+     * Analyzes the music structure (energy profile, segments) and aligns
      * najlepszy moment startu + dynamiczne musicDirections.
      *
-     * Przy błędzie — loguje warning i kontynuuje z domyślnym volume.
-     * Pipeline nigdy się nie zatrzymuje z powodu analizy muzyki.
+     * On error — it logs a warning and continues with the default volume.
+     * The pipeline never stops because of music analysis.
      */
     private void analyzeAndAlign(GenerationContext context) {
         try {
-            log.info("[MusicStep] Analizuję strukturę muzyki...");
+            log.info("[MusicStep] Analyzing the music structure...");
             MusicAnalysisResult analysis = musicAnalysisService.analyze(
                     context.getMusicLocalPath(),
-                    context.getCachedAudioAnalysis()  // reuse z BeatDetection (jesli juz wywolany)
+                    context.getCachedAudioAnalysis()  // reuse from BeatDetection (if already called)
             );
             context.setMusicAnalysis(analysis);
 
-            log.info("[MusicStep] Analiza OK — {}ms, {} segmentów, avg energy={}, bpm={}",
+            log.info("[MusicStep] Analysis OK — {}ms, {} segments, avg energy={}, bpm={}",
                     analysis.totalDurationMs(),
                     analysis.segments().size(),
                     String.format("%.2f", analysis.averageEnergy()),
                     analysis.estimatedBpm());
 
-            // Dopasuj muzykę do scenariusza
+            // Align the music to the script
             if (context.getScript() != null) {
-                log.info("[MusicStep] Dopasowuję muzykę do wideo...");
+                log.info("[MusicStep] Aligning the music to the video...");
                 MusicAlignment alignment = musicAlignmentService.align(analysis, context.getScript());
 
                 context.setMusicStartOffsetMs(alignment.startOffsetMs());
 
-                // Nadpisz musicDirections z GPT — teraz bazujemy na analizie muzyki
+                // Override the musicDirections from GPT — we now base them on the music analysis
                 List<ScriptResult.MusicDirection> newDirections = alignment.directions();
                 if (!newDirections.isEmpty()) {
-                    // Budujemy nowy ScriptResult z zaktualizowanymi directions
+                    // We build a new ScriptResult with the updated directions
                     ScriptResult oldScript = context.getScript();
                     ScriptResult updatedScript = new ScriptResult(
                             oldScript.narration(),
@@ -134,7 +134,7 @@ public class MusicStep implements GenerationStep {
             }
 
         } catch (Exception e) {
-            log.warn("[MusicStep] Analiza muzyki failed — używam domyślnego volume. Przyczyna: {}",
+            log.warn("[MusicStep] Music analysis failed — using the default volume. Reason: {}",
                     e.getMessage());
         }
     }

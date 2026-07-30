@@ -5,18 +5,18 @@ import lombok.*;
 import java.util.List;
 
 /**
- * Uzasadnione cięcie — każdy cut ma POWÓD.
+ * Justified cut — every cut has a REASON.
  *
- * Zamiast schematycznego "ciąć co 2 sekundy" albo "ciąć na każdym beacie",
- * każde cięcie ma konkretne uzasadnienie oparte na:
- *   - NarrationAnalysis (treść, ważność, temat)
- *   - SpeechTimingAnalysis (pauzy, tempo, granice zdań)
- *   - AudioAnalysis (muzyka, beat, energia)
- *   - EditingIntent (intencja montażowa)
+ * Instead of a formulaic "cut every 2 seconds" or "cut on every beat",
+ * each cut has a concrete justification based on:
+ *   - NarrationAnalysis (content, importance, topic)
+ *   - SpeechTimingAnalysis (pauses, tempo, sentence boundaries)
+ *   - AudioAnalysis (music, beat, energy)
+ *   - EditingIntent (editing intent)
  *
  * Film grammar:
- *   NIE rób: cutów w połowie słowa, w środku myśli
- *   RÓB: cut na końcu zdania, na słowie kluczowym, na zmianie kontekstu
+ *   DON'T: cut in the middle of a word, in the middle of a thought
+ *   DO: cut at the end of a sentence, on a keyword, on a context change
  */
 @Data
 @Builder
@@ -24,65 +24,65 @@ import java.util.List;
 @AllArgsConstructor
 public class JustifiedCut {
 
-    /** Początek cięcia (ms) */
+    /** Cut start (ms) */
     private int startMs;
 
-    /** Koniec cięcia (ms) */
+    /** Cut end (ms) */
     private int endMs;
 
     /**
-     * Typ cięcia:
-     *   HARD — zmiana kadru, nowy temat/ważna informacja
-     *   SOFT — lekka zmiana (zoom, pan), koniec zdania
-     *   MICRO — dynamiczna przebitka, szybka zmiana w serii
+     * Cut type:
+     *   HARD — frame change, new topic/important information
+     *   SOFT — a light change (zoom, pan), sentence end
+     *   MICRO — a dynamic cutaway, a quick change in a series
      */
     private CutClassification classification;
 
     /**
-     * Główny powód cięcia — dlaczego TERAZ?
+     * Main reason for the cut — why NOW?
      */
     private CutReason primaryReason;
 
     /**
-     * Dodatkowe powody (mogą się nakładać, np. topic_change + pause + beat)
+     * Additional reasons (may overlap, e.g. topic_change + pause + beat)
      */
     private List<CutReason> secondaryReasons;
 
     /**
-     * Pewność decyzji (0.0-1.0). Wyższy = silniejsze uzasadnienie.
-     * Cut z confidence < 0.4 może zostać pominięty przez engine.
+     * Decision confidence (0.0-1.0). Higher = stronger justification.
+     * A cut with confidence < 0.4 may be skipped by the engine.
      */
     private double confidence;
 
-    /** Indeks segmentu narracji (z NarrationAnalysis) w momencie cięcia */
+    /** Index of the narration segment (from NarrationAnalysis) at the cut moment */
     private int narrationSegmentIndex;
 
-    /** Energia muzyki w momencie cięcia (0.0-1.0), null jeśli brak muzyki */
+    /** Music energy at the cut moment (0.0-1.0), null if there's no music */
     private Double musicEnergy;
 
-    /** Czy cięcie trafia na beat muzyczny (±50ms) */
+    /** Whether the cut lands on a music beat (±50ms) */
     private boolean onBeat;
 
     /**
-     * Faza łuku montażowego (z EditingIntent.arc) w momencie cięcia.
-     * Np. "opening", "climax", "resolution"
+     * Editing-arc phase (from EditingIntent.arc) at the cut moment.
+     * E.g. "opening", "climax", "resolution"
      */
     private String editingPhase;
 
     /**
-     * Sugerowany efekt wizualny na tym cięciu (na podstawie kontekstu).
-     * CutEngine sugeruje, ale EdlGenerator może nadpisać.
+     * Suggested visual effect on this cut (based on context).
+     * CutEngine suggests it, but EdlGenerator may override it.
      */
     private String suggestedEffect;
 
     /**
-     * Sugerowane przejście do następnego segmentu.
+     * Suggested transition to the next segment.
      */
     private String suggestedTransition;
 
     /**
-     * Jawnie przypisany indeks assetu (z UserEditIntent / warstwy D).
-     * -1 = brak przypisania, użyj scene-based fallback.
+     * Explicitly assigned asset index (from UserEditIntent / layer D).
+     * -1 = no assignment, use the scene-based fallback.
      * >= 0 = MUST use this asset (user explicitly requested it).
      */
     @Builder.Default
@@ -92,71 +92,71 @@ public class JustifiedCut {
 
     public enum CutClassification {
         /**
-         * HARD CUT — pełna zmiana kadru.
-         * Triggery: zmiana topic, importance > 0.75, początek hooka, beat drop
+         * HARD CUT — a full frame change.
+         * Triggers: topic change, importance > 0.75, hook start, beat drop
          */
         HARD,
 
         /**
-         * SOFT CUT — lekka zmiana (zoom, pan, subtelne przejście).
-         * Triggery: koniec zdania + pauza, spadek energii, oddech
+         * SOFT CUT — a light change (zoom, pan, subtle transition).
+         * Triggers: sentence end + pause, energy drop, a breath
          */
         SOFT,
 
         /**
-         * MICRO CUT — dynamiczna przebitka, szybka seria.
-         * Triggery: wysoka energia (>0.8), szybkie tempo mowy, drop muzyczny
+         * MICRO CUT — a dynamic cutaway, a quick series.
+         * Triggers: high energy (>0.8), fast speech tempo, music drop
          */
         MICRO
     }
 
     public enum CutReason {
-        /** Zmiana tematu w narracji */
+        /** Topic change in the narration */
         TOPIC_CHANGE,
 
-        /** Wysoka ważność segmentu (importance > 0.75) */
+        /** High segment importance (importance > 0.75) */
         HIGH_IMPORTANCE,
 
-        /** Początek hooka (scroll-stopper) */
+        /** Hook start (scroll-stopper) */
         HOOK_START,
 
-        /** Koniec zdania + pauza w mowie */
+        /** Sentence end + pause in speech */
         SENTENCE_END_PAUSE,
 
-        /** Spadek energii narracji */
+        /** Narration energy drop */
         ENERGY_DROP,
 
-        /** Wzrost energii narracji */
+        /** Narration energy rise */
         ENERGY_RISE,
 
-        /** Wysoka energia mowy (>0.8) */
+        /** High speech energy (>0.8) */
         HIGH_ENERGY_BURST,
 
-        /** Zmiana tempa mowy (z szybkiego na wolne lub odwrotnie) */
+        /** Speech tempo change (from fast to slow or vice versa) */
         TEMPO_SHIFT,
 
-        /** Cięcie na beacie muzycznym */
+        /** Cut on a music beat */
         MUSIC_BEAT,
 
-        /** Drop w muzyce (wysoka energia muzyczna) */
+        /** Music drop (high music energy) */
         MUSIC_DROP,
 
-        /** Słowo kluczowe — cięcie na ważnym słowie */
+        /** Keyword — a cut on an important word */
         KEYWORD_EMPHASIS,
 
-        /** Dramatyczna pauza (>800ms) */
+        /** Dramatic pause (>800ms) */
         DRAMATIC_PAUSE,
 
-        /** Wymóg łuku montażowego (gęstość cięć w danej fazie) */
+        /** Editing-arc requirement (cut density in a given phase) */
         ARC_DENSITY,
 
-        /** Wymóg minimalnego/maksymalnego czasu ujęcia */
+        /** Minimum/maximum shot-duration requirement */
         DURATION_CONSTRAINT,
 
-        /** Call to action — cięcie przed/na CTA */
+        /** Call to action — a cut before/on the CTA */
         CTA_TRANSITION,
 
-        /** Reset uwagi widza — przerwa w monotonii */
+        /** Viewer attention reset — a break in the monotony */
         ATTENTION_RESET
     }
 }

@@ -9,20 +9,20 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * Warstwa B — ANALIZA TIMINGÓW MOWY z WhisperX.
+ * Layer B — SPEECH TIMING ANALYSIS from WhisperX.
  *
- * Analizuje per-word timestampy z WhisperX i wykrywa:
- *   - Pauzy > 300ms (breath), > 500ms (sentence), > 800ms (dramatic)
- *   - Granice zdań (interpunkcja + pauza)
- *   - Tempo mowy w oknach 2-sekundowych
- *   - Zmiany tempa (przyspieszenie/zwolnienie)
+ * Analyzes per-word timestamps from WhisperX and detects:
+ *   - Pauses > 300ms (breath), > 500ms (sentence), > 800ms (dramatic)
+ *   - Sentence boundaries (punctuation + pause)
+ *   - Speech tempo in 2-second windows
+ *   - Tempo changes (speeding up/slowing down)
  *
- * Te dane mówią WHERE ciąć:
- *   - Na pauzie = bezpieczny punkt cięcia (film grammar)
- *   - Na końcu zdania = naturalny punkt zmiany kadru
- *   - Zmiana tempa = potencjalna zmiana energii wizualnej
+ * This data tells WHERE to cut:
+ *   - On a pause = a safe cut point (film grammar)
+ *   - At the end of a sentence = a natural frame-change point
+ *   - Tempo change = a potential change in visual energy
  *
- * NIGDY nie tnij w środku słowa ani w środku myśli.
+ * NEVER cut in the middle of a word or in the middle of a thought.
  */
 @Slf4j
 @Service
@@ -31,20 +31,20 @@ public class SpeechAnalyzer {
     private static final Set<Character> SENTENCE_ENDS = Set.of('.', '!', '?');
     private static final Set<Character> ENUM_BREAKS = Set.of(',', ';');
 
-    /** Minimalna pauza uznawana za "oddech" */
+    /** Minimum pause considered a "breath" */
     private static final int BREATH_PAUSE_MS = 300;
 
-    /** Pauza uznawana za koniec zdania */
+    /** Pause considered a sentence end */
     private static final int SENTENCE_PAUSE_MS = 500;
 
-    /** Pauza uznawana za dramatyczną */
+    /** Pause considered dramatic */
     private static final int DRAMATIC_PAUSE_MS = 800;
 
-    /** Rozmiar okna do analizy tempa (ms) */
+    /** Window size for tempo analysis (ms) */
     private static final int TEMPO_WINDOW_MS = 2000;
 
     /**
-     * Analizuje timestampy słów i zwraca SpeechTimingAnalysis.
+     * Analyzes the word timestamps and returns a SpeechTimingAnalysis.
      */
     public SpeechTimingAnalysis analyze(List<SubtitleService.WordTiming> wordTimings) {
         if (wordTimings == null || wordTimings.isEmpty()) {

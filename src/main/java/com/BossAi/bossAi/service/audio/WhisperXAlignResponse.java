@@ -7,8 +7,8 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import java.util.List;
 
 /**
- * DTO mapujący response z WhisperX /api/v1/align endpoint.
- * Zawiera per-word timestamps z forced alignment (<20ms accuracy).
+ * DTO mapping the response from the WhisperX /api/v1/align endpoint.
+ * Contains per-word timestamps from forced alignment (<20ms accuracy).
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public record WhisperXAlignResponse(
@@ -35,8 +35,8 @@ public record WhisperXAlignResponse(
     ) {}
 
     /**
-     * Konwertuje WhisperX response na listę SubtitleService.WordTiming
-     * kompatybilną z istniejącym pipeline (RenderStep, EdlGeneratorService).
+     * Converts the WhisperX response into a list of SubtitleService.WordTiming
+     * compatible with the existing pipeline (RenderStep, EdlGeneratorService).
      */
     public List<SubtitleService.WordTiming> toWordTimings() {
         if (words == null) return List.of();

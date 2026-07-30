@@ -73,7 +73,7 @@ public class DirectorAiServiceImpl implements DirectorAiService {
 
         sb.append("STYLE: ").append(context.getStyle()).append("\n\n");
 
-        // === MUSIC ANALYSIS (jeśli dostępna) ===
+        // === MUSIC ANALYSIS (if available) ===
         AudioAnalysisResponse audio = context.getCachedAudioAnalysis();
         if (audio != null) {
             sb.append("=== MUSIC ANALYSIS (from audio AI) ===\n");

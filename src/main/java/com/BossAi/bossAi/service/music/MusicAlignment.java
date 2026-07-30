@@ -5,13 +5,13 @@ import com.BossAi.bossAi.service.generation.context.ScriptResult;
 import java.util.List;
 
 /**
- * Wynik wyrównania muzyki do wideo.
+ * Result of aligning the music to the video.
  *
- * @param startOffsetMs offset w ms od początku utworu muzycznego — od tego momentu
- *                       muzyka powinna zacząć grać w filmie (seek w FFmpeg).
- *                       Np. 43000 = zacznij od 43. sekundy muzyki.
- * @param directions    dynamiczne musicDirections per scena —
- *                       bazowane na analizie struktury muzyki, nie na domyśle GPT.
+ * @param startOffsetMs offset in ms from the start of the music track — from this point
+ *                       the music should start playing in the video (seek in FFmpeg).
+ *                       E.g. 43000 = start from the 43rd second of the music.
+ * @param directions    dynamic per-scene musicDirections —
+ *                       based on analysis of the music structure, not GPT guesswork.
  */
 public record MusicAlignment(
         int startOffsetMs,

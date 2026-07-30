@@ -20,25 +20,25 @@ import java.util.concurrent.TimeUnit;
 /**
  * FalAiService — klient do fal.ai async queue API.
  *
- * FAZA 1 BUGFIX — generateVideo():
+ * PHASE 1 BUGFIX — generateVideo():
  *
  *   Problem: Kling 1.6 image-to-video API wymaga image_url w polu "image_url"
- *   na poziomie głównego body, ale wcześniejszy kod używał tej samej struktury
- *   co text-to-video. W efekcie obraz był ignorowany — każda scena generowała
- *   losowy klip bez związku z poprzednio wygenerowanym obrazem.
+ *   at the top level of the body, but the earlier code used the same structure
+ *   as text-to-video. As a result the image was ignored — each scene generated
+ *   a random clip unrelated to the previously generated image.
  *
- *   Różne endpointy fal.ai mają różne struktury body:
+ *   Different fal.ai endpoints have different body structures:
  *     - kling-video/v1/standard/image-to-video  → { image_url, prompt, duration, aspect_ratio }
  *     - kling-video/v1/standard/text-to-video   → { prompt, duration, aspect_ratio }
  *     - ltx-video (free)                        → { image_url, prompt }
  *     - minimax/video-01-live (free tier)        → { first_frame_image, prompt }
  *
- *   Rozwiązanie: buildVideoRequestBody() buduje body zależnie od modelu.
- *   Każdy provider ma inną strukturę — centralizujemy to w jednym miejscu.
+ *   Solution: buildVideoRequestBody() builds the body depending on the model.
+ *   Each provider has a different structure — we centralize it in one place.
  *
- * FAZA 1 BUGFIX — image model:
+ * PHASE 1 BUGFIX — image model:
  *
- *   generateImage() używało "portrait_16_9" zamiast "portrait_9_16".
+ *   generateImage() used "portrait_16_9" instead of "portrait_9_16".
  *   TikTok wymaga formatu pionowego 9:16. Naprawione.
  */
 @Slf4j
@@ -69,7 +69,7 @@ public class FalAiService {
     // =========================================================================
 
     /**
-     * Generuje obraz 9:16 dla jednej sceny.
+     * Generates a 9:16 image for a single scene.
      * BUGFIX: zmieniono "portrait_16_9" → "portrait_9_16" (format pionowy TikTok).
      */
     @Retry(name = "falAi")
@@ -95,7 +95,7 @@ public class FalAiService {
 
         String imageUrl = result.path("images").get(0).path("url").asText();
         if (imageUrl.isBlank()) {
-            throw new RuntimeException("[FalAiService] Brak URL obrazu w odpowiedzi");
+            throw new RuntimeException("[FalAiService] No image URL in the response");
         }
 
         log.info("[FalAiService] Image gotowy — {}", imageUrl);
@@ -107,18 +107,18 @@ public class FalAiService {
     // =========================================================================
 
     /**
-     * Generuje klip wideo z obrazu (image-to-video).
+     * Generates a video clip from an image (image-to-video).
      *
-     * BUGFIX: Każdy provider fal.ai ma inną strukturę body dla image-to-video.
-     * Wcześniej używaliśmy jednej struktury dla wszystkich modeli, przez co
-     * obraz był ignorowany i dostawaliśmy losowe klipy bez spójności wizualnej.
+     * BUGFIX: Each fal.ai provider has a different body structure for image-to-video.
+     * Previously we used one structure for all models, which meant
+     * the image was ignored and we got random clips with no visual consistency.
      *
-     * Teraz: buildVideoRequestBody() dobiera strukturę body do modelu.
+     * Now: buildVideoRequestBody() picks the body structure to match the model.
      *
-     * @param imageUrl     URL obrazu z ImageStep — musi być publiczny URL
+     * @param imageUrl     the image URL from ImageStep — must be a public URL
      * @param motionPrompt opis ruchu z ScriptResult.SceneScript
-     * @param durationMs   czas trwania (Kling: 5 lub 10s)
-     * @param modelId      model z ModelSelector (np. "fal-ai/kling-video/v1.6/pro/image-to-video")
+     * @param durationMs   duration (Kling: 5 or 10s)
+     * @param modelId      the model from ModelSelector (e.g. "fal-ai/kling-video/v1.6/pro/image-to-video")
      */
     @Retry(name = "falAi")
     public byte[] generateVideo(String imageUrl, String motionPrompt,
@@ -126,7 +126,7 @@ public class FalAiService {
         log.info("[FalAiService] generateVideo — model: {}, imageUrl: {}, motion: {}...",
                 modelId, imageUrl, truncate(motionPrompt, 60));
 
-        // Budujemy body zależnie od modelu (każdy provider ma inną strukturę)
+        // We build the body depending on the model (each provider has a different structure)
         Map<String, Object> requestBody = buildVideoRequestBody(modelId, imageUrl, motionPrompt, durationMs);
 
         JsonNode submitResponse = submitJobFull(modelId, requestBody);
@@ -140,7 +140,7 @@ public class FalAiService {
 
         String videoUrl = extractVideoUrl(result, modelId);
         if (videoUrl.isBlank()) {
-            throw new RuntimeException("[FalAiService] Brak URL wideo w odpowiedzi. Response: " + result);
+            throw new RuntimeException("[FalAiService] No video URL in the response. Response: " + result);
         }
 
         log.info("[FalAiService] Video gotowy — {}", videoUrl);
@@ -152,10 +152,10 @@ public class FalAiService {
     // =========================================================================
 
     /**
-     * Buduje body requestu dla video generation.
+     * Builds the request body for video generation.
      *
-     * Każdy provider fal.ai ma inną strukturę — centralizujemy to tutaj.
-     * Przy dodaniu nowego providera (Runway, Luma) → dodaj case tutaj.
+     * Each fal.ai provider has a different structure — we centralize it here.
+     * When adding a new provider (Runway, Luma) → add a case here.
      *
      * Kling image-to-video:
      *   Endpoint: fal-ai/kling-video/v1/standard/image-to-video
@@ -165,12 +165,12 @@ public class FalAiService {
      * LTX Video (free):
      *   Endpoint: fal-ai/ltx-video
      *   Body: { image_url, prompt }
-     *   Note: LTX nie obsługuje duration/aspect_ratio — generuje zawsze ~5s
+     *   Note: LTX doesn't support duration/aspect_ratio — it always generates ~5s
      *
      * MiniMax Hailuo (free):
      *   Endpoint: fal-ai/minimax/video-01-live
      *   Body: { first_frame_image: url, prompt }
-     *   Note: Używa "first_frame_image" zamiast "image_url"
+     *   Note: Uses "first_frame_image" instead of "image_url"
      */
     private Map<String, Object> buildVideoRequestBody(
             String modelId, String imageUrl, String motionPrompt, int durationMs) {
@@ -180,7 +180,7 @@ public class FalAiService {
 
         if (isKlingModel(modelId)) {
             // Kling wymaga konkretnego image-to-video endpointu
-            // i duration jako String, nie int
+            // and duration as a String, not an int
             body.put("image_url", imageUrl);
             body.put("prompt", motionPrompt);
             body.put("duration", String.valueOf(durationSeconds));
@@ -192,13 +192,13 @@ public class FalAiService {
             body.put("prompt", motionPrompt);
 
         } else if (isMiniMaxModel(modelId)) {
-            // MiniMax Hailuo — używa "first_frame_image" zamiast "image_url"
+            // MiniMax Hailuo — uses "first_frame_image" instead of "image_url"
             body.put("first_frame_image", imageUrl);
             body.put("prompt", motionPrompt);
 
         } else {
-            // Domyślna struktura (dla nieznanych modeli / przyszłych providerów)
-            log.warn("[FalAiService] Nieznany model: {} — używam domyślnej struktury body", modelId);
+            // Default structure (for unknown models / future providers)
+            log.warn("[FalAiService] Unknown model: {} — using the default body structure", modelId);
             body.put("image_url", imageUrl);
             body.put("prompt", motionPrompt);
             body.put("duration", String.valueOf(durationSeconds));
@@ -209,19 +209,19 @@ public class FalAiService {
     }
 
     /**
-     * Wyciąga URL wideo z odpowiedzi fal.ai.
-     * Różne modele mają różne ścieżki do URL w JSON.
+     * Extracts the video URL from the fal.ai response.
+     * Different models have different paths to the URL in the JSON.
      *
      * Kling:    response.video.url
      * LTX:      response.video.url
      * MiniMax:  response.video_url  (flat string)
      */
     private String extractVideoUrl(JsonNode result, String modelId) {
-        // Próbuj standardową ścieżkę Kling/LTX
+        // Try the standard Kling/LTX path
         String url = result.path("video").path("url").asText("");
         if (!url.isBlank()) return url;
 
-        // Fallback dla MiniMax i innych flat-structure models
+        // Fallback for MiniMax and other flat-structure models
         url = result.path("video_url").asText("");
         if (!url.isBlank()) return url;
 
@@ -229,7 +229,7 @@ public class FalAiService {
         url = result.path("url").asText("");
         if (!url.isBlank()) return url;
 
-        log.error("[FalAiService] Nie mogę znaleźć URL wideo w odpowiedzi. Model: {}, Response: {}",
+        log.error("[FalAiService] Cannot find the video URL in the response. Model: {}, Response: {}",
                 modelId, result);
         return "";
     }
@@ -253,12 +253,12 @@ public class FalAiService {
 
             if (root.path("request_id").asText().isBlank()) {
                 throw new RuntimeException(
-                        "fal.ai nie zwrócił request_id. Response: " + responseJson);
+                        "fal.ai did not return a request_id. Response: " + responseJson);
             }
 
             return root;
         } catch (Exception e) {
-            throw new RuntimeException("[FalAiService] Błąd parsowania submit response", e);
+            throw new RuntimeException("[FalAiService] Error parsing the submit response", e);
         }
     }
 
@@ -310,7 +310,7 @@ public class FalAiService {
 
             return objectMapper.readTree(resultJson);
         } catch (Exception e) {
-            throw new RuntimeException("[FalAiService] Błąd pobierania wyniku z: " + responseUrl, e);
+            throw new RuntimeException("[FalAiService] Error fetching the result from: " + responseUrl, e);
         }
     }
 
@@ -319,10 +319,10 @@ public class FalAiService {
 
         try (Response response = okHttpClient.newCall(request).execute()) {
             if (!response.isSuccessful()) {
-                throw new IOException("[FalAiService] HTTP " + response.code() + " przy pobieraniu: " + url);
+                throw new IOException("[FalAiService] HTTP " + response.code() + " while downloading: " + url);
             }
             if (response.body() == null) {
-                throw new IOException("[FalAiService] Puste body przy pobieraniu: " + url);
+                throw new IOException("[FalAiService] Empty body while downloading: " + url);
             }
             byte[] bytes = response.body().bytes();
             log.info("[FalAiService] Pobrano {} bytes z {}", bytes.length, url);

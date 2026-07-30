@@ -23,10 +23,10 @@ import java.util.Optional;
 import java.util.UUID;
 
 /**
- * Wewnętrzny endpoint do serwowania assetów po UUID.
- * Używany przez Remotion renderer (localhost:3000) — bez autentykacji.
+ * Internal endpoint for serving assets by UUID.
+ * Used by the Remotion renderer (localhost:3000) — without authentication.
  *
- * Wymaga dodania "/internal/**" do SecurityConfig whitelist.
+ * Requires "/internal/**" to be added to the SecurityConfig whitelist.
  */
 @Slf4j
 @RestController
@@ -39,11 +39,11 @@ public class InternalAssetController {
     private final AssetRepository assetRepository;
 
     /**
-     * GET /internal/assets/{assetId}/file — pobiera plik media po UUID assetu.
-     * Remotion wywołuje ten endpoint żeby pobrać wideo/obraz/audio do renderowania.
+     * GET /internal/assets/{assetId}/file — fetches the media file by asset UUID.
+     * Remotion calls this endpoint to fetch the video/image/audio for rendering.
      *
-     * Zwraca Resource (nie byte[]) — Spring automatycznie obsługuje HTTP Range requests,
-     * co jest wymagane przez Remotion's <Video> component (Chromium seek).
+     * Returns a Resource (not byte[]) — Spring automatically handles HTTP Range requests,
+     * which is required by Remotion's <Video> component (Chromium seek).
      */
     @GetMapping("/{assetId}/file")
     public ResponseEntity<Resource> getAssetFile(@PathVariable UUID assetId) {
@@ -91,7 +91,7 @@ public class InternalAssetController {
     }
 
     /**
-     * GET /internal/assets/{assetId}/info — metadane assetu (bez pliku).
+     * GET /internal/assets/{assetId}/info — asset metadata (without the file).
      */
     @GetMapping("/{assetId}/info")
     public ResponseEntity<?> getAssetInfo(@PathVariable UUID assetId) {

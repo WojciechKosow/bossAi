@@ -31,22 +31,22 @@ import java.util.UUID;
 import java.util.stream.Collectors;
 
 /**
- * Most miedzy starym pipeline (GenerationContext) a nowym
+ * A bridge between the old pipeline (GenerationContext) and the new
  * (VideoProject + ProjectAsset + EDL).
  *
- * Po zakonczeniu fazy generowania assetow przez stary pipeline:
- *   1. {@link #bridgeToVideoProject} — tworzy VideoProject i mapuje assety.
+ * After the old pipeline finishes the asset-generation phase:
+ *   1. {@link #bridgeToVideoProject} — creates a VideoProject and maps the assets.
  *   2. {@link #bootstrapEdlAndRender} — syntetyzuje basic EDL (segment-per-scene)
- *      i tworzy RenderJob w stanie COMPLETE wskazujacy na finalne MP4 ze starego
+ *      and creates a RenderJob in the COMPLETE state pointing to the final MP4 from the old
  *      pipeline.
  *
- * Te dwie operacje sa rozdzielone na osobne transakcje, zeby blad
- * podczas zapisu EDL/RenderJob nie cofal stworzenia projektu.
+ * These two operations are split into separate transactions, so an error
+ * while saving the EDL/RenderJob does not roll back the project creation.
  *
- * Dzieki temu kazda generacja konczy sie projektem widocznym i edytowalnym
- * na timeline, niezaleznie od tego czy nowy pipeline (Remotion) jest aktywny.
- * Gdy useNewPipeline=true, orkiestrator dalej moze podmienic EDL na bardziej
- * zaawansowany i przerobic render — zapisujac nowa wersje EDL i RenderJob.
+ * This way every generation ends with a project that is visible and editable
+ * on the timeline, regardless of whether the new pipeline (Remotion) is active.
+ * When useNewPipeline=true, the orchestrator can still swap the EDL for a more
+ * advanced one and redo the render — saving a new version of the EDL and RenderJob.
  */
 @Slf4j
 @Service
@@ -91,13 +91,13 @@ public class AssetBridgeService {
     }
 
     /**
-     * Tworzy VideoProject i rejestruje wszystkie assety z GenerationContext.
+     * Creates a VideoProject and registers all assets from GenerationContext.
      */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public UUID bridgeToVideoProject(GenerationContext context, Generation generation, String email) {
         log.info("[AssetBridge] Bridging generation {} to VideoProject", context.getGenerationId());
 
-        // 1. Utwórz VideoProject
+        // 1. Create the VideoProject
         VideoProject project = videoProjectService.createProject(
                 email,
                 context.getPrompt() != null
@@ -112,7 +112,7 @@ public class AssetBridgeService {
         // 2. Linkuj z Generation
         videoProjectService.linkGeneration(projectId, generation);
 
-        // 3. Rejestruj assety scen (IMAGE / VIDEO)
+        // 3. Register the scene assets (IMAGE / VIDEO)
         // displayOrder = scene.getIndex() preserves the user's original upload order
         // even when all rows are saved within a single transaction (same createdAt).
         for (SceneAsset scene : context.getScenes()) {
@@ -141,7 +141,7 @@ public class AssetBridgeService {
             }
         }
 
-        // 4. Rejestruj custom TTS clipy (oddzielne assety) — pozwala edytować voice per-clip na timeline
+        // 4. Register the custom TTS clips (separate assets) — allows editing the voice per-clip on the timeline
         if (context.hasCustomTts()) {
             for (int i = 0; i < context.getCustomTtsAssets().size(); i++) {
                 Asset ttsAsset = context.getCustomTtsAssets().get(i);
@@ -203,7 +203,7 @@ public class AssetBridgeService {
             );
         }
 
-        // 5. Rejestruj muzykę
+        // 5. Register the music
         if (context.getMusicLocalPath() != null) {
             ProjectAsset musicAsset = projectAssetService.createAsset(
                     projectId,
@@ -230,7 +230,7 @@ public class AssetBridgeService {
     }
 
     /**
-     * Syntetyzuje basic EDL (segment-per-scene + audio + napisy) i tworzy
+     * Synthesizes a basic EDL (segment-per-scene + audio + subtitles) and creates
      * RenderJob w stanie COMPLETE wskazujacy na podany URL filmu.
      *
      * Wywolywane po {@link #bridgeToVideoProject}, w osobnej transakcji
@@ -278,12 +278,12 @@ public class AssetBridgeService {
     }
 
     /**
-     * Buduje proste EDL z dostepnych ProjectAssetow + scen w GenerationContext:
+     * Builds a simple EDL from the available ProjectAssets + scenes in GenerationContext:
      *   - po jednym EdlSegment na scene (layer 0, sekwencyjnie)
-     *   - audio tracks dla voiceover + music (jesli sa)
-     *   - text overlays z subtitleText sceny (jesli wypelnione)
+     *   - audio tracks for voiceover + music (if any)
+     *   - text overlays from the scene's subtitleText (if filled in)
      *
-     * Bez efektow ani transitions — uzytkownik moze je dodac w edytorze.
+     * Without effects or transitions — the user can add them in the editor.
      */
     private EdlDto synthesizeBasicEdl(GenerationContext context, List<ProjectAsset> projectAssets) {
         List<ProjectAsset> sceneAssets = projectAssets.stream()

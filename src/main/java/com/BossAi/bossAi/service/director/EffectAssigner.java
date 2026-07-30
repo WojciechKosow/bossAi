@@ -8,14 +8,14 @@ import org.springframework.stereotype.Component;
 import java.util.List;
 
 /**
- * Przypisuje efekty i przejścia do cutów.
+ * Assigns effects and transitions to cuts.
  *
- * 3 efekty TikTok:
- *   - SMASH_ZOOM  — scena 0 (hook), snap zoom 1.0→1.6 w 8 klatkach
- *   - ZOOM_IN     — sceny parzyste + ostatnia, gładki zoom 1.0→1.20
- *   - WHIP_PAN    — sceny nieparzyste, poziomy pan z motion blur
+ * 3 TikTok effects:
+ *   - SMASH_ZOOM  — scene 0 (hook), snap zoom 1.0→1.6 over 8 frames
+ *   - ZOOM_IN     — even scenes + the last one, smooth zoom 1.0→1.20
+ *   - WHIP_PAN    — odd scenes, horizontal pan with motion blur
  *
- * Przejście między scenami: fade_white (scena 0→1) + fade (pozostałe).
+ * Transition between scenes: fade_white (scene 0→1) + fade (the rest).
  */
 @Slf4j
 @Component
@@ -58,7 +58,7 @@ public class EffectAssigner {
                 scene.setTransitionToNext("cut");
                 continue;
             }
-            // Po hooku (scena 0): biały flash — przyciąga uwagę. Potem: fade.
+            // After the hook (scene 0): a white flash — grabs attention. Then: fade.
             scene.setTransitionToNext(i == 0 ? "fade_white" : "fade");
         }
     }
@@ -68,15 +68,15 @@ public class EffectAssigner {
     // =========================================================================
 
     private EffectType pickEffectForScene(int sceneIndex, int lastIndex, VideoStyle style) {
-        // Cinematic/Luxury: zawsze gładki zoom
+        // Cinematic/Luxury: always a smooth zoom
         if (style == VideoStyle.CINEMATIC || style == VideoStyle.LUXURY_AD) {
             return EffectType.ZOOM_IN;
         }
-        // Hook (scena 0): snap zoom
+        // Hook (scene 0): snap zoom
         if (sceneIndex == 0) return EffectType.SMASH_ZOOM;
-        // Ostatnia scena (CTA): stabilny zoom
+        // Last scene (CTA): stable zoom
         if (sceneIndex == lastIndex) return EffectType.ZOOM_IN;
-        // Alternacja: parzyste → ZOOM_IN, nieparzyste → WHIP_PAN
+        // Alternation: even → ZOOM_IN, odd → WHIP_PAN
         return sceneIndex % 2 == 0 ? EffectType.ZOOM_IN : EffectType.WHIP_PAN;
     }
 }

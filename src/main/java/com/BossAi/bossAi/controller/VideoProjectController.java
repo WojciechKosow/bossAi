@@ -40,7 +40,7 @@ public class VideoProjectController {
     // =========================================================================
 
     /**
-     * GET /api/v1/projects — lista projektów usera.
+     * GET /api/v1/projects — list of the user's projects.
      */
     @GetMapping
     public ResponseEntity<List<VideoProjectDTO>> getMyProjects(Authentication auth) {
@@ -48,7 +48,7 @@ public class VideoProjectController {
     }
 
     /**
-     * GET /api/v1/projects/{id} — projekt + aktualny EDL + status.
+     * GET /api/v1/projects/{id} — project + current EDL + status.
      */
     @GetMapping("/{id}")
     public ResponseEntity<VideoProjectDTO> getProject(
@@ -64,7 +64,7 @@ public class VideoProjectController {
     // =========================================================================
 
     /**
-     * GET /api/v1/projects/{id}/timeline — aktualny EDL JSON (timeline-ready format).
+     * GET /api/v1/projects/{id}/timeline — current EDL JSON (timeline-ready format).
      */
     @GetMapping("/{id}/timeline")
     public ResponseEntity<String> getTimeline(
@@ -81,9 +81,9 @@ public class VideoProjectController {
     /**
      * Phase 3.1 — GET /api/v1/projects/{id}/timeline/edl
      *
-     * Wariant z deserializacją EDL do EdlDto (typed response). Daje frontendowi
-     * gotową strukturę segmentów/audio tracków/overlayów do interaktywnego
-     * timeline editora.
+     * Variant that deserializes the EDL into EdlDto (typed response). Gives the
+     * frontend a ready-made structure of segments/audio tracks/overlays for the
+     * interactive timeline editor.
      */
     @GetMapping("/{id}/timeline/edl")
     public ResponseEntity<EdlDto> getTimelineEdl(
@@ -104,13 +104,13 @@ public class VideoProjectController {
     /**
      * Phase 3.2 — PUT /api/v1/projects/{id}/timeline
      *
-     * User edytuje timeline (kolejność segmentów, asset assignments, efekty,
-     * przejścia) i wysyła zaktualizowany EDL. Backend:
-     *   1. Waliduje EDL przez EdlValidator.
-     *   2. Zapisuje nową wersję (USER_MODIFIED) — historia wersji się buduje.
-     *   3. Opcjonalnie odpala re-render (query param triggerRender, default true).
+     * The user edits the timeline (segment order, asset assignments, effects,
+     * transitions) and sends the updated EDL. The backend:
+     *   1. Validates the EDL via EdlValidator.
+     *   2. Saves a new version (USER_MODIFIED) — building up the version history.
+     *   3. Optionally triggers a re-render (query param triggerRender, default true).
      *
-     * Zwraca metadane zapisanej wersji.
+     * Returns the metadata of the saved version.
      */
     @PutMapping("/{id}/timeline")
     public ResponseEntity<EdlVersionDTO> putTimeline(
@@ -167,7 +167,7 @@ public class VideoProjectController {
     }
 
     /**
-     * GET /api/v1/projects/{id}/versions — historia wersji EDL.
+     * GET /api/v1/projects/{id}/versions — EDL version history.
      */
     @GetMapping("/{id}/versions")
     public ResponseEntity<List<EdlVersionDTO>> getEdlVersions(
@@ -179,7 +179,7 @@ public class VideoProjectController {
     }
 
     /**
-     * GET /api/v1/projects/{id}/versions/{version} — EDL JSON konkretnej wersji.
+     * GET /api/v1/projects/{id}/versions/{version} — EDL JSON of a specific version.
      */
     @GetMapping("/{id}/versions/{version}")
     public ResponseEntity<String> getEdlByVersion(
@@ -199,7 +199,7 @@ public class VideoProjectController {
     // =========================================================================
 
     /**
-     * GET /api/v1/projects/{id}/assets — lista assetów z metadanymi + thumbnailami.
+     * GET /api/v1/projects/{id}/assets — list of assets with metadata + thumbnails.
      */
     @GetMapping("/{id}/assets")
     public ResponseEntity<List<ProjectAssetDTO>> getProjectAssets(
@@ -211,7 +211,7 @@ public class VideoProjectController {
     }
 
     /**
-     * GET /api/v1/projects/{id}/assets/{assetId} — pojedynczy asset + metadane.
+     * GET /api/v1/projects/{id}/assets/{assetId} — a single asset + metadata.
      */
     @GetMapping("/{id}/assets/{assetId}")
     public ResponseEntity<ProjectAssetDTO> getAsset(
@@ -229,7 +229,7 @@ public class VideoProjectController {
     // =========================================================================
 
     /**
-     * POST /api/v1/projects/{id}/render — trigger renderingu aktualnego EDL.
+     * POST /api/v1/projects/{id}/render — trigger rendering of the current EDL.
      */
     @PostMapping("/{id}/render")
     public ResponseEntity<RenderJobDTO> triggerRender(
@@ -244,7 +244,7 @@ public class VideoProjectController {
     }
 
     /**
-     * GET /api/v1/projects/{id}/render/status — status renderingu.
+     * GET /api/v1/projects/{id}/render/status — rendering status.
      */
     @GetMapping("/{id}/render/status")
     public ResponseEntity<RenderJobDTO> getRenderStatus(
@@ -256,7 +256,7 @@ public class VideoProjectController {
     }
 
     /**
-     * GET /api/v1/projects/{id}/render/progress — SSE stream postępu renderu.
+     * GET /api/v1/projects/{id}/render/progress — SSE stream of render progress.
      *
      * Frontend (timeline editor) otwiera EventSource po "Save & re-render":
      *   const es = new EventSource('/api/v1/projects/{id}/render/progress');

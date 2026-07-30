@@ -8,14 +8,14 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 /**
- * AssetReuseStep — uruchamiany po ScriptStep, przed ImageStep.
+ * AssetReuseStep — runs after ScriptStep, before ImageStep.
  *
- * Jeśli reuseAssets=true w kontekście, wywołuje AssetReuseService
- * który przez GPT dopasowuje wcześniejsze assety usera do nowych scen.
+ * If reuseAssets=true in the context, it calls AssetReuseService
+ * which uses GPT to match the user's earlier assets to the new scenes.
  *
  * Wynik: context.reusedImageAssets i context.reusedVideoAssets
- * zostają wypełnione. ImageStep i VideoStep sprawdzają te mapy
- * i pomijają generację dla dopasowanych scen.
+ * get filled in. ImageStep and VideoStep check these maps
+ * and skip generation for the matched scenes.
  */
 @Slf4j
 @Service
@@ -37,7 +37,7 @@ public class AssetReuseStep implements GenerationStep {
         context.updateProgress(
                 GenerationStepName.SCRIPT,
                 GenerationStepName.SCRIPT.getProgressPercent() + 5,
-                "Szukam pasujących assetów z poprzednich generacji..."
+                "Looking for matching assets from previous generations..."
         );
 
         assetReuseService.matchReusableAssets(context);

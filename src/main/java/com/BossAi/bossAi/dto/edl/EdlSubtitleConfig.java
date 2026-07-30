@@ -10,8 +10,8 @@ import lombok.NoArgsConstructor;
 import java.util.List;
 
 /**
- * Konfiguracja napisow per-word (Whisper-based subtitles).
- * Remotion uzywa tego w komponencie SubtitleTrack z KaraokeHighlight.
+ * Per-word subtitle configuration (Whisper-based subtitles).
+ * Remotion uses this in the SubtitleTrack component with KaraokeHighlight.
  */
 @Data
 @Builder

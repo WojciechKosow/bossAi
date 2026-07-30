@@ -10,18 +10,18 @@ import lombok.NoArgsConstructor;
 import java.util.List;
 
 /**
- * Root DTO dla Edit Decision List (EDL) — source of truth dla timeline.
+ * Root DTO for the Edit Decision List (EDL) — the source of truth for the timeline.
  *
- * Struktura:
+ * Structure:
  *   EdlDto
- *   ├── metadata (styl, tempo, aspect ratio)
- *   ├── segments[] (klipy na timeline)
- *   │   ├── assetId (referencja do ProjectAsset)
- *   │   ├── timeRange (start/end na timeline)
- *   │   ├── trim (in/out w source)
+ *   ├── metadata (style, pacing, aspect ratio)
+ *   ├── segments[] (clips on the timeline)
+ *   │   ├── assetId (reference to ProjectAsset)
+ *   │   ├── timeRange (start/end on the timeline)
+ *   │   ├── trim (in/out within the source)
  *   │   ├── effects[] (zoom, shake, speed ramp...)
- *   │   └── transition (do nastepnego segmentu)
- *   ├── audioTracks[] (voice, muzyka, SFX)
+ *   │   └── transition (to the next segment)
+ *   ├── audioTracks[] (voice, music, SFX)
  *   └── textOverlays[] (subtitles, lower thirds, CTAs)
  */
 @Data
@@ -46,7 +46,7 @@ public class EdlDto {
     @JsonProperty("text_overlays")
     private List<EdlTextOverlay> textOverlays;
 
-    /** GIF overlays (subscribe button, follow, fire, etc.) nakładane na sceny */
+    /** GIF overlays (subscribe button, follow, fire, etc.) laid over the scenes */
     @JsonProperty("gif_overlays")
     private List<EdlGifOverlay> gifOverlays;
 
