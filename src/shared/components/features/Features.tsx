@@ -5,8 +5,8 @@ import type { ReactNode } from "react";
 const features: { icon: ReactNode; title: string; desc: string }[] = [
   {
     icon: <Wand2 className="w-5 h-5 text-white" />,
-    title: "AI Script & Voiceover",
-    desc: "Drop your brief and get a fully narrated video script — tone, pacing, and hooks included.",
+    title: "AI Script",
+    desc: "Drop your brief and get a scroll-stopping video script — tone, pacing, and hooks included.",
   },
   {
     icon: <Scissors className="w-5 h-5 text-white" />,

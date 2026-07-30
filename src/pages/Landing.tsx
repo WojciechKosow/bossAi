@@ -2,14 +2,14 @@ import SectionCTA from "../shared/components/cta/SectionCTA";
 import Features from "../shared/components/features/Features";
 import Hero from "../shared/components/hero/Hero";
 import Pricing from "../shared/components/pricing/Pricing";
-import Testimonials from "../shared/components/testimonials/Testimonials";
+import Workflow from "../shared/components/workflow/Workflow";
 
 const Landing = () => {
   return (
     <>
       <Hero />
       <Features />
-      <Testimonials />
+      <Workflow />
       <Pricing />
       <SectionCTA />
     </>
