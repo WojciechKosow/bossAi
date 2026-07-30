@@ -19,7 +19,11 @@ const AuthLayout = ({ children, title }: Props) => {
         {/* LOGO */}
         <div className="flex justify-center mb-6">
           <Link to="/">
-            <BrandLogo tone="auto" iconClassName="size-10" textClassName="text-lg" />
+            <BrandLogo
+              tone="auto"
+              iconClassName="size-10"
+              textClassName="text-lg"
+            />
           </Link>
         </div>
 
