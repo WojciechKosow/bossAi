@@ -7,12 +7,12 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * Registry efektow dostepnych w Remotion renderer.
+ * Registry of the effects available in the Remotion renderer.
  *
- * Mapuje nazwy efektow na domyslne parametry.
- * Uzywany przez EdlGeneratorService do walidacji i uzupelniania parametrow.
+ * Maps effect names to their default parameters.
+ * Used by EdlGeneratorService to validate and fill in parameters.
  *
- * REMOTION_EFFECTS — efekty aktualnie zaimplementowane w Remotion renderer.
+ * REMOTION_EFFECTS — effects currently implemented in the Remotion renderer.
  * Nowe efekty TikTok-native sa w pelnym rejestrze, ale mapowane na Remotion-safe
  * odpowiedniki az do wdrozenia na remotion-branch.
  */
@@ -41,19 +41,19 @@ public class EffectRegistry {
 
     // ─── Efekty TikTok-native (nowe) ─────────────────────────────────
 
-    /** Snap zoom ekstremalny — stop-scroll w <100ms, używany wyłącznie na hooku */
+    /** Extreme snap zoom — stop-scroll in <100ms, used exclusively on the hook */
     public static final String SMASH_ZOOM = "smash_zoom";
-    /** Gaussian blur na końcu segmentu przed cięciem — płynność między klipami */
+    /** Gaussian blur at the end of a segment before the cut — smoothness between clips */
     public static final String BLUR_TRANSITION = "blur_transition";
-    /** Skok jasności +0.4 przez ~120ms — punch na bicie lub reveal */
+    /** Brightness jump +0.4 for ~120ms — punch on the beat or reveal */
     public static final String BRIGHTNESS_BURST = "brightness_burst";
-    /** Ekstremalny pan 40-60% z motion blur — sygnatura przejścia sceny */
+    /** Extreme pan 40-60% with motion blur — a scene-transition signature */
     public static final String WHIP_PAN = "whip_pan";
     /** Skok saturacji +0.3 — reveal produktu, CTA */
     public static final String COLOR_POP = "color_pop";
     /** Szybkie wzmocnienie vignette na dropie */
     public static final String VIGNETTE_PULSE = "vignette_pulse";
-    /** Chromatic aberration burst na wejściu sceny — red/blue channel split, dropy i hooki */
+    /** Chromatic aberration burst on scene entry — red/blue channel split, drops and hooks */
     public static final String RGB_SPLIT = "rgb_split";
 
     // ─── Przejscia ────────────────────────────────────────────────────
@@ -78,7 +78,7 @@ public class EffectRegistry {
     public static final String TEXT_ANIM_KARAOKE = "karaoke";
 
     /**
-     * Efekty aktualnie zaimplementowane w Remotion renderer.
+     * Effects currently implemented in the Remotion renderer.
      * To add a new effect: implement the component in the remotion-branch, add it here.
      */
     private static final Set<String> REMOTION_EFFECTS = Set.of(
@@ -93,14 +93,14 @@ public class EffectRegistry {
 
     /**
      * Fallback mapping for effects not yet implemented in Remotion.
-     * Aktualnie pusty — wszystkie efekty są obsługiwane.
+     * Currently empty — all effects are supported.
      */
     private static final Map<String, String> REMOTION_FALLBACKS = Map.of();
 
     private static final Map<String, Map<String, Object>> EFFECT_DEFAULTS = Map.ofEntries(
             Map.entry(ZOOM_IN, Map.of("scale_from", 1.0, "scale_to", 1.3, "easing", "easeInOut")),
             Map.entry(ZOOM_OUT, Map.of("scale_from", 1.3, "scale_to", 1.0, "easing", "easeInOut")),
-            // easeOut = szybki start, wolny koniec → snap/punch feel zamiast opóźnionego easeIn
+            // easeOut = fast start, slow end → snap/punch feel instead of a delayed easeIn
             Map.entry(FAST_ZOOM, Map.of("scale_from", 1.0, "scale_to", 1.6, "easing", "easeOut", "duration_ms", 150)),
             Map.entry(PAN_LEFT, Map.of("direction", "left", "distance_percent", 13, "easing", "linear")),
             Map.entry(PAN_RIGHT, Map.of("direction", "right", "distance_percent", 13, "easing", "linear")),
@@ -160,9 +160,9 @@ public class EffectRegistry {
     }
 
     /**
-     * Zwraca Remotion-safe odpowiednik efektu.
-     * Jeśli efekt jest już obsługiwany — zwraca go bez zmian.
-     * Nowe efekty TikTok-native → fallback na najbliższy Remotion equivalent.
+     * Returns the Remotion-safe equivalent of the effect.
+     * If the effect is already supported — returns it unchanged.
+     * New TikTok-native effects → fallback to the nearest Remotion equivalent.
      */
     public String mapToRemotionSafeEffect(String effectType) {
         if (isRemotionSupportedEffect(effectType)) return effectType;

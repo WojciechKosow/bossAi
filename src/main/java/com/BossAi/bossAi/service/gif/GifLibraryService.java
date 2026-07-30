@@ -20,11 +20,11 @@ import java.util.concurrent.ThreadLocalRandom;
  *
  * Giphy Stickers API (free):
  *   GET https://api.giphy.com/v1/stickers/search?api_key={key}&q={query}&limit=5&rating=g
- *   Odpowiedź: data[0].images.original.url → URL do GIF-a z przezroczystym tłem
+ *   Response: data[0].images.original.url → the URL of the GIF with a transparent background
  *
  * Cache: in-memory per category (refreshes after the app restarts).
- * Jeśli Giphy jest niedostępne lub klucz nie skonfigurowany → zwraca Optional.empty()
- * i EdlGeneratorService pomija GIF overlay dla tej sceny.
+ * If Giphy is unavailable or the key is not configured → returns Optional.empty()
+ * and EdlGeneratorService skips the GIF overlay for that scene.
  */
 @Slf4j
 @Service
@@ -36,11 +36,11 @@ public class GifLibraryService {
     private final GifProperties gifProperties;
     private final ObjectMapper objectMapper;
 
-    /** In-memory cache: kategoria → lista URL-i GIF-ów (losowany przy każdym wywołaniu) */
+    /** In-memory cache: category → list of GIF URLs (randomized on each call) */
     private final Map<GifCategory, List<String>> cache = new EnumMap<>(GifCategory.class);
 
     /**
-     * Zwraca URL GIF-a dla podanej kategorii.
+     * Returns the GIF URL for the given category.
      *
      * Order:
      *   1. Cache (if it exists)
@@ -62,7 +62,7 @@ public class GifLibraryService {
     }
 
     /**
-     * Czyści cache — przydatne gdy admin chce odświeżyć GIF-y.
+     * Clears the cache — useful when an admin wants to refresh the GIFs.
      */
     public void clearCache() {
         cache.clear();

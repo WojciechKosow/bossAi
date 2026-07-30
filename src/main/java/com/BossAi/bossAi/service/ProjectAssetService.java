@@ -137,7 +137,7 @@ public class ProjectAssetService {
     }
 
     /**
-     * Generuje thumbnail dla assetu video (pierwszy frame) lub obrazu (resize).
+     * Generates a thumbnail for a video asset (first frame) or an image (resize).
      * Uses FFmpeg for extraction.
      *
      * @param assetId   ID assetu

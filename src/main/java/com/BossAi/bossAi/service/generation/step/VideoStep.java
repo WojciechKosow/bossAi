@@ -32,20 +32,20 @@ import java.util.stream.Collectors;
 /**
  * VideoStep v2 — mixed media pipeline.
  *
- * FAZA 2 zmiany:
+ * PHASE 2 changes:
  *
  *   Mixed media: not every scene is an animated video via fal.ai.
  *   GPT-4o decides (via mediaAssignments in ScriptResult) which scenes
  *   need animation (VIDEO) and which can be a static image (IMAGE).
  *
- *   VIDEO scena → fal.ai Kling/LTX (drogie, dynamiczne, używamy dla hook + CTA)
- *   IMAGE scena → ImageToClipStep (FFmpeg loop, $0, używamy dla treści)
+ *   VIDEO scene → fal.ai Kling/LTX (expensive, dynamic, used for hook + CTA)
+ *   IMAGE scene → ImageToClipStep (FFmpeg loop, $0, used for content)
  *
  *   Limit: max 2 VIDEO scenes. Enforced here as a safety check if GPT
  *   generates too many VIDEO scenes (which saves cost on a prompt error).
  *
- *   Fallback: jeśli mediaAssignments null/empty (stary format) → używamy
- *   starego zachowania (pierwsze + ostatnie = VIDEO, reszta = IMAGE).
+ *   Fallback: if mediaAssignments is null/empty (old format) → we use
+ *   the old behavior (first + last = VIDEO, the rest = IMAGE).
  *
  * TEST MODE (forceReuseForTesting):
  *   All scenes become IMAGE (FFmpeg loop from reused images) — zero fal.ai calls.
@@ -64,7 +64,7 @@ public class VideoStep implements GenerationStep {
     private final ImageToClipStep imageToClipStep;
     private final FfmpegProperties ffmpegProperties;
 
-    /** Maksymalna liczba scen VIDEO — safety cap niezależnie od GPT output */
+    /** Maximum number of VIDEO scenes — a safety cap regardless of GPT output */
     private static final int MAX_VIDEO_SCENES = 2;
 
     @Value("${ffmpeg.temp.dir:/tmp/bossai/render}")
@@ -78,16 +78,16 @@ public class VideoStep implements GenerationStep {
         List<Asset> customMedia = context.getCustomMediaAssets();
         boolean hasCustomMedia  = context.hasCustomMedia();
 
-        log.info("[VideoStep] START — {} scen, model: {}, forceReuse: {}, customMedia: {}, generationId: {}",
+        log.info("[VideoStep] START — {} scenes, model: {}, forceReuse: {}, customMedia: {}, generationId: {}",
                 scenes.size(), modelId, forceReuse,
                 hasCustomMedia ? customMedia.size() : 0,
                 context.getGenerationId());
 
-        // Walidacja — każda scena musi mieć imageUrl z ImageStep
+        // Validation — each scene must have an imageUrl from ImageStep
         for (SceneAsset scene : scenes) {
             if (scene.getImageUrl() == null || scene.getImageUrl().isBlank()) {
-                throw new IllegalStateException("[VideoStep] Scena " + scene.getIndex()
-                        + " nie ma imageUrl — ImageStep musiał się nie wykonać");
+                throw new IllegalStateException("[VideoStep] Scene " + scene.getIndex()
+                        + " has no imageUrl — ImageStep must not have run");
             }
         }
 
@@ -240,17 +240,17 @@ public class VideoStep implements GenerationStep {
 
                         scene.setVideoLocalPath(normalizedPath.toString());
                         customCount++;
-                        log.info("[VideoStep] Scena {} CUSTOM VIDEO (normalized to 1080x1920) — asset: {}, {} bytes",
+                        log.info("[VideoStep] Scene {} CUSTOM VIDEO (normalized to 1080x1920) — asset: {}, {} bytes",
                                 scene.getIndex(), customAsset.getId(), customBytes.length);
                         continue;
                     } catch (Exception e) {
-                        log.warn("[VideoStep] Scena {} — custom video load failed ({}), falling back to pipeline",
+                        log.warn("[VideoStep] Scene {} — custom video load failed ({}), falling back to pipeline",
                                 scene.getIndex(), e.getMessage());
                     }
                 }
                 // Custom IMAGE asset → load from storage, then FFmpeg Ken Burns
                 if (customAsset.getType() == AssetType.IMAGE) {
-                    log.info("[VideoStep] Scena {} CUSTOM IMAGE → FFmpeg Ken Burns (from storage)", scene.getIndex());
+                    log.info("[VideoStep] Scene {} CUSTOM IMAGE → FFmpeg Ken Burns (from storage)", scene.getIndex());
                     byte[] imageBytes = storageService.load(customAsset.getStorageKey());
                     String ext = detectImageExtension(customAsset.getOriginalFilename());
                     Path imagePath = workDir.resolve(String.format("scene_%02d_custom%s", scene.getIndex(), ext));
@@ -259,7 +259,7 @@ public class VideoStep implements GenerationStep {
                             imagePath, scene.getDurationMs(), scene.getIndex(), workDir);
                     scene.setVideoLocalPath(clipPath);
                     customCount++;
-                    log.info("[VideoStep] Scena {} CUSTOM IMAGE DONE — {} bytes → {}",
+                    log.info("[VideoStep] Scene {} CUSTOM IMAGE DONE — {} bytes → {}",
                             scene.getIndex(), imageBytes.length, clipPath);
                     continue;
                 }
@@ -273,7 +273,7 @@ public class VideoStep implements GenerationStep {
 
                 if (reusedAsset != null && reusedAsset.getStorageKey() != null) {
                     try {
-                        // REUSE — pobierz istniejące wideo z storage i normalizuj do 1080x1920
+                        // REUSE — fetch the existing video from storage and normalize to 1080x1920
                         byte[] existingBytes = storageService.load(reusedAsset.getStorageKey());
                         String rawFilename = String.format("scene_%02d_%s_raw.mp4", scene.getIndex(), context.getGenerationId());
                         Path rawPath = workDir.resolve(rawFilename);
@@ -286,11 +286,11 @@ public class VideoStep implements GenerationStep {
                         scene.setVideoLocalPath(normalizedPath.toString());
                         reusedCount++;
                         videoCount++;
-                        log.info("[VideoStep] VIDEO scena {} REUSED (normalized to 1080x1920) — asset: {}, {} bytes",
+                        log.info("[VideoStep] VIDEO scene {} REUSED (normalized to 1080x1920) — asset: {}, {} bytes",
                                 scene.getIndex(), reusedAsset.getId(), existingBytes.length);
                         continue;
                     } catch (Exception e) {
-                        log.warn("[VideoStep] VIDEO scena {} — reuse failed ({}), generuję nowy",
+                        log.warn("[VideoStep] VIDEO scene {} — reuse failed ({}), generating a new one",
                                 scene.getIndex(), e.getMessage());
                     }
                 }
@@ -316,13 +316,13 @@ public class VideoStep implements GenerationStep {
     }
 
     // =========================================================================
-    // PRZETWARZANIE SCEN
+    // SCENE PROCESSING
     // =========================================================================
 
     /** Animates the scene via fal.ai (expensive, dynamic) */
     private void processVideoScene(SceneAsset scene, String modelId,
                                    Path workDir, GenerationContext context) throws Exception {
-        log.info("[VideoStep] VIDEO scena {} — fal.ai animation", scene.getIndex());
+        log.info("[VideoStep] VIDEO scene {} — fal.ai animation", scene.getIndex());
 
         byte[] videoBytes = falAiService.generateVideo(
                 scene.getImageUrl(),
@@ -346,18 +346,18 @@ public class VideoStep implements GenerationStep {
                 scene.getImagePrompt()
         );
 
-        log.info("[VideoStep] VIDEO scena {} DONE — {} bytes → {}",
+        log.info("[VideoStep] VIDEO scene {} DONE — {} bytes → {}",
                 scene.getIndex(), videoBytes.length, videoPath);
     }
 
-    /** Konwertuje obraz do MP4 przez FFmpeg loop (tani, $0) */
+    /** Converts an image to MP4 via an FFmpeg loop (cheap, $0) */
     private void processImageScene(SceneAsset scene, Path workDir) throws Exception {
-        log.info("[VideoStep] IMAGE scena {} — FFmpeg Ken Burns", scene.getIndex());
+        log.info("[VideoStep] IMAGE scene {} — FFmpeg Ken Burns", scene.getIndex());
 
         String clipPath = imageToClipStep.convertImageToClip(scene, workDir);
         scene.setVideoLocalPath(clipPath);
 
-        log.info("[VideoStep] IMAGE scena {} DONE → {}", scene.getIndex(), clipPath);
+        log.info("[VideoStep] IMAGE scene {} DONE → {}", scene.getIndex(), clipPath);
     }
 
     // =========================================================================
@@ -368,8 +368,8 @@ public class VideoStep implements GenerationStep {
      * Determines which scenes should be animated via fal.ai.
      *
      * Priorytet:
-     *   1. mediaAssignments z ScriptResult (GPT-4o decyzja) — jeśli dostępne
-     *   2. Fallback: scena 0 (hook) + ostatnia (CTA)
+     *   1. mediaAssignments from ScriptResult (GPT-4o decision) — if available
+     *   2. Fallback: scene 0 (hook) + the last one (CTA)
      *   Safety cap: max MAX_VIDEO_SCENES regardless of source
      */
     private Set<Integer> resolveVideoSceneIndices(GenerationContext context) {
@@ -384,7 +384,7 @@ public class VideoStep implements GenerationStep {
                     .collect(Collectors.toList());
 
             if (videoIndices.size() > MAX_VIDEO_SCENES) {
-                log.warn("[VideoStep] GPT-4o wybrał {} VIDEO scen — ograniczam do {} (hook + CTA)",
+                log.warn("[VideoStep] GPT-4o chose {} VIDEO scenes — limiting to {} (hook + CTA)",
                         videoIndices.size(), MAX_VIDEO_SCENES);
                 // Always take the first (hook) and last (CTA) from the video scene list
                 videoIndices = List.of(videoIndices.get(0), videoIndices.get(videoIndices.size() - 1));
@@ -394,7 +394,7 @@ public class VideoStep implements GenerationStep {
             return Set.copyOf(videoIndices);
         }
 
-        // Fallback: scena 0 (hook) + ostatnia scena (CTA)
+        // Fallback: scene 0 (hook) + the last scene (CTA)
         List<SceneAsset> scenes = context.getScenes();
         int lastIndex = scenes.stream()
                 .mapToInt(SceneAsset::getIndex)

@@ -25,7 +25,7 @@ public class EdlService {
     /**
      * Saves a new EDL version for the project.
      * Automatycznie inkrementuje numer wersji.
-     * Ustawia nowy EDL jako currentEdl w projekcie.
+     * Sets the new EDL as the currentEdl on the project.
      */
     @Transactional
     public EditDecisionListEntity saveNewVersion(UUID projectId, String edlJson, EdlSource source) {
@@ -44,7 +44,7 @@ public class EdlService {
 
         edl = edlRepository.save(edl);
 
-        // Ustaw jako aktualny EDL projektu
+        // Set as the project's current EDL
         project.setCurrentEdl(edl);
         projectRepository.save(project);
 
@@ -53,7 +53,7 @@ public class EdlService {
     }
 
     /**
-     * Pobiera aktualny (najnowszy) EDL JSON dla projektu.
+     * Fetches the current (latest) EDL JSON for the project.
      */
     @Transactional(readOnly = true)
     public String getCurrentEdlJson(UUID projectId) {
@@ -68,7 +68,7 @@ public class EdlService {
     }
 
     /**
-     * Pobiera EDL JSON dla konkretnej wersji.
+     * Fetches the EDL JSON for a specific version.
      */
     @Transactional(readOnly = true)
     public String getEdlJsonByVersion(UUID projectId, Integer version) {
@@ -79,7 +79,7 @@ public class EdlService {
     }
 
     /**
-     * Pobiera historię wersji EDL dla projektu (bez pełnego JSON — tylko metadane).
+     * Fetches the EDL version history for the project (without full JSON — metadata only).
      */
     @Transactional(readOnly = true)
     public List<EdlVersionDTO> getVersionHistory(UUID projectId) {

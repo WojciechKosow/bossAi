@@ -8,7 +8,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 /**
- * AssetReuseStep — uruchamiany po ScriptStep, przed ImageStep.
+ * AssetReuseStep — runs after ScriptStep, before ImageStep.
  *
  * If reuseAssets=true in the context, it calls AssetReuseService
  * which uses GPT to match the user's earlier assets to the new scenes.

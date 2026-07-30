@@ -15,12 +15,12 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Warstwa A — ANALIZA SCENARIUSZA przez GPT.
+ * Layer A — SCRIPT ANALYSIS via GPT.
  *
  * Analyzes the narration and breaks it into semantic segments,
  * each with a type, importance, energy, and topic.
  *
- * Jednocześnie generuje EditingIntent — intencję montażu,
+ * At the same time it generates the EditingIntent — the editing intent,
  * which defines the CHARACTER of the cuts (not a random pattern,
  * but a deliberate choice based on content + music + mood).
  *

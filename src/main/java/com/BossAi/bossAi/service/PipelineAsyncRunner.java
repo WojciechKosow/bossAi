@@ -18,15 +18,15 @@ import java.time.LocalDateTime;
 import java.util.UUID;
 
 /**
- * Osobny bean do asynchronicznego uruchamiania pipeline.
+ * A separate bean for running the pipeline asynchronously.
  *
- * DLACZEGO OSOBNY BEAN:
+ * WHY A SEPARATE BEAN:
  * Spring @Async works via a proxy. When an @Async method is called
  * from the same bean (self-invocation), the proxy doesn't intercept the call
- * i metoda działa SYNCHRONICZNIE — wewnątrz transakcji wywołującej.
+ * and the method runs SYNCHRONOUSLY — inside the calling transaction.
  *
- * DLACZEGO UUID zamiast Generation entity:
- * generateTikTokAd() jest @Transactional — entity jest managed w tej transakcji.
+ * WHY UUID instead of the Generation entity:
+ * generateTikTokAd() is @Transactional — the entity is managed within that transaction.
  * After the method returns, the transaction commits and the entity becomes DETACHED.
  * An async thread trying to save() a detached entity gets
  * StaleObjectStateException (optimistic lock na merge).
@@ -90,7 +90,7 @@ public class PipelineAsyncRunner {
             log.info("[PipelineAsyncRunner] Pipeline DONE — generationId: {}, url: {}",
                     generationId, context.getFinalVideoUrl());
 
-            // Zapisz DONE status PRZED bridge
+            // Save DONE status BEFORE the bridge
             generationRepository.save(generation);
 
             // Always bootstrap a VideoProject + ProjectAssets so the user can find

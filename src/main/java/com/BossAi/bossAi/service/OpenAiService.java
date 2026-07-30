@@ -554,7 +554,7 @@ public class OpenAiService {
             JsonNode wordsNode = root.path("words");
 
             if (wordsNode.isMissingNode() || !wordsNode.isArray() || wordsNode.isEmpty()) {
-                log.warn("[OpenAiService] Whisper nie zwrócił words — fallback do estimated timings");
+                log.warn("[OpenAiService] Whisper did not return words — fallback to estimated timings");
                 return List.of();
             }
 
@@ -578,7 +578,7 @@ public class OpenAiService {
                 }
             }
 
-            log.info("[OpenAiService] Whisper OK — {} słów z timestampami, ostatnie słowo kończy się na {}ms",
+            log.info("[OpenAiService] Whisper OK — {} words with timestamps, the last word ends at {}ms",
                     timings.size(),
                     timings.isEmpty() ? 0 : timings.get(timings.size() - 1).endMs());
 
@@ -596,9 +596,9 @@ public class OpenAiService {
     // =========================================================================
 
     /**
-     * Analizuje obrazy/klatki video przez GPT-4o Vision.
+     * Analyzes images/video frames via GPT-4o Vision.
      *
-     * @param frames   lista klatek jako byte[] (JPEG)
+     * @param frames   a list of frames as byte[] (JPEG)
      * @param prompt   instrukcja analizy
      * @return the raw JSON response from GPT
      */
@@ -662,7 +662,7 @@ public class OpenAiService {
             // Normalize: auto-correct VIDEO scene durations to match Kling API minimum
             result = normalizeScriptResult(result);
 
-            log.info("[OpenAiService] ScriptResult OK \u2014 {} scen, {}ms, {} overlays, contentType: {}",
+            log.info("[OpenAiService] ScriptResult OK — {} scenes, {}ms, {} overlays, contentType: {}",
                     result.scenes().size(),
                     result.totalDurationMs(),
                     result.overlays() != null ? result.overlays().size() : 0,
@@ -671,7 +671,7 @@ public class OpenAiService {
             return result;
 
         } catch (Exception e) {
-            throw new RuntimeException("[OpenAiService] Blad parsowania ScriptResult: " + e.getMessage(), e);
+            throw new RuntimeException("[OpenAiService] Error parsing ScriptResult: " + e.getMessage(), e);
         }
     }
 
@@ -680,19 +680,19 @@ public class OpenAiService {
             throw new RuntimeException("ScriptResult: brak narracji");
         }
         if (result.scenes() == null || result.scenes().isEmpty()) {
-            throw new RuntimeException("ScriptResult: brak scen");
+            throw new RuntimeException("ScriptResult: no scenes");
         }
         if (result.scenes().size() > 30) {
-            throw new RuntimeException("ScriptResult: za duzo scen ("
+            throw new RuntimeException("ScriptResult: too many scenes ("
                     + result.scenes().size() + ") \u2014 max 30");
         }
         for (ScriptResult.SceneScript scene : result.scenes()) {
             if (scene.imagePrompt() == null || scene.imagePrompt().isBlank()) {
                 // Custom image assets legitimately have no imagePrompt — ScriptStep backfills
-                log.warn("[OpenAiService] ScriptResult: scena {} bez imagePrompt (zostanie uzupelniona przez ScriptStep)", scene.index());
+                log.warn("[OpenAiService] ScriptResult: scene {} without imagePrompt (it will be filled in by ScriptStep)", scene.index());
             }
             if (scene.durationMs() < 1000) {
-                throw new RuntimeException("ScriptResult: scena " + scene.index()
+                throw new RuntimeException("ScriptResult: scene " + scene.index()
                         + " ma durationMs=" + scene.durationMs() + " \u2014 minimum 1000ms");
             }
         }
@@ -702,7 +702,7 @@ public class OpenAiService {
                     .filter(ScriptResult.MediaAssignment::isVideo)
                     .count();
             if (videoCount > 3) {
-                log.warn("[OpenAiService] Zbyt duzo scen VIDEO ({}) \u2014 VideoStep ograniczy do 2", videoCount);
+                log.warn("[OpenAiService] Too many VIDEO scenes ({}) — VideoStep will limit to 2", videoCount);
             }
         }
     }
@@ -710,10 +710,10 @@ public class OpenAiService {
     /**
      * Normalizuje ScriptResult po walidacji:
      *   - VIDEO sceny: durationMs < 5000 → 5000 (Kling API minimum)
-     *   - IMAGE sceny: durationMs < 3000 → 3000 (zbyt krótkie dla Ken Burns)
+     *   - IMAGE scenes: durationMs < 3000 → 3000 (too short for Ken Burns)
      *   - Przelicza totalDurationMs
      *
-     * ScriptResult to immutable record — tworzymy nową instancję z poprawionymi wartościami.
+     * ScriptResult is an immutable record — we create a new instance with the corrected values.
      */
     private ScriptResult normalizeScriptResult(ScriptResult result) {
         java.util.Set<Integer> videoSceneIndices = new java.util.HashSet<>();
@@ -733,12 +733,12 @@ public class OpenAiService {
             int correctedDuration = scene.durationMs();
 
             if (isVideo && correctedDuration < 5000) {
-                log.warn("[OpenAiService] Normalizacja: VIDEO scena {} durationMs {} → 5000",
+                log.warn("[OpenAiService] Normalization: VIDEO scene {} durationMs {} → 5000",
                         scene.index(), correctedDuration);
                 correctedDuration = 5000;
                 needsFix = true;
             } else if (!isVideo && correctedDuration < 3000) {
-                log.warn("[OpenAiService] Normalizacja: IMAGE scena {} durationMs {} → 3000",
+                log.warn("[OpenAiService] Normalization: IMAGE scene {} durationMs {} → 3000",
                         scene.index(), correctedDuration);
                 correctedDuration = 3000;
                 needsFix = true;

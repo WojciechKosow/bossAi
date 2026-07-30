@@ -18,7 +18,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * ImageStep — generuje obraz dla każdej sceny przez fal.ai.
+ * ImageStep — generates an image for each scene via fal.ai.
  *
  * Input:  context.scenes[].imagePrompt, context.planType
  * Output: context.scenes[].imageUrl (URL na CDN fal.ai)
@@ -50,7 +50,7 @@ public class ImageStep implements GenerationStep {
         List<Asset> customMedia = context.getCustomMediaAssets();
         boolean hasCustomMedia = context.hasCustomMedia();
 
-        log.info("[ImageStep] START — {} scen, model: {}, reuse: {} dopasowań, forceReuse: {}, customMedia: {}, generationId: {}",
+        log.info("[ImageStep] START — {} scenes, model: {}, reuse: {} matches, forceReuse: {}, customMedia: {}, generationId: {}",
                 scenes.size(), modelId,
                 reusedImages != null ? reusedImages.size() : 0,
                 forceReuse,
@@ -82,11 +82,11 @@ public class ImageStep implements GenerationStep {
                 if (customUrl != null) {
                     scene.setImageUrl(customUrl);
                     customCount++;
-                    log.info("[ImageStep] Scena {}/{} CUSTOM ASSET — type: {}, asset: {}, url: {}",
+                    log.info("[ImageStep] Scene {}/{} CUSTOM ASSET — type: {}, asset: {}, url: {}",
                             i + 1, scenes.size(), customAsset.getType(), customAsset.getId(), customUrl);
                     continue;
                 }
-                log.warn("[ImageStep] Scena {}/{} — custom asset URL resolution failed, asset: {}",
+                log.warn("[ImageStep] Scene {}/{} — custom asset URL resolution failed, asset: {}",
                         i + 1, scenes.size(), customAsset.getId());
             }
 
@@ -100,11 +100,11 @@ public class ImageStep implements GenerationStep {
                 if (resolvedUrl != null) {
                     scene.setImageUrl(resolvedUrl);
                     reusedCount++;
-                    log.info("[ImageStep] Scena {}/{} REUSED — asset: {}, url: {}",
+                    log.info("[ImageStep] Scene {}/{} REUSED — asset: {}, url: {}",
                             i + 1, scenes.size(), reusedAsset.getId(), resolvedUrl);
                     continue;
                 }
-                log.warn("[ImageStep] Scena {}/{} — reuse failed (brak danych w storage), asset: {}",
+                log.warn("[ImageStep] Scene {}/{} — reuse failed (no data in storage), asset: {}",
                         i + 1, scenes.size(), reusedAsset.getId());
 
                 // TEST MODE: if reuse was forced but URL resolution failed, error out
@@ -126,7 +126,7 @@ public class ImageStep implements GenerationStep {
             }
 
             // Normal mode — generate new image via fal.ai
-            log.info("[ImageStep] Scena {}/{} — prompt: {}",
+            log.info("[ImageStep] Scene {}/{} — prompt: {}",
                     i + 1, scenes.size(), scene.getImagePrompt());
 
             String imageUrl = falAiService.generateImage(scene.getImagePrompt(), modelId);
@@ -148,11 +148,11 @@ public class ImageStep implements GenerationStep {
                         scene.getImagePrompt(),
                         imageUrl  // keep the external URL for future reuse
                 );
-                log.info("[ImageStep] Scena {}/{} — obraz zapisany lokalnie ({} bytes), storageKey: {}",
+                log.info("[ImageStep] Scene {}/{} — image saved locally ({} bytes), storageKey: {}",
                         i + 1, scenes.size(), imageBytes.length, storageKey);
             } catch (Exception e) {
                 // Fallback: save URL-only if the download failed
-                log.warn("[ImageStep] Scena {}/{} — nie udało się pobrać bajtów, zapisuję URL-only: {}",
+                log.warn("[ImageStep] Scene {}/{} — failed to download bytes, saving URL-only: {}",
                         i + 1, scenes.size(), e.getMessage());
                 assetService.createAssetFromUrl(
                         context.getUserId(),
@@ -164,7 +164,7 @@ public class ImageStep implements GenerationStep {
                 );
             }
 
-            log.info("[ImageStep] Scena {}/{} DONE — imageUrl: {}", i + 1, scenes.size(), imageUrl);
+            log.info("[ImageStep] Scene {}/{} DONE — imageUrl: {}", i + 1, scenes.size(), imageUrl);
         }
 
         log.info("[ImageStep] DONE — {} AI generated, {} reused, {} custom user assets",
@@ -174,20 +174,20 @@ public class ImageStep implements GenerationStep {
     /**
      * Resolves the asset URL for use in the pipeline.
      *
-     * WAŻNE: imageUrl musi być publicznym URL — fal.ai używa go do image-to-video.
+     * IMPORTANT: imageUrl must be a public URL — fal.ai uses it for image-to-video.
      * Local URLs (/api/assets/file/...) won't work with fal.ai.
      *
      * Strategia:
-     *   1. Jeśli asset ma external URL (originalFilename) → użyj go (może być wygasły)
-     *   2. Jeśli bajty istnieją w storage → wygeneruj nowy publiczny URL przez fal.ai upload
+     *   1. If the asset has an external URL (originalFilename) → use it (may be expired)
+     *   2. If bytes exist in storage → generate a new public URL via fal.ai upload
      *      (nie zaimplementowane — fallback do external URL)
      *   3. Null if it can't be recovered
      *
      * In the future: upload to a CDN or a pre-signed URL.
-     * Na teraz: external URL + lokalny fallback na potrzeby RenderStep.
+     * For now: external URL + a local fallback for RenderStep's needs.
      */
     private String resolveAssetUrl(Asset asset) {
-        // Priorytet 1: external URL (fal.ai CDN) — publiczny, działa z API
+        // Priority 1: external URL (fal.ai CDN) — public, works with the API
         String externalUrl = asset.getOriginalFilename();
         if (externalUrl != null && !externalUrl.isBlank()
                 && (externalUrl.startsWith("http://") || externalUrl.startsWith("https://"))) {
@@ -195,7 +195,7 @@ public class ImageStep implements GenerationStep {
             return externalUrl;
         }
 
-        // Priorytet 2: lokalne bajty → generuj URL z storage
+        // Priority 2: local bytes → generate a URL from storage
         // (only works if the app is public or fal.ai doesn't need a URL)
         String storageKey = asset.getStorageKey();
         if (storageKey != null && !storageKey.startsWith("external/")) {
@@ -213,7 +213,7 @@ public class ImageStep implements GenerationStep {
     }
 
     /**
-     * Pobiera bajty obrazu z URL (fal.ai CDN).
+     * Downloads the image bytes from a URL (fal.ai CDN).
      */
     private byte[] downloadImageBytes(String imageUrl) throws Exception {
         var url = new java.net.URI(imageUrl).toURL();

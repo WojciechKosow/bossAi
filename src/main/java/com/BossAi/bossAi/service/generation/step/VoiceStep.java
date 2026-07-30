@@ -25,9 +25,9 @@ import java.util.List;
 /**
  * VoiceStep — dostarcza plik MP3 z voice-over do RenderStep.
  *
- * Dwa tryby:
- *   1. User upload  → kopiuje plik z Storage do katalogu roboczego FFmpeg
- *   2. AI TTS       → wywołuje OpenAI TTS z narracji ScriptResult
+ * Two modes:
+ *   1. User upload  → copies the file from Storage to the FFmpeg working directory
+ *   2. AI TTS       → calls OpenAI TTS from the ScriptResult narration
  *
  * Word timing pipeline (priorytet):
  *   1. WhisperX forced alignment via audio-analysis-service (<20ms accuracy)
@@ -90,12 +90,12 @@ public class VoiceStep implements GenerationStep {
 
         if (!wordTimings.isEmpty()) {
             context.setWordTimings(wordTimings);
-            log.info("[VoiceStep] Word timings OK — {} słów, {}ms–{}ms",
+            log.info("[VoiceStep] Word timings OK — {} words, {}ms–{}ms",
                     wordTimings.size(),
                     wordTimings.get(0).startMs(),
                     wordTimings.get(wordTimings.size() - 1).endMs());
         } else {
-            log.warn("[VoiceStep] Brak word timings — RenderStep użyje estimated timings");
+            log.warn("[VoiceStep] No word timings — RenderStep will use estimated timings");
         }
 
         log.info("[VoiceStep] DONE — voiceLocalPath: {}", voiceLocalPath);
@@ -206,7 +206,7 @@ public class VoiceStep implements GenerationStep {
             }
         }
 
-        log.info("[VoiceStep] mergeWhisperTokens: {} tokenów → {} słów", tokens.size(), result.size());
+        log.info("[VoiceStep] mergeWhisperTokens: {} tokens → {} words", tokens.size(), result.size());
         return result;
     }
 
@@ -216,10 +216,10 @@ public class VoiceStep implements GenerationStep {
                 List<SubtitleService.WordTiming> timings =
                         openAiService.transcribeWordTimestamps(audioBytes);
                 if (!timings.isEmpty()) {
-                    log.info("[VoiceStep] Whisper OK na próbie {} — {} tokenów", attempt, timings.size());
+                    log.info("[VoiceStep] Whisper OK on attempt {} — {} tokens", attempt, timings.size());
                     return timings;
                 }
-                log.warn("[VoiceStep] Whisper próba {} — 0 tokenów", attempt);
+                log.warn("[VoiceStep] Whisper attempt {} — 0 tokens", attempt);
             } catch (Exception e) {
                 log.warn("[VoiceStep] Whisper attempt {} failed: {}", attempt, e.getMessage());
             }
@@ -237,7 +237,7 @@ public class VoiceStep implements GenerationStep {
 
     private String generateAiTts(GenerationContext context) throws Exception {
         String narration = context.getScript().narration();
-        log.info("[VoiceStep] Generuję AI TTS — {} znaków", narration.length());
+        log.info("[VoiceStep] Generating AI TTS — {} characters", narration.length());
 
         byte[] audioBytes = openAiService.generateTts(narration);
 
@@ -261,7 +261,7 @@ public class VoiceStep implements GenerationStep {
 
     private String copyUserVoice(GenerationContext context) throws Exception {
         String storageKey = context.getUserVoiceAsset().getStorageKey();
-        log.info("[VoiceStep] Kopiuję voice-over usera — storageKey: {}", storageKey);
+        log.info("[VoiceStep] Copying the user's voice-over — storageKey: {}", storageKey);
 
         byte[] audioBytes = storageService.load(storageKey);
 

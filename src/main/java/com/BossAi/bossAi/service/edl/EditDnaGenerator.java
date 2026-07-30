@@ -14,7 +14,7 @@ import org.springframework.stereotype.Service;
 import java.util.concurrent.ThreadLocalRandom;
 
 /**
- * LLM Director — generuje EditDna (osobowość montażu) przed generowaniem EDL.
+ * LLM Director — generates EditDna (the editing personality) before generating the EDL.
  *
  * One GPT call per project. The output determines how the next GPT call
  * (EdlGeneratorService) wygeneruje EDL — jakie efekty, rytm, kolor.
@@ -60,7 +60,7 @@ public class EditDnaGenerator {
             EditDna dna = parse(rawJson);
             dna.setSeed(seed);
 
-            // Jeśli NarrationAnalysis dostarczył EditingIntent, a GPT nie wygenerował — wstrzyknij
+            // If NarrationAnalysis provided an EditingIntent but GPT didn't generate one — inject it
             if (dna.getEditingIntent() == null && narrationAnalysis != null
                     && narrationAnalysis.getEditingIntent() != null) {
                 var naIntent = narrationAnalysis.getEditingIntent();
@@ -124,7 +124,7 @@ public class EditDnaGenerator {
                 You are NOT editing the video — you are creating the CREATIVE BRIEF that another
                 editor (AI) will follow. Your decisions make each video feel different and human.
 
-                CRITICAL PHILOSOPHY — "DLACZEGO ciąć?" not "KIEDY ciąć?"
+                CRITICAL PHILOSOPHY — "WHY cut?" not "WHEN to cut?"
                 Every cut must have a REASON. You're defining the intent behind cuts, not a schedule.
                 Think about WHY each cut happens: topic change? emphasis? attention reset? rhythm? emotion?
 

@@ -31,7 +31,7 @@ import java.util.stream.Collectors;
  * <p>
  * KEY RULE: ALWAYS use f() for double values passed to FFmpeg.
  * <p>
- * FAZA 4 zmiany:
+ * PHASE 4 changes:
  * 1. Animated effects — ZOOM_IN/OUT/FAST_ZOOM progressive over duration.
  * PAN_LEFT/PAN_RIGHT Ken Burns. SHAKE improved.
  * 2. Scene transitions — xfade between scenes (fade, fadewhite, dissolve).
@@ -66,7 +66,7 @@ public class RenderStep implements GenerationStep {
                 GenerationStepName.RENDER.getDisplayMessage()
         );
 
-        log.info("[RenderStep] START — generationId: {}, scen: {}, overlays: {}",
+        log.info("[RenderStep] START — generationId: {}, scenes: {}, overlays: {}",
                 context.getGenerationId(),
                 context.sceneCount(),
                 countOverlays(context));
@@ -76,20 +76,20 @@ public class RenderStep implements GenerationStep {
         Path workDir = getWorkingDir(context);
         Files.createDirectories(workDir);
 
-        // Faza 1 — build per-scene videos (cut clips with effects → hard concat per scene)
+        // Phase 1 — build per-scene videos (cut clips with effects → hard concat per scene)
         List<SceneVideo> sceneVideos = buildSceneVideos(context, workDir);
-        log.info("[RenderStep] Scene videos DONE → {} scen", sceneVideos.size());
+        log.info("[RenderStep] Scene videos DONE → {} scenes", sceneVideos.size());
 
-        // Faza 2 — join scenes with transitions (xfade)
+        // Phase 2 — join scenes with transitions (xfade)
         Path concatOutput = joinScenesWithTransitions(sceneVideos, context, workDir);
         log.info("[RenderStep] Transitions DONE → {}", concatOutput);
 
-        // Faza 3 — word-by-word subtitles + overlays + dynamic audio → final.mp4
+        // Phase 3 — word-by-word subtitles + overlays + dynamic audio → final.mp4
         Path finalOutput = workDir.resolve("final.mp4");
         runFinalRender(concatOutput, context, workDir, finalOutput);
         log.info("[RenderStep] Final render DONE → {}", finalOutput);
 
-        // Zapisz
+        // Save
         byte[] videoBytes = Files.readAllBytes(finalOutput);
         String storageKey = "video/final/" + context.getGenerationId() + "/final.mp4";
         storageService.save(videoBytes, storageKey);
@@ -140,7 +140,7 @@ public class RenderStep implements GenerationStep {
 
             List<Path> cutClips = splitScene(scene, direction, workDir);
             if (cutClips.isEmpty()) {
-                log.warn("[RenderStep] Scena {} — 0 clips, pomijam", scene.getIndex());
+                log.warn("[RenderStep] Scene {} — 0 clips, skipping", scene.getIndex());
                 continue;
             }
 
@@ -304,13 +304,13 @@ public class RenderStep implements GenerationStep {
         List<SubtitleService.WordTiming> wordTimings;
         if (context.getWordTimings() != null && !context.getWordTimings().isEmpty()) {
             wordTimings = context.getWordTimings();
-            log.info("[RenderStep] Whisper word timings — {} słów, {}ms–{}ms",
+            log.info("[RenderStep] Whisper word timings — {} words, {}ms–{}ms",
                     wordTimings.size(),
                     wordTimings.get(0).startMs(),
                     wordTimings.get(wordTimings.size() - 1).endMs());
         } else {
             wordTimings = subtitleService.generateWordTimings(context.getScript());
-            log.info("[RenderStep] Estimated word timings — {} słów", wordTimings.size());
+            log.info("[RenderStep] Estimated word timings — {} words", wordTimings.size());
         }
         boolean useWordByWord = !wordTimings.isEmpty();
 
@@ -337,7 +337,7 @@ public class RenderStep implements GenerationStep {
             cmd.addAll(List.of("-i", context.getMusicLocalPath())); // input 2: music
         }
 
-        // === Buduj i zapisz filter_complex ===
+        // === Build and write filter_complex ===
         String filterComplex = buildFilterComplex(
                 context, hasMusic, hasOverlays, useWordByWord, wordTimings, srtFile);
 
@@ -346,8 +346,8 @@ public class RenderStep implements GenerationStep {
                 filterComplex.substring(0, Math.min(500, filterComplex.length())));
 
         if (filterComplex.isBlank()) {
-            // Passthrough — brak napisów, muzyki i overlays
-            log.warn("[RenderStep] filter_complex pusty — passthrough bez napisów");
+            // Passthrough — no subtitles, music, or overlays
+            log.warn("[RenderStep] filter_complex empty — passthrough without subtitles");
             cmd.addAll(List.of("-map", "0:v"));
             cmd.addAll(List.of("-map", "1:a"));
             cmd.addAll(List.of(
@@ -386,7 +386,7 @@ public class RenderStep implements GenerationStep {
     }
 
     /**
-     * Buduje kompletny filter_complex zapisywany do pliku.
+     * Builds the complete filter_complex written to a file.
      * Commas inside FFmpeg expressions are ordinary commas (not \,).
      */
     private String buildFilterComplex(
@@ -413,8 +413,8 @@ public class RenderStep implements GenerationStep {
             String wordChain = buildWordByWordFilter(wordTimings, "[0:v]", afterWordsLabel);
 
             if (wordChain == null || wordChain.isBlank()) {
-                // Brak napisów — passthrough
-                log.warn("[RenderStep] buildWordByWordFilter zwrócił pusty string — passthrough");
+                // No subtitles — passthrough
+                log.warn("[RenderStep] buildWordByWordFilter returned an empty string — passthrough");
                 if (hasOverlays) {
                     fc.append("[0:v]null[worded]");
                 } else {
@@ -447,7 +447,7 @@ public class RenderStep implements GenerationStep {
                 fc.append(";");
                 fc.append(overlayFilter);
             } else {
-                log.warn("[RenderStep] OverlayEngine zwrócił null — relabel do [vout]");
+                log.warn("[RenderStep] OverlayEngine returned null — relabel to [vout]");
                 String fromLabel = useWordByWord ? "[worded]" : "[subtitled]";
                 return fc.toString().replace(fromLabel, "[vout]");
             }
@@ -470,10 +470,10 @@ public class RenderStep implements GenerationStep {
     private static final int MAX_WORDS_PER_GROUP = 5;
 
     /**
-     * Buduje karaoke-style word-by-word subtitles:
+     * Builds karaoke-style word-by-word subtitles:
      *   - Words are grouped into small groups (max 5 words)
      *   - The whole group is visible on screen (white letters)
-     *   - Aktualnie mówione słowo jest podświetlone (żółte) — nakładane jako osobny drawtext
+     *   - The currently spoken word is highlighted (yellow) — overlaid as a separate drawtext
      *
      * Struktura FFmpeg filter chain:
      *   [in] → drawtext(grupa1, white, enable=between) → drawtext(word1, yellow, enable=between)
@@ -490,7 +490,7 @@ public class RenderStep implements GenerationStep {
         List<WordGroup> groups = groupWordsForKaraoke(words);
 
         if (groups.isEmpty()) {
-            log.warn("[RenderStep] 0 groups po grupowaniu — brak napisów");
+            log.warn("[RenderStep] 0 groups after grouping — no subtitles");
             return "";
         }
 
@@ -631,8 +631,8 @@ public class RenderStep implements GenerationStep {
     }
 
     /**
-     * Grupuje WordTimings w grupy do MAX_WORDS_PER_GROUP.
-     * Rozdziela na granicach scen (przerwa > 800ms) i przy interpunkcji.
+     * Groups WordTimings into groups of up to MAX_WORDS_PER_GROUP.
+     * Splits at scene boundaries (pause > 800ms) and at punctuation.
      * Each group contains: the full text, timing, and per-word entries with charOffset.
      */
     private List<WordGroup> groupWordsForKaraoke(List<SubtitleService.WordTiming> words) {
@@ -667,7 +667,7 @@ public class RenderStep implements GenerationStep {
 
             if (groupWords.isEmpty()) continue;
 
-            // Buduj fullText i wordEntries z charOffset
+            // Build fullText and wordEntries with charOffset
             StringBuilder fullText = new StringBuilder();
             List<WordEntry> entries = new ArrayList<>();
 
@@ -730,7 +730,7 @@ public class RenderStep implements GenerationStep {
         List<ScriptResult.MusicDirection> directions = context.getScript().musicDirections();
 
         if (directions == null || directions.isEmpty()) {
-            log.info("[RenderStep] Brak musicDirections — stały volume=0.25");
+            log.info("[RenderStep] No musicDirections — constant volume=0.25");
             return "volume=0.25";
         }
 
@@ -839,7 +839,7 @@ public class RenderStep implements GenerationStep {
 
         if (context.getScript().overlays() != null) {
             context.getScript().overlays().stream()
-                    // Pomijaj overlays na pozycji BOTTOM — tam są phrase subtitles
+                    // Skip overlays at the BOTTOM position — the phrase subtitles are there
                     .filter(o -> o.position() == null
                             || !o.position().equalsIgnoreCase("BOTTOM"))
                     .forEach(overlays::add);
@@ -873,7 +873,7 @@ public class RenderStep implements GenerationStep {
             int durationMs = cut.getEndMs() - cut.getStartMs();
 
             if (durationMs <= 0) {
-                log.warn("[RenderStep] Scena {} cut {} — durationMs={}, pomijam",
+                log.warn("[RenderStep] Scene {} cut {} — durationMs={}, skipping",
                         scene.getIndex(), i, durationMs);
                 continue;
             }
@@ -931,7 +931,7 @@ public class RenderStep implements GenerationStep {
     /**
      * Maps transition names from EffectRegistry (underscore format) to names
      * supported by the FFmpeg xfade filter (no underscores).
-     * Nieznane wartości → "fade" jako bezpieczny fallback.
+     * Unknown values → "fade" as a safe fallback.
      */
     private String mapToXfadeName(String registryName) {
         return switch (registryName.toLowerCase()) {
@@ -1004,7 +1004,7 @@ public class RenderStep implements GenerationStep {
             // Slow motion — 1.5x stretch
             case SLOW_MOTION -> "setpts=1.5*PTS";
             // ─── Nowe efekty TikTok-native ─────────────────────────────────────────
-            // SMASH_ZOOM: snap zoom 1.0→1.6 w 8 klatkach (~0.27s), potem hold na 1.6
+            // SMASH_ZOOM: snap zoom 1.0→1.6 over 8 frames (~0.27s), then hold at 1.6
             case SMASH_ZOOM -> String.format(Locale.US,
                     "zoompan=z='if(lt(on,8),1+on*0.075,1.6)':d=%d:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=1080x1920:fps=30",
                     totalFrames);
@@ -1047,8 +1047,8 @@ public class RenderStep implements GenerationStep {
         List<ScriptResult.TextOverlay> overlays = context.getScript().overlays();
         if (overlays == null || overlays.isEmpty()) return false;
 
-        // Filtruj overlays które są SUBTITLE_TYPE — te obsługuje phrase system
-        // Zostawiaj tylko dekoracyjne overlays: HOOK banner, CTA button itp.
+        // Filter out overlays that are SUBTITLE_TYPE — the phrase system handles those
+        // Keep only decorative overlays: HOOK banner, CTA button, etc.
         // that have a position other than BOTTOM (where the phrase subtitles are)
         return overlays.stream().anyMatch(o ->
                 o.position() != null && !o.position().equalsIgnoreCase("BOTTOM")
@@ -1063,11 +1063,11 @@ public class RenderStep implements GenerationStep {
 
     private void validateInputs(GenerationContext context) {
         if (context.getScenes() == null || context.getScenes().isEmpty())
-            throw new IllegalStateException("[RenderStep] Brak scen");
+            throw new IllegalStateException("[RenderStep] No scenes");
 
         for (SceneAsset scene : context.getScenes()) {
             if (scene.getVideoLocalPath() == null || scene.getVideoLocalPath().isBlank())
-                throw new IllegalStateException("[RenderStep] Scena " + scene.getIndex() + " bez videoLocalPath");
+                throw new IllegalStateException("[RenderStep] Scene " + scene.getIndex() + " without videoLocalPath");
             if (!Files.exists(Paths.get(scene.getVideoLocalPath())))
                 throw new IllegalStateException("[RenderStep] Plik nie istnieje: " + scene.getVideoLocalPath());
         }

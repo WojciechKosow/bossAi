@@ -7,9 +7,9 @@ import org.springframework.stereotype.Component;
 import java.util.List;
 
 /**
- * OverlayEngine — buduje FFmpeg drawtext filtry z listy TextOverlay.
+ * OverlayEngine — builds FFmpeg drawtext filters from a list of TextOverlay.
  * <p>
- * FAZA 2 — serce dynamicznego tekstu.
+ * PHASE 2 — the heart of dynamic text.
  * <p>
  * Each TextOverlay from ScriptResult.overlays[] is turned into one
  * FFmpeg drawtext filter z:
@@ -21,27 +21,27 @@ import java.util.List;
  * All overlay filters are combined into one filter_complex chain:
  * [0:v]drawtext=...[v1];[v1]drawtext=...[v2];[v2]drawtext=...[vout]
  * <p>
- * ANIMACJE przez FFmpeg expressions:
+ * ANIMATIONS via FFmpeg expressions:
  * <p>
  * FADE:
  * alpha='if(lt(t,startSec+fadeDur),(t-startSec)/fadeDur,
  * if(gt(t,endSec-fadeDur),(endSec-t)/fadeDur,1))'
- * Fade in przez 0.3s, fade out przez 0.3s.
+ * Fade in over 0.3s, fade out over 0.3s.
  * <p>
  * SLIDE_IN:
- * alpha jak FADE (slide robi się przez x expression — osobny).
+ * alpha like FADE (slide is done via an x expression — separate).
  * <p>
  * POP:
  * Szybki fade in 0.15s, bez fade out.
  * <p>
  * NONE:
- * Brak animacji — tekst pojawia się natychmiast.
+ * No animation — the text appears instantly.
  * <p>
  * UWAGA na escapowanie:
- * Ten plik generuje fragmenty filter_complex zapisywane do pliku
+ * This file generates filter_complex fragments written to a file
  * (filter_complex_script). In the file, commas inside FFmpeg expressions
  * (between, if, lt, gt, min, max) are NOT escaped with a backslash.
- * Backslash przed przecinkiem jest wymagany tylko w argumencie cmdline.
+ * A backslash before the comma is only required in the cmdline argument.
  */
 @Slf4j
 @Component
@@ -57,7 +57,7 @@ public class OverlayEngine {
     private static final double POP_DURATION = 0.15;
 
     /**
-     * Buduje kompletny video filter string z listy overlays.
+     * Builds the complete video filter string from the list of overlays.
      *
      * @param overlays    lista TextOverlay z ScriptResult
      * @param inputLabel  the input label (e.g. "[0:v]" or "[worded]")
@@ -130,7 +130,7 @@ public class OverlayEngine {
 
         StringBuilder sb = new StringBuilder();
 
-        // Tekst — musi być prawidłowo escapowany
+        // Text — must be properly escaped
         sb.append("text='").append(escapeText(overlay.text())).append("':");
 
         // Font
@@ -148,10 +148,10 @@ public class OverlayEngine {
         sb.append("x=").append(position.x).append(":");
         sb.append("y=").append(position.y).append(":");
 
-        // Timing — zwykłe przecinki (plik, nie cmdline)
+        // Timing — plain commas (file, not cmdline)
         sb.append("enable='between(t,").append(f(startSec)).append(",").append(f(endSec)).append(")':");
 
-        // Animacja — alpha expression (zwykłe przecinki)
+        // Animation — alpha expression (plain commas)
         String alphaExpr = buildAlphaExpression(overlay.animation(), startSec, endSec);
         sb.append("alpha='").append(alphaExpr).append("'");
 
@@ -207,7 +207,7 @@ public class OverlayEngine {
      * FFmpeg drawtext expressions:
      * W  = video width
      * H  = video height
-     * tw = text width (wyliczone automatycznie przez FFmpeg)
+     * tw = text width (computed automatically by FFmpeg)
      * th = text height
      * <p>
      * Centrowanie X: x=(W-tw)/2
@@ -220,7 +220,7 @@ public class OverlayEngine {
 
         String y = switch (overlay.position() != null ? overlay.position().toUpperCase() : "CENTER") {
             case "TOP" -> "(H*0.10)";
-            case "TOP_RIGHT" -> "(H*0.05)";   // watermark — blisko górnej krawędzi
+            case "TOP_RIGHT" -> "(H*0.05)";   // watermark — near the top edge
             case "CENTER" -> "((H-th)/2)";
             case "BOTTOM" -> "(H*0.80)";
             default -> "((H-th)/2)";
@@ -234,12 +234,12 @@ public class OverlayEngine {
     // =========================================================================
 
     /**
-     * Buduje FFmpeg alpha expression dla animacji.
+     * Builds an FFmpeg alpha expression for the animation.
      * <p>
-     * Zwykłe przecinki — wyrażenie trafia do pliku filter_complex_script,
+     * Plain commas — the expression goes into the filter_complex_script file,
      * nie do argumentu cmdline.
      * <p>
-     * FADE / SLIDE_IN : fade in przez FADE_DURATION + fade out przez FADE_DURATION
+     * FADE / SLIDE_IN : fade in over FADE_DURATION + fade out over FADE_DURATION
      * POP             : szybki fade in POP_DURATION, bez fade out
      * NONE / default  : constant alpha=1
      */
@@ -251,7 +251,7 @@ public class OverlayEngine {
         return switch (animation.toUpperCase()) {
             case "FADE", "SLIDE_IN" -> {
                 double fadeDur = Math.min(FADE_DURATION, duration * 0.3);
-                // Zwykłe przecinki w if/lt/gt/min/max — jesteśmy w pliku
+                // Plain commas in if/lt/gt/min/max — we're in a file
                 yield String.format(
                         java.util.Locale.US,
                         "if(lt(t,%s),min(1,(t-%s)/%s),if(gt(t,%s),max(0,(%s-t)/%s),1))",
@@ -284,11 +284,11 @@ public class OverlayEngine {
     /**
      * Escapuje tekst dla FFmpeg drawtext.
      * <p>
-     * Kolejność escapowania jest istotna — backslashe najpierw,
+     * The escaping order matters — backslashes first,
      * so we don't double-escape characters added in later steps.
      * <p>
-     * \  → \\   backslash (musi być pierwszy)
-     * '  → \'   apostrof — zamknąłby string text='...' przedwcześnie
+     * \  → \\   backslash (must be first)
+     * '  → \'   apostrophe — would close the text='...' string prematurely
      * :  → \:   dwukropek — separator opcji drawtext
      * %  → %%   procent — znak formatowania drawtext
      */
@@ -296,7 +296,7 @@ public class OverlayEngine {
         if (text == null) return "";
         return text
                 .replace("\\", "\\\\")
-                .replace("'",  "''")     // FIX: było replace("'", "'") — brak ucieczki!
+                .replace("'",  "''")     // FIX: was replace("'", "'") — no escaping!
                 .replace(":", "\\:")
                 .replace("%", "%%");
     }
@@ -304,7 +304,7 @@ public class OverlayEngine {
     /**
      * Formatuje double do 3 miejsc po przecinku dla FFmpeg expressions.
      * Locale.US guarantees a decimal point (not a comma) regardless
-     * od ustawień systemowych — KLUCZOWE na Windows z polskim locale.
+     * of system settings — CRUCIAL on Windows with a Polish locale.
      */
     private String f(double value) {
         return String.format(java.util.Locale.US, "%.3f", value);

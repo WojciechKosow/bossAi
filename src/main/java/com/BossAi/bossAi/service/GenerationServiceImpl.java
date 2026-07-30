@@ -89,7 +89,7 @@ public class GenerationServiceImpl implements GenerationService {
         int cost = com.BossAi.bossAi.config.CreditCosts.processVideo(sourceSeconds);
         creditService.charge(user, generation.getId(), OperationType.TIKTOK_AD_FULL, cost, "process_video");
 
-//        // Jeśli user przesłał plik muzyki bezpośrednio — uploaduj jako asset
+//        // If the user uploaded a music file directly — upload it as an asset
 //        if (request.getMusicFile() != null && !request.getMusicFile().isEmpty()) {
 //            AssetDTO musicAssetDto = assetService.createUserUpload(
 //                    email, AssetType.MUSIC, request.getMusicFile());
@@ -133,9 +133,9 @@ public class GenerationServiceImpl implements GenerationService {
 
 
 
-        // Uruchom pipeline DOPIERO po commicie transakcji.
-        // @Async odpala nowy wątek natychmiast — jeśli zrobimy to tutaj,
-        // wątek może wystartować zanim INSERT Generation się commituje → findById() = empty.
+        // Start the pipeline ONLY after the transaction commits.
+        // @Async spawns a new thread immediately — if we do this here,
+        // the thread may start before the Generation INSERT commits → findById() = empty.
         UUID genId = generation.getId();
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
             @Override
@@ -554,10 +554,10 @@ public class GenerationServiceImpl implements GenerationService {
     }
 
     /**
-     * Phase 2.3 — układa assety w kolejności scen wg explicit sceneAssignments.
+     * Phase 2.3 — arranges assets in scene order according to the explicit sceneAssignments.
      *
      * Input:
-     *   customMedia — assety usera już posortowane po orderIndex
+     *   customMedia — the user's assets, already sorted by orderIndex
      *   assignments — lista par (sceneIndex, assetId) od usera
      *
      * Output: a list of assets in scene order. Scenes without an entry are filled

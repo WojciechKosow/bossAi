@@ -20,11 +20,11 @@ import java.util.concurrent.TimeUnit;
 /**
  * FalAiService — klient do fal.ai async queue API.
  *
- * FAZA 1 BUGFIX — generateVideo():
+ * PHASE 1 BUGFIX — generateVideo():
  *
  *   Problem: Kling 1.6 image-to-video API wymaga image_url w polu "image_url"
  *   at the top level of the body, but the earlier code used the same structure
- *   co text-to-video. W efekcie obraz był ignorowany — każda scena generowała
+ *   as text-to-video. As a result the image was ignored — each scene generated
  *   a random clip unrelated to the previously generated image.
  *
  *   Different fal.ai endpoints have different body structures:
@@ -34,9 +34,9 @@ import java.util.concurrent.TimeUnit;
  *     - minimax/video-01-live (free tier)        → { first_frame_image, prompt }
  *
  *   Solution: buildVideoRequestBody() builds the body depending on the model.
- *   Każdy provider ma inną strukturę — centralizujemy to w jednym miejscu.
+ *   Each provider has a different structure — we centralize it in one place.
  *
- * FAZA 1 BUGFIX — image model:
+ * PHASE 1 BUGFIX — image model:
  *
  *   generateImage() used "portrait_16_9" instead of "portrait_9_16".
  *   TikTok wymaga formatu pionowego 9:16. Naprawione.
@@ -69,7 +69,7 @@ public class FalAiService {
     // =========================================================================
 
     /**
-     * Generuje obraz 9:16 dla jednej sceny.
+     * Generates a 9:16 image for a single scene.
      * BUGFIX: zmieniono "portrait_16_9" → "portrait_9_16" (format pionowy TikTok).
      */
     @Retry(name = "falAi")
@@ -107,7 +107,7 @@ public class FalAiService {
     // =========================================================================
 
     /**
-     * Generuje klip wideo z obrazu (image-to-video).
+     * Generates a video clip from an image (image-to-video).
      *
      * BUGFIX: Each fal.ai provider has a different body structure for image-to-video.
      * Previously we used one structure for all models, which meant
@@ -115,9 +115,9 @@ public class FalAiService {
      *
      * Now: buildVideoRequestBody() picks the body structure to match the model.
      *
-     * @param imageUrl     URL obrazu z ImageStep — musi być publiczny URL
+     * @param imageUrl     the image URL from ImageStep — must be a public URL
      * @param motionPrompt opis ruchu z ScriptResult.SceneScript
-     * @param durationMs   czas trwania (Kling: 5 lub 10s)
+     * @param durationMs   duration (Kling: 5 or 10s)
      * @param modelId      model z ModelSelector (np. "fal-ai/kling-video/v1.6/pro/image-to-video")
      */
     @Retry(name = "falAi")
@@ -152,10 +152,10 @@ public class FalAiService {
     // =========================================================================
 
     /**
-     * Buduje body requestu dla video generation.
+     * Builds the request body for video generation.
      *
-     * Każdy provider fal.ai ma inną strukturę — centralizujemy to tutaj.
-     * Przy dodaniu nowego providera (Runway, Luma) → dodaj case tutaj.
+     * Each fal.ai provider has a different structure — we centralize it here.
+     * When adding a new provider (Runway, Luma) → add a case here.
      *
      * Kling image-to-video:
      *   Endpoint: fal-ai/kling-video/v1/standard/image-to-video
@@ -165,7 +165,7 @@ public class FalAiService {
      * LTX Video (free):
      *   Endpoint: fal-ai/ltx-video
      *   Body: { image_url, prompt }
-     *   Note: LTX nie obsługuje duration/aspect_ratio — generuje zawsze ~5s
+     *   Note: LTX doesn't support duration/aspect_ratio — it always generates ~5s
      *
      * MiniMax Hailuo (free):
      *   Endpoint: fal-ai/minimax/video-01-live
@@ -180,7 +180,7 @@ public class FalAiService {
 
         if (isKlingModel(modelId)) {
             // Kling wymaga konkretnego image-to-video endpointu
-            // i duration jako String, nie int
+            // and duration as a String, not an int
             body.put("image_url", imageUrl);
             body.put("prompt", motionPrompt);
             body.put("duration", String.valueOf(durationSeconds));
@@ -192,13 +192,13 @@ public class FalAiService {
             body.put("prompt", motionPrompt);
 
         } else if (isMiniMaxModel(modelId)) {
-            // MiniMax Hailuo — używa "first_frame_image" zamiast "image_url"
+            // MiniMax Hailuo — uses "first_frame_image" instead of "image_url"
             body.put("first_frame_image", imageUrl);
             body.put("prompt", motionPrompt);
 
         } else {
             // Default structure (for unknown models / future providers)
-            log.warn("[FalAiService] Nieznany model: {} — używam domyślnej struktury body", modelId);
+            log.warn("[FalAiService] Unknown model: {} — using the default body structure", modelId);
             body.put("image_url", imageUrl);
             body.put("prompt", motionPrompt);
             body.put("duration", String.valueOf(durationSeconds));

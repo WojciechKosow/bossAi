@@ -13,12 +13,12 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * DirectorStep — generuje plan cięć i efektów dla każdej sceny.
+ * DirectorStep — generates the cut and effect plan for each scene.
  *
- * FAZA 1 BUGFIX:
+ * PHASE 1 BUGFIX:
  *
  *   1. context.setDirectorPlan(plan) was called only in the catch block (fallback).
- *      Przy sukcesie AI planu — plan był generowany ale NIE zapisywany do kontekstu.
+ *      On AI plan success — the plan was generated but NOT saved to the context.
  *      RenderStep got null and crashed. Fixed: setDirectorPlan is always called
  *      at the end of execute(), regardless of the path (AI or fallback).
  *
@@ -26,18 +26,18 @@ import java.util.List;
  *      Fixed: beat sync is applied to the final plan (regardless of source).
  *
  *   3. effectAssigner.applyEffects was called twice on AI success.
- *      Raz w try, raz po beat sync. Naprawione: tylko raz, po beat sync.
+ *      Once in try, once after beat sync. Fixed: only once, after beat sync.
  *
  *   4. callback.onStep in the DIRECTOR step used GenerationStepName.SCRIPT instead
  *      dedykowanego kroku. Zostawiono SCRIPT bo DIRECTOR nie ma osobnego enum value —
- *      do poprawy w Fazie 2 gdy dodamy DIRECTOR do GenerationStepName.
+ *      to be improved in Phase 2 when we add DIRECTOR to GenerationStepName.
  *
  * Flow:
  *   1. Attempt to generate the plan via AI (DirectorAiService)
- *   2. Jeśli AI failuje → fallback plan oparty na StyleConfig
+ *   2. If the AI fails → a fallback plan based on StyleConfig
  *   3. Beat sync (if music is available)
  *   4. Apply effects
- *   5. Zapisz plan do kontekstu (ZAWSZE)
+ *   5. Save the plan to the context (ALWAYS)
  */
 @Slf4j
 @Service
@@ -62,15 +62,15 @@ public class DirectorStep implements GenerationStep {
         // Step 2: Beat sync (if music is available)
         // Note: in the normal pipeline, music is only available after MusicStep,
         // which runs AFTER DirectorStep. Beat sync here only works when
-        // context.musicLocalPath jest ustawiony z poprzedniej sesji lub user upload.
+        // context.musicLocalPath is set from a previous session or a user upload.
         if (context.getMusicLocalPath() != null) {
-            log.info("[DirectorStep] Muzyka dostępna — stosuję beat sync");
+            log.info("[DirectorStep] Music available — applying beat sync");
             try {
                 List<Integer> beats = beatDetectionService.detectBeats(context.getMusicLocalPath(), context);
                 applyBeatSync(plan, context, beats);
-                log.info("[DirectorStep] Beat sync OK — {} beatów", beats.size());
+                log.info("[DirectorStep] Beat sync OK — {} beats", beats.size());
             } catch (Exception e) {
-                log.warn("[DirectorStep] Beat sync failed — używam oryginalnych cuts: {}", e.getMessage());
+                log.warn("[DirectorStep] Beat sync failed — using the original cuts: {}", e.getMessage());
             }
         }
 
@@ -80,10 +80,10 @@ public class DirectorStep implements GenerationStep {
         effectAssigner.applyEffects(plan, context.getStyle(), contentType, audioAnalysis);
         effectAssigner.applyTransitions(plan, context.getStyle(), contentType, audioAnalysis);
 
-        // Krok 4: Zapisz do kontekstu — ZAWSZE, niezależnie od ścieżki powyżej
+        // Step 4: Save to the context — ALWAYS, regardless of the path above
         context.setDirectorPlan(plan);
 
-        log.info("[DirectorStep] DONE — {} scen, pacing: {}, energy: {}",
+        log.info("[DirectorStep] DONE — {} scenes, pacing: {}, energy: {}",
                 plan.getScenes().size(),
                 plan.getPacing(),
                 plan.getEnergyLevel());
@@ -95,14 +95,14 @@ public class DirectorStep implements GenerationStep {
 
     /**
      * Attempts to generate the plan via AI.
-     * Przy każdym błędzie loguje i zwraca fallback plan — pipeline nigdy się nie zatrzymuje.
+     * On any error it logs and returns a fallback plan — the pipeline never stops.
      */
     private DirectorPlan generatePlanWithFallback(GenerationContext context) {
         try {
             log.info("[DirectorStep] Generating AI plan for {} scenes", context.getScenes().size());
             DirectorPlan aiPlan = directorAiService.generatePlan(context);
 
-            log.info("[DirectorStep] AI plan OK — {} scen", aiPlan.getScenes().size());
+            log.info("[DirectorStep] AI plan OK — {} scenes", aiPlan.getScenes().size());
             return aiPlan;
 
         } catch (Exception e) {
@@ -115,11 +115,11 @@ public class DirectorStep implements GenerationStep {
      * Generates a simple, deterministic cut plan based on StyleConfig.
      * Used when the AI director fails or times out.
      *
-     * Fallback nie jest "złym" planem — to plan spójny z wybranym stylem,
-     * tylko bez AI-driven dramaturgii.
+     * The fallback is not a "bad" plan — it's a plan consistent with the chosen style,
+     * just without the AI-driven dramaturgy.
      */
     private DirectorPlan buildFallbackPlan(GenerationContext context) {
-        log.info("[DirectorStep] Buduję fallback plan — styl: {}", context.getStyle());
+        log.info("[DirectorStep] Building the fallback plan — style: {}", context.getStyle());
 
         List<SceneDirection> directions = new ArrayList<>();
 
@@ -140,7 +140,7 @@ public class DirectorStep implements GenerationStep {
                 .scenes(directions)
                 .build();
 
-        log.info("[DirectorStep] Fallback plan gotowy — {} scen",
+        log.info("[DirectorStep] Fallback plan ready — {} scenes",
                 directions.size());
 
         return fallback;
@@ -156,9 +156,9 @@ public class DirectorStep implements GenerationStep {
                     .filter(s -> s.getIndex() == scene.getSceneIndex())
                     .findFirst()
                     .orElseThrow(() -> new IllegalStateException(
-                            "[DirectorStep] Scena " + scene.getSceneIndex() + " nie znaleziona przy beat sync"));
+                            "[DirectorStep] Scene " + scene.getSceneIndex() + " not found during beat sync"));
 
-            // Oblicz offset czasowy sceny na timeline
+            // Compute the scene's time offset on the timeline
             int sceneOffsetMs = 0;
             for (SceneAsset s : context.getScenes()) {
                 if (s.getIndex() < scene.getSceneIndex()) {
@@ -169,11 +169,11 @@ public class DirectorStep implements GenerationStep {
             List<Cut> cuts = mapBeatsToScene(beats, asset.getDurationMs(), sceneOffsetMs);
 
             if (!cuts.isEmpty()) {
-                log.info("[DirectorStep] Beat sync scena {} — {} cutów (offset={}ms, duration={}ms)",
+                log.info("[DirectorStep] Beat sync scene {} — {} cuts (offset={}ms, duration={}ms)",
                         scene.getSceneIndex(), cuts.size(), sceneOffsetMs, asset.getDurationMs());
                 scene.setCuts(cuts);
             } else {
-                log.warn("[DirectorStep] Beat sync dla sceny {} wygenerował 0 cuts — zostawiam oryginalne",
+                log.warn("[DirectorStep] Beat sync for scene {} produced 0 cuts — keeping the originals",
                         scene.getSceneIndex());
             }
         }
@@ -232,7 +232,7 @@ public class DirectorStep implements GenerationStep {
 
     /**
      * Generates evenly distributed cuts based on the pacing from StyleConfig.
-     * FAST → 500ms cuts, MEDIUM → 1000ms, SLOW → cała scena jako jeden cut.
+     * FAST → 500ms cuts, MEDIUM → 1000ms, SLOW → the whole scene as one cut.
      */
     private List<Cut> generateCuts(int durationMs, GenerationContext context) {
         List<Cut> cuts = new ArrayList<>();
@@ -240,7 +240,7 @@ public class DirectorStep implements GenerationStep {
         int stepMs = switch (context.getStyleConfig().getPacing()) {
             case "FAST"   -> 500;
             case "MEDIUM" -> 1000;
-            case "SLOW"   -> durationMs; // jedna scena = jeden cut
+            case "SLOW"   -> durationMs; // one scene = one cut
             default       -> 1000;
         };
 

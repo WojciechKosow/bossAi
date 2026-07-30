@@ -6,9 +6,9 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
 /**
- * ModelSelector — wybiera model AI na podstawie planu użytkownika.
+ * ModelSelector — selects the AI model based on the user's plan.
  *
- * FAZA 1 BUGFIX — video modele:
+ * PHASE 1 BUGFIX — video models:
  *
  *   Kling image-to-video requires a DIFFERENT endpoint than text-to-video.
  *   The earlier code used text-to-video endpoints, which meant the image
@@ -18,7 +18,7 @@ import org.springframework.stereotype.Component;
  *     Standard: fal-ai/kling-video/v1/standard/image-to-video
  *     Pro:      fal-ai/kling-video/v1.6/pro/image-to-video
  *
- *   Free tier używa LTX Video — obsługuje image_url, tańszy, wolniejszy.
+ *   The free tier uses LTX Video — it supports image_url, cheaper, slower.
  *
  * Tier image models:
  *   FREE/TRIAL/STARTER → fal-ai/flux/schnell   ($0.039/img)
@@ -32,7 +32,7 @@ import org.springframework.stereotype.Component;
  *
  * UWAGA: Endpointy video hardkodowane tutaj (nie w FalAiProperties) bo
  * zmiana image-to-video → text-to-video to zmiana semantyki, nie konfiguracji.
- * Jeśli chcesz dać to do properties — użyj osobnych kluczy:
+ * If you want to move this to properties — use separate keys:
  *   fal-ai.model.video.free-image-to-video, .standard-image-to-video itd.
  */
 @Component
@@ -47,7 +47,7 @@ public class ModelSelector {
     private static final String VIDEO_MODEL_PRO      = "fal-ai/kling-video/v1.6/pro/image-to-video";
 
     /**
-     * Zwraca identyfikator modelu image generation dla danego planu.
+     * Returns the image-generation model identifier for a given plan.
      */
     public String imageModel(PlanType planType) {
         return switch (planType) {
@@ -58,7 +58,7 @@ public class ModelSelector {
     }
 
     /**
-     * Zwraca identyfikator modelu video generation (image-to-video) dla danego planu.
+     * Returns the video-generation (image-to-video) model identifier for a given plan.
      *
      * IMPORTANT: The returned endpoints must be image-to-video, not text-to-video.
      * FalAiService.buildVideoRequestBody() picks the body structure based on

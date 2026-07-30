@@ -13,24 +13,24 @@ import org.springframework.stereotype.Service;
 import java.util.List;
 
 /**
- * AssetAnalysisStep — analizuje custom media assety PRZED ScriptStep.
+ * AssetAnalysisStep — analyzes custom media assets BEFORE ScriptStep.
  *
  * Cel:
  *   ScriptStep needs a visual description of the assets so GPT can write narration
  *   matched to the actual content of the assets (not shooting in the dark).
  *
  * Co robi:
- *   1. AssetAnalyzer — GPT-4o Vision analizuje każdy asset (IMAGE/VIDEO keyframe)
- *      → wypełnia context.assetProfiles (visualDescription, role, mood, tags)
+ *   1. AssetAnalyzer — GPT-4o Vision analyzes each asset (IMAGE/VIDEO keyframe)
+ *      → fills context.assetProfiles (visualDescription, role, mood, tags)
  *   2. UserIntentParser — parsuje prompt usera → UserEditIntent
  *      (placement hints, scene descriptions, pacing preference)
  *
- * Oba są opcjonalne — przy błędzie loguje warning i kontynuuje.
+ * Both are optional — on error it logs a warning and continues.
  * ScriptStep radzi sobie bez profili, ale wynik jest gorszy.
  *
  * Skipped gdy:
  *   - Brak custom media (context.hasCustomMedia() == false)
- *   - Profile już ustawione (context.getAssetProfiles() != null) — unika
+ *   - Profiles already set (context.getAssetProfiles() != null) — avoids
  *     double analysis when the step is called again or by a test.
  */
 @Slf4j
@@ -44,13 +44,13 @@ public class AssetAnalysisStep implements GenerationStep {
     @Override
     public void execute(GenerationContext context) throws Exception {
         if (!context.hasCustomMedia()) {
-            log.info("[AssetAnalysisStep] Brak custom media — pomijam analizę");
+            log.info("[AssetAnalysisStep] No custom media — skipping analysis");
             return;
         }
 
         // Skip if already populated (e.g. test re-run or future retry)
         if (context.getAssetProfiles() != null && !context.getAssetProfiles().isEmpty()) {
-            log.info("[AssetAnalysisStep] Profile już dostępne ({}) — pomijam", context.getAssetProfiles().size());
+            log.info("[AssetAnalysisStep] Profiles already available ({}) — skipping", context.getAssetProfiles().size());
             return;
         }
 
@@ -60,7 +60,7 @@ public class AssetAnalysisStep implements GenerationStep {
                 "Analyzing your assets..."
         );
 
-        log.info("[AssetAnalysisStep] START — {} assetów do analizy, generationId: {}",
+        log.info("[AssetAnalysisStep] START — {} assets to analyze, generationId: {}",
                 context.getCustomMediaAssets().size(), context.getGenerationId());
 
         // Step 1: Vision analysis
@@ -95,7 +95,7 @@ public class AssetAnalysisStep implements GenerationStep {
                     editIntent.getPlacements() != null ? editIntent.getPlacements().size() : 0,
                     editIntent.getPacingPreference());
         } catch (Exception e) {
-            log.warn("[AssetAnalysisStep] Intent parsing FAILED — kontynuuję bez intent: {}", e.getMessage());
+            log.warn("[AssetAnalysisStep] Intent parsing FAILED — continuing without intent: {}", e.getMessage());
         }
 
         // If user gave no prompt, enrich the synthetic prompt with vision findings

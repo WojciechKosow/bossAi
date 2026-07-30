@@ -9,18 +9,18 @@ import java.util.Comparator;
 import java.util.List;
 
 /**
- * MusicAlignmentService — dopasowuje moment muzyki do kontekstu wideo.
+ * MusicAlignmentService — aligns the music moment to the video context.
  *
  * Main logic:
- *   1. Analizuje scenariusz — identyfikuje "ważne momenty" (hook, CTA, peak narracji)
- *   2. Analizuje muzykę — energy profile, segmenty (drop, build-up, peak, quiet)
- *   3. Oblicza optymalny offset startu muzyki — wyrównuje DROP w muzyce z HOOK/CTA w wideo
- *   4. Generuje dynamiczne musicDirections na podstawie rzeczywistej struktury muzyki
+ *   1. Analyzes the script — identifies the "important moments" (hook, CTA, narration peak)
+ *   2. Analyzes the music — energy profile, segments (drop, build-up, peak, quiet)
+ *   3. Computes the optimal music start offset — aligns the DROP in the music with the HOOK/CTA in the video
+ *   4. Generates dynamic musicDirections based on the actual music structure
  *
- * Jeśli muzyka ma drop w sekundzie 45, a hook wideo jest w sekundzie 2 →
+ * If the music has a drop at second 45 and the video hook is at second 2 →
  * musicStartOffsetMs = 43000 (we start the music from the 43rd second so the drop lands on the hook).
  *
- * Jeśli muzyka jest krótsza niż wideo → loop (obsługiwane przez RenderStep).
+ * If the music is shorter than the video → loop (handled by RenderStep).
  */
 @Slf4j
 @Service
@@ -30,7 +30,7 @@ public class MusicAlignmentService {
      * Computes the optimal alignment of the music to the video.
      *
      * @param analysis    wynik analizy muzyki
-     * @param script      scenariusz (sceny, narracja, hook, CTA)
+     * @param script      the script (scenes, narration, hook, CTA)
      * @return the alignment result (offset + musicDirections)
      */
     public MusicAlignment align(MusicAnalysisResult analysis, ScriptResult script) {
@@ -45,7 +45,7 @@ public class MusicAlignmentService {
         int startOffsetMs = findBestOffset(analysis, videoMoments, script.totalDurationMs());
         log.info("[MusicAlignment] Optymalny offset: {}ms", startOffsetMs);
 
-        // 3. Generuj musicDirections na podstawie analizy + offsetu
+        // 3. Generate musicDirections based on the analysis + offset
         List<ScriptResult.MusicDirection> directions = buildDirections(analysis, script, startOffsetMs);
         log.info("[MusicAlignment] {} musicDirections", directions.size());
 
@@ -63,9 +63,9 @@ public class MusicAlignmentService {
         HOOK,
         /** CTA — call to action, kulminacja */
         CTA,
-        /** Transition — zmiana sceny, dobry moment na zmianę dynamiki */
+        /** Transition — a scene change, a good moment for a dynamics change */
         TRANSITION,
-        /** Peak narration — najdłuższa/najważniejsza scena */
+        /** Peak narration — the longest/most important scene */
         PEAK_NARRATION
     }
 
@@ -83,12 +83,12 @@ public class MusicAlignmentService {
         for (int i = 0; i < scenes.size(); i++) {
             ScriptResult.SceneScript scene = scenes.get(i);
 
-            // Pierwsza scena = HOOK
+            // The first scene = HOOK
             if (i == 0) {
                 moments.add(new VideoMoment(currentMs, MomentType.HOOK, i));
             }
 
-            // Ostatnia scena = CTA
+            // The last scene = CTA
             if (i == scenes.size() - 1) {
                 moments.add(new VideoMoment(currentMs, MomentType.CTA, i));
             }
@@ -130,18 +130,18 @@ public class MusicAlignmentService {
     // =========================================================================
 
     /**
-     * Znajduje najlepszy offset startu muzyki.
+     * Finds the best music start offset.
      *
      * Strategy: align the first DROP in the music with the HOOK in the video.
-     * Jeśli brak dropów — wyrównaj pierwszy PEAK z CTA.
-     * Jeśli brak tego też — zacznij od początku (offset=0).
+     * If there are no drops — align the first PEAK with the CTA.
+     * If there's none of that either — start from the beginning (offset=0).
      *
      * Constraint: the offset must allow enough music length
      * from the offset to the end of the track (minimum 60% of the video length).
      */
     private int findBestOffset(MusicAnalysisResult analysis, List<VideoMoment> videoMoments, int videoDurationMs) {
         if (analysis.segments().isEmpty()) {
-            log.info("[MusicAlignment] Brak segmentów — offset=0");
+            log.info("[MusicAlignment] No segments — offset=0");
             return 0;
         }
 
@@ -198,7 +198,7 @@ public class MusicAlignmentService {
             }
         }
 
-        // Strategia 4: Brute-force — znajdź offset z najlepszym score
+        // Strategy 4: Brute-force — find the offset with the best score
         return findBestOffsetBruteForce(analysis, videoMoments, videoDurationMs);
     }
 
@@ -231,11 +231,11 @@ public class MusicAlignmentService {
     }
 
     /**
-     * Ocenia jakość offsetu — ile energii muzyki trafia w ważne momenty wideo.
+     * Evaluates the offset quality — how much music energy hits the important video moments.
      *
      * Higher score = better fit:
      *   - HOOK/CTA w momencie wysokiej energii → bonus
-     *   - PEAK_NARRATION w momencie niskiej energii → bonus (muzyka nie zagłusza)
+     *   - PEAK_NARRATION at a low-energy moment → bonus (the music doesn't drown it out)
      */
     private double scoreOffset(MusicAnalysisResult analysis, List<VideoMoment> videoMoments, int offset) {
         double score = 0;
@@ -257,8 +257,8 @@ public class MusicAlignmentService {
             switch (moment.type) {
                 case HOOK -> score += energy * 3.0;        // We want energy on the hook
                 case CTA -> score += energy * 2.5;         // The CTA needs energy too
-                case TRANSITION -> score += energy * 1.0;  // Przejścia — lekki bonus za energię
-                case PEAK_NARRATION -> score += (1.0 - energy) * 2.0; // Narracja — chcemy ciszej
+                case TRANSITION -> score += energy * 1.0;  // Transitions — a small bonus for energy
+                case PEAK_NARRATION -> score += (1.0 - energy) * 2.0; // Narration — we want it quieter
             }
         }
 
@@ -277,13 +277,13 @@ public class MusicAlignmentService {
     // =========================================================================
 
     /**
-     * Generuje dynamiczne musicDirections na podstawie analizy muzyki.
+     * Generates dynamic musicDirections based on the music analysis.
      *
      * Logika:
-     *   - Scena z narracją (subtitle) → muzyka ciszej (0.12-0.18)
-     *   - Scena pokrywająca się z DROPem/PEAKiem w muzyce → głośniej (0.35-0.50)
-     *   - Scena z BUILD_UP → stopniowe zwiększanie (fadeIn)
-     *   - Domyślnie → 0.20
+     *   - A scene with narration (subtitle) → music quieter (0.12-0.18)
+     *   - A scene overlapping a DROP/PEAK in the music → louder (0.35-0.50)
+     *   - A scene with BUILD_UP → a gradual increase (fadeIn)
+     *   - By default → 0.20
      */
     private List<ScriptResult.MusicDirection> buildDirections(
             MusicAnalysisResult analysis,
@@ -301,7 +301,7 @@ public class MusicAlignmentService {
             ScriptResult.SceneScript scene = scenes.get(i);
             int sceneEndMs = sceneStartMs + scene.durationMs();
 
-            // Mapuj czas sceny → czas w muzyce (z offsetem)
+            // Map scene time → time in the music (with the offset)
             int musicStart = sceneStartMs + startOffsetMs;
             int musicEnd = sceneEndMs + startOffsetMs;
 
@@ -314,14 +314,14 @@ public class MusicAlignmentService {
             // Whether the scene has narration
             boolean hasNarration = scene.subtitleText() != null && !scene.subtitleText().isBlank();
 
-            // Oblicz volume + fade
+            // Compute volume + fade
             double volume;
             int fadeInMs = 0;
             int fadeOutMs = 0;
 
             if (dominantSegment == MusicAnalysisResult.SegmentType.DROP
                     || dominantSegment == MusicAnalysisResult.SegmentType.PEAK) {
-                // Muzyka ma drop/peak — daj jej więcej przestrzeni
+                // The music has a drop/peak — give it more space
                 if (hasNarration) {
                     // Narracja + drop → kompromis
                     volume = 0.25 + musicEnergy * 0.10;
@@ -330,7 +330,7 @@ public class MusicAlignmentService {
                     volume = 0.35 + musicEnergy * 0.20;
                 }
             } else if (dominantSegment == MusicAnalysisResult.SegmentType.BUILD_UP) {
-                // Build-up — stopniowe zwiększanie
+                // Build-up — a gradual increase
                 volume = hasNarration ? 0.15 : 0.25;
                 fadeInMs = Math.min(scene.durationMs() / 2, 2000);
             } else if (dominantSegment == MusicAnalysisResult.SegmentType.QUIET) {
@@ -344,7 +344,7 @@ public class MusicAlignmentService {
             // Clamp
             volume = Math.max(0.05, Math.min(0.55, volume));
 
-            // Fade out na ostatniej scenie
+            // Fade out on the last scene
             if (i == scenes.size() - 1) {
                 fadeOutMs = Math.min(scene.durationMs() / 2, 1500);
             }

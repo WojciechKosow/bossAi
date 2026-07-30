@@ -21,7 +21,7 @@ import java.util.*;
 import java.util.stream.Collectors;
 
 /**
- * Autonomiczny system kompozycji wielowarstwowej — działa jak montażysta.
+ * An autonomous multi-layer composition system — works like an editor.
  *
  * Na podstawie:
  *   - AssetProfile (what is in each asset)
@@ -36,9 +36,9 @@ import java.util.stream.Collectors;
  * The existing infrastructure (appendLayerSegments in EdlGeneratorService) handles the rest.
  *
  * Rules for the Problem/Payoff DNA:
- *   TalkingHeadBg  — testimonial/person jako primary + b-roll/background jako tło
- *   ProductReveal  — product-shot jako overlay w momencie kulminacji/reveal
- *   CtaOverlay     — CTA asset jako nakładka na ostatnich scenach
+ *   TalkingHeadBg  — testimonial/person as primary + b-roll/background as the background
+ *   ProductReveal  — product-shot as an overlay at the climax/reveal moment
+ *   CtaOverlay     — CTA asset as an overlay on the last scenes
  */
 @Slf4j
 @Service
@@ -52,7 +52,7 @@ public class AutonomousCompositionDecider {
     private static final int DEFAULT_MAX_LAYERED_SCENES_PCT = 40; // max 40% of scenes may have layers
 
     /**
-     * Główna metoda — decyduje o kompozycji i wypełnia SceneAsset.layerAssetIds.
+     * The main method — decides the composition and fills SceneAsset.layerAssetIds.
      *
      * @param context        the active GenerationContext (must have profiles, narration, cuts)
      * @param projectAssets  list of ProjectAssets from the DB (VIDEO/IMAGE in scene order)

@@ -26,7 +26,7 @@ public class CompositionCandidate {
      * Typ kompozycji:
      *   pip       — picture-in-picture: primary (mniejszy) na tle background
      *   overlay   — primary fullscreen + overlay na wierzchu (logo, CTA, product)
-     *   fullscreen — jedna warstwa (domyślne — kandydat nie jest akceptowany)
+     *   fullscreen — a single layer (default — the candidate is not accepted)
      */
     @Builder.Default
     private String composition = "fullscreen";
@@ -58,9 +58,9 @@ public class CompositionCandidate {
     /** Typ segmentu narracji (hook/setup/point/emphasis/climax/cta) */
     private String narrationType;
 
-    /** Faza DNA (A=hook, B=problem, C=tension, D=reveal, E=transform, F=cta) */
+    /** DNA phase (A=hook, B=problem, C=tension, D=reveal, E=transform, F=cta) */
     private String dnaBeat;
 
-    /** Uzasadnienie reguły — dlaczego ta kompozycja ma sens */
+    /** Justification for the rule — why this composition makes sense */
     private String reasoning;
 }

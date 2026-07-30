@@ -8,14 +8,14 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * SubtitleService — generuje napisy word-by-word + fallback SRT.
+ * SubtitleService — generates word-by-word subtitles + a fallback SRT.
  *
- * FAZA 3 — word-by-word subtitles:
- *   generateWordTimings() rozbija subtitleText kazdej sceny na osobne slowa
- *   z timingiem (startMs/endMs per word). RenderStep renderuje kazde slowo
- *   jako osobny FFmpeg drawtext z enable='between(t, start, end)'.
+ * PHASE 3 — word-by-word subtitles:
+ *   generateWordTimings() splits each scene's subtitleText into separate words
+ *   with timing (startMs/endMs per word). RenderStep renders each word
+ *   as a separate FFmpeg drawtext with enable='between(t, start, end)'.
  *
- *   Fallback: generateSrt() — klasyczny plik SRT (per-scena lub word-split).
+ *   Fallback: generateSrt() — a classic SRT file (per-scene or word-split).
  */
 @Slf4j
 @Service
@@ -28,10 +28,10 @@ public class SubtitleService {
     ) {}
 
     /**
-     * Generuje liste slow z timingiem word-by-word.
-     * Kazda scena ma subtitleText rozbijany na slowa dystrybuowane rownomiernie.
+     * Generates a list of words with word-by-word timing.
+     * Each scene's subtitleText is split into words distributed evenly.
      *
-     * Ulepszenia:
+     * Improvements:
      *   - Enumeration items (after a comma) get a shorter pause between them
      *   - Words after a period/exclamation mark get a longer break (natural sentence break)
      *   - Short words (1-3 chars: "a", "to", "etc") get less time
@@ -104,12 +104,12 @@ public class SubtitleService {
             sceneStartMs += scene.durationMs();
         }
 
-        log.info("[SubtitleService] Word-by-word: {} slow z timingiem (weighted)", timings.size());
+        log.info("[SubtitleService] Word-by-word: {} words with timing (weighted)", timings.size());
         return timings;
     }
 
     // =========================================================================
-    // FALLBACK — klasyczny SRT
+    // FALLBACK — classic SRT
     // =========================================================================
 
     public String generateSrt(ScriptResult script, int offsetMs) {
@@ -119,10 +119,10 @@ public class SubtitleService {
                 .anyMatch(s -> s.subtitleText() != null && !s.subtitleText().isBlank());
 
         if (hasSubtitleText) {
-            log.info("[SubtitleService] SRT fallback: tryb per-scena — {} blokow", scenes.size());
+            log.info("[SubtitleService] SRT fallback: per-scene mode — {} blocks", scenes.size());
             return generatePerSceneSrt(scenes, offsetMs);
         } else {
-            log.info("[SubtitleService] SRT fallback: tryb word-split — {} znakow",
+            log.info("[SubtitleService] SRT fallback: word-split mode — {} characters",
                     script.narration().length());
             return generateWordSplitSrt(script.narration(), script.totalDurationMs(), offsetMs);
         }

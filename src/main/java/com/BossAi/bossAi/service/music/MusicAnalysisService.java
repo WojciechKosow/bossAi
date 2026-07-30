@@ -14,9 +14,9 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * MusicAnalysisService — analizuje strukturę muzyki (energy profile, segmenty).
+ * MusicAnalysisService — analyzes the music structure (energy profile, segments).
  *
- * Strategia: najpierw Python/librosa (AudioAnalysisClient), fallback na FFmpeg astats.
+ * Strategy: first Python/librosa (AudioAnalysisClient), fallback to FFmpeg astats.
  * Python daje: prawdziwe BPM, beat map, energy curve, mood, sekcje.
  * FFmpeg gives: an approximate energy profile (often empty).
  */
@@ -39,8 +39,8 @@ public class MusicAnalysisService {
     }
 
     /**
-     * Analizuje plik audio, opcjonalnie uzywajac cached AudioAnalysisResponse
-     * z kontekstu (ustawiony wczesniej przez BeatDetectionServiceImpl).
+     * Analyzes the audio file, optionally using a cached AudioAnalysisResponse
+     * from the context (set earlier by BeatDetectionServiceImpl).
      */
     public MusicAnalysisResult analyze(String audioPath, AudioAnalysisResponse cachedResponse) {
         log.info("[MusicAnalysis] Analyzing: {}", audioPath);
@@ -55,13 +55,13 @@ public class MusicAnalysisService {
             log.warn("[MusicAnalysis] Python analysis failed — fallback to FFmpeg: {}", e.getMessage());
         }
 
-        // Fallback: stary FFmpeg astats
+        // Fallback: the old FFmpeg astats
         return analyzeViaFfmpeg(audioPath);
     }
 
     /**
-     * Analiza przez Python/FastAPI microservice (librosa + essentia).
-     * Uzywa cachedResponse jesli dostepny (z BeatDetectionService), unikajac duplikatu.
+     * Analysis via the Python/FastAPI microservice (librosa + essentia).
+     * Uses cachedResponse if available (from BeatDetectionService), avoiding a duplicate.
      */
     private MusicAnalysisResult analyzeViaPython(String audioPath, AudioAnalysisResponse cachedResponse) throws Exception {
         AudioAnalysisResponse response = cachedResponse;
@@ -84,7 +84,7 @@ public class MusicAnalysisService {
                 response.sections() != null ? response.sections().size() : 0,
                 response.mood());
 
-        // Konwertuj energy curve na nasz format (co 500ms)
+        // Convert the energy curve to our format (every 500ms)
         List<Double> energyProfile = new ArrayList<>();
         if (response.energyCurve() != null && !response.energyCurve().isEmpty()) {
             double maxTime = response.durationSeconds();
@@ -99,7 +99,7 @@ public class MusicAnalysisService {
             }
         }
 
-        // Konwertuj sekcje
+        // Convert the sections
         List<MusicAnalysisResult.MusicSegment> segments = new ArrayList<>();
         if (response.sections() != null) {
             for (AudioAnalysisResponse.Section section : response.sections()) {
@@ -127,7 +127,7 @@ public class MusicAnalysisService {
             case "peak", "chorus" -> MusicAnalysisResult.SegmentType.PEAK;
             case "quiet", "intro", "outro", "bridge" -> MusicAnalysisResult.SegmentType.QUIET;
             default -> {
-                // Fallback: mapuj na podstawie energy stringa
+                // Fallback: map based on the energy string
                 if ("high".equalsIgnoreCase(energy)) yield MusicAnalysisResult.SegmentType.PEAK;
                 if ("low".equalsIgnoreCase(energy)) yield MusicAnalysisResult.SegmentType.QUIET;
                 yield MusicAnalysisResult.SegmentType.NORMAL;
@@ -146,7 +146,7 @@ public class MusicAnalysisService {
     }
 
     /**
-     * Fallback: analiza przez FFmpeg astats (stary kod).
+     * Fallback: analysis via FFmpeg astats (old code).
      */
     private MusicAnalysisResult analyzeViaFfmpeg(String audioPath) {
         log.info("[MusicAnalysis] FFmpeg fallback — {}", audioPath);
@@ -173,7 +173,7 @@ public class MusicAnalysisService {
         // Approximate BPM from beat spacing
         int bpm = estimateBpm(rawEnergy);
 
-        log.info("[MusicAnalysis] DONE — duration={}ms, {} windows, {} segmentów, avgEnergy={}, bpm={}",
+        log.info("[MusicAnalysis] DONE — duration={}ms, {} windows, {} segments, avgEnergy={}, bpm={}",
                 totalDurationMs, normalizedProfile.size(), segments.size(),
                 String.format("%.2f", avgEnergy), bpm);
 
@@ -228,9 +228,9 @@ public class MusicAnalysisService {
                 if (line.contains("RMS_level")) {
                     double rms = extractValue(line, "RMS_level:");
 
-                    // Grupuj w okna WINDOW_MS
+                    // Group into WINDOW_MS windows
                     if (currentTimeMs >= lastWindowEnd) {
-                        // Zapisz okno
+                        // Save the window
                         if (windowMaxRms > -100) {
                             points.add(new EnergyPoint((int) (lastWindowEnd - WINDOW_MS), windowMaxRms));
                         }
@@ -275,7 +275,7 @@ public class MusicAnalysisService {
     /**
      * Normalizuje RMS dB do 0.0-1.0.
      * Typowy zakres RMS: -60dB (cisza) do 0dB (max).
-     * Mapujemy: -60dB → 0.0, -5dB → 1.0
+     * We map: -60dB → 0.0, -5dB → 1.0
      */
     private List<Double> normalizeEnergy(List<EnergyPoint> raw) {
         // Find the range
@@ -305,7 +305,7 @@ public class MusicAnalysisService {
      *
      * Algorytm:
      *   1. Compute percentiles (25%, 75%) for the quiet/peak thresholds
-     *   2. Skanuj profil okno po oknie, klasyfikuj jako: DROP, BUILD_UP, PEAK, QUIET, NORMAL
+     *   2. Scan the profile window by window, classify as: DROP, BUILD_UP, PEAK, QUIET, NORMAL
      *   3. Merge adjacent windows of the same type into segments
      */
     private List<MusicAnalysisResult.MusicSegment> detectSegments(List<Double> profile) {
@@ -357,7 +357,7 @@ public class MusicAnalysisService {
 
     /**
      * Merges adjacent windows of the same type into segments.
-     * Segmenty krótsze niż 2 okna (1s) → NORMAL (za krótkie żeby być znaczące).
+     * Segments shorter than 2 windows (1s) → NORMAL (too short to be significant).
      * Exception: a DROP may last 1 window.
      */
     private List<MusicAnalysisResult.MusicSegment> mergeWindows(

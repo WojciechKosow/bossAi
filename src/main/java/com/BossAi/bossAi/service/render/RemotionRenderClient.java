@@ -11,7 +11,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 /**
  * HTTP client do mikroserwisu remotion-renderer (Node.js/Remotion).
  *
- * Zleca renderowanie EDL → MP4 i polluje status aż do zakończenia.
+ * Requests rendering EDL → MP4 and polls the status until completion.
  */
 @Slf4j
 @Service
@@ -85,7 +85,7 @@ public class RemotionRenderClient {
     }
 
     /**
-     * Pobiera surowe bajty wyrenderowanego pliku z Remotiona.
+     * Fetches the raw bytes of the rendered file from Remotion.
      *
      * @param outputPath the path returned by Remotion (e.g. "/output/{renderId}.mp4"),
      *                   relative to the renderer's baseUrl
@@ -106,7 +106,7 @@ public class RemotionRenderClient {
     }
 
     /**
-     * Pobiera aktualny status renderowania.
+     * Fetches the current render status.
      *
      * @param renderId identyfikator renderowania
      * @return RemotionRenderStatusResponse z progress i outputUrl
@@ -134,8 +134,8 @@ public class RemotionRenderClient {
     }
 
     /**
-     * Wariant z callbackiem postępu — wywoływany po każdym odczycie statusu
-     * "in progress" (wartość 0.0–1.0). Pozwala streamować postęp do edytora.
+     * Variant with a progress callback — called after each status read
+     * "in progress" (value 0.0–1.0). Allows streaming progress to the editor.
      */
     public RemotionRenderStatusResponse pollUntilComplete(
             String renderId, java.util.function.DoubleConsumer onProgress) {
@@ -197,7 +197,7 @@ public class RemotionRenderClient {
     }
 
     /**
-     * Pobiera status z retry na transient errors (Connection reset, timeout).
+     * Fetches the status with retry on transient errors (Connection reset, timeout).
      * Returns null if all attempts failed (the caller decides what next).
      */
     private RemotionRenderStatusResponse getStatusWithRetry(String renderId) {

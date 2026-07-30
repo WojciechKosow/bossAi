@@ -11,18 +11,18 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * ProgressService — zarządza SSE emitterami dla aktywnych generacji.
+ * ProgressService — manages SSE emitters for active generations.
  *
  * How it works:
- *   1. Frontend robi GET /api/generations/{id}/progress → tworzy SseEmitter
+ *   1. The frontend does GET /api/generations/{id}/progress → creates an SseEmitter
  *   2. The pipeline (each Step) calls broadcast(generationId, step, %)
  *   3. ProgressService sends an event to the frontend via SSE
- *   4. Po DONE lub FAILED emitter jest zamykany
+ *   4. After DONE or FAILED the emitter is closed
  *
- * Używamy ConcurrentHashMap — pipeline i HTTP request są na różnych wątkach.
+ * We use ConcurrentHashMap — the pipeline and the HTTP request are on different threads.
  *
  * SseEmitter timeout: 5 minutes (enough for the longest generation).
- * Jeśli frontend się rozłączy → emitter jest usuwany przy następnym broadcast.
+ * If the frontend disconnects → the emitter is removed on the next broadcast.
  *
  * Event format (JSON):
  *   {
@@ -46,7 +46,7 @@ public class ProgressService {
     // =========================================================================
 
     /**
-     * Tworzy i rejestruje nowy SseEmitter dla danej generacji.
+     * Creates and registers a new SseEmitter for a given generation.
      * Called by GET /api/generations/{id}/progress.
      */
     public SseEmitter subscribe(UUID generationId) {
@@ -75,7 +75,7 @@ public class ProgressService {
                 generationId,
                 GenerationStepName.INITIALIZING,
                 GenerationStepName.INITIALIZING.getProgressPercent(),
-                "Połączono — czekam na start generacji..."
+                "Connected — waiting for the generation to start..."
         ));
 
         log.info("[ProgressService] SSE subscribed — generationId: {}", generationId);
@@ -90,7 +90,7 @@ public class ProgressService {
      * Sends a progress event to the frontend.
      * Call from GenerationService after every state change in GenerationContext.
      *
-     * Jeśli nie ma subskrybenta (frontend nie otworzył SSE) → no-op.
+     * If there is no subscriber (the frontend didn't open the SSE) → no-op.
      */
     public void broadcast(UUID generationId, GenerationStepName step, int percent, String message) {
         SseEmitter emitter = emitters.get(generationId);
@@ -99,7 +99,7 @@ public class ProgressService {
         String event = buildEvent(generationId, step, percent, message);
         sendEvent(generationId, emitter, event);
 
-        // Po DONE lub FAILED zamknij emitter
+        // After DONE or FAILED close the emitter
         if (step == GenerationStepName.DONE || step == GenerationStepName.FAILED) {
             try {
                 emitter.complete();
@@ -110,7 +110,7 @@ public class ProgressService {
     }
 
     /**
-     * Shorthand — używa danych ze stepu (GenerationStepName ma domyślny % i message).
+     * Shorthand — uses the step's data (GenerationStepName has a default % and message).
      */
     public void broadcast(UUID generationId, GenerationStepName step) {
         broadcast(generationId, step, step.getProgressPercent(), step.getDisplayMessage());
@@ -128,14 +128,14 @@ public class ProgressService {
                             .data(data)
             );
         } catch (IOException e) {
-            log.debug("[ProgressService] Nie udało się wysłać SSE — klient rozłączony. generationId: {}",
+            log.debug("[ProgressService] Failed to send SSE — client disconnected. generationId: {}",
                     generationId);
             emitters.remove(generationId);
         }
     }
 
     private String buildEvent(UUID generationId, GenerationStepName step, int percent, String message) {
-        // Ręczny JSON — bez dodatkowej zależności (Jackson jest dostępny, ale to prosty string)
+        // Manual JSON — without an extra dependency (Jackson is available, but this is a simple string)
         return String.format(
                 "{\"step\":\"%s\",\"percent\":%d,\"message\":\"%s\",\"generationId\":\"%s\"}",
                 step.name(),

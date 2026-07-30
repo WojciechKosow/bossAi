@@ -39,12 +39,12 @@ public record ScriptResult(
         String contentType,
 
         /**
-         * Instrukcje dynamiki muzyki per scena.
+         * Per-scene music dynamics directions.
          * GPT-4o decyduje o glosnosci muzyki w zaleznosci od tresci:
-         *   - narrator mowi -> muzyka ciszej (0.10-0.20)
-         *   - pauza/przejscie -> muzyka glosniej (0.35-0.50)
+         *   - narrator speaking -> music quieter (0.10-0.20)
+         *   - pause/transition -> music louder (0.35-0.50)
          *   - hook/CTA -> muzyka najglosniej (0.40-0.60)
-         * Jesli null -> RenderStep uzywa stalego volume=0.25 (jak dotychczas).
+         * If null -> RenderStep uses a constant volume=0.25 (as before).
          */
         @JsonProperty("musicDirections")
         List<MusicDirection> musicDirections
@@ -119,12 +119,12 @@ public record ScriptResult(
     /**
      * Instrukcja dynamiki muzyki dla jednej sceny.
      *
-     * GPT-4o generuje te instrukcje na podstawie tresci sceny:
-     *   - volume: docelowa glosnosc muzyki (0.0-1.0) w trakcie sceny
-     *   - fadeInMs: czas fade-in na poczatku sceny (0 = brak)
-     *   - fadeOutMs: czas fade-out na koncu sceny (0 = brak)
+     * GPT-4o generates these directions based on the scene's content:
+     *   - volume: the target music volume (0.0-1.0) during the scene
+     *   - fadeInMs: fade-in time at the start of the scene (0 = none)
+     *   - fadeOutMs: fade-out time at the end of the scene (0 = none)
      *
-     * RenderStep buduje FFmpeg audio filter z volume zmieniajacym sie w czasie.
+     * RenderStep builds an FFmpeg audio filter with volume changing over time.
      */
     @JsonIgnoreProperties(ignoreUnknown = true)
     public record MusicDirection(

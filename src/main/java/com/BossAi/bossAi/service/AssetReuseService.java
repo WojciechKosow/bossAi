@@ -20,13 +20,13 @@ import java.util.*;
 import java.util.stream.Collectors;
 
 /**
- * AssetReuseService — analizuje wcześniej wygenerowane assety usera
- * i dopasowuje je tematycznie do nowych scen przez GPT.
+ * AssetReuseService — analyzes the user's previously generated assets
+ * and matches them thematically to the new scenes via GPT.
  *
  * Flow:
- *   1. Pobierz reusable assety usera (IMAGE, VIDEO) z bazy
+ *   1. Fetch the user's reusable assets (IMAGE, VIDEO) from the DB
  *   2. Send GPT the list of assets (prompt/description) + the list of new scenes (imagePrompt)
- *   3. GPT zwraca mapowanie: sceneIndex → assetId (lub null jeśli brak dopasowania)
+ *   3. GPT returns a mapping: sceneIndex → assetId (or null if no match)
  *   4. Wynik trafia do GenerationContext.reusedImageAssets / reusedVideoAssets
  *
  * Minimalne wymagania do reuse (normal mode):
@@ -168,7 +168,7 @@ public class AssetReuseService {
      * Normal mode — GPT-based thematic matching with lowered thresholds.
      */
     private void normalMatchAssets(User user, GenerationContext context) {
-        // Pobierz reusable assety z bazy
+        // Fetch the reusable assets from the DB
         List<Asset> reusableImages = assetRepository
                 .findByUserAndReusableTrueAndTypeAndPromptIsNotNull(user, AssetType.IMAGE);
         List<Asset> reusableVideos = assetRepository
@@ -178,7 +178,7 @@ public class AssetReuseService {
                 context.getUserId(), reusableImages.size(), reusableVideos.size());
 
         if (reusableImages.size() < MIN_REUSABLE_IMAGES) {
-            log.info("[AssetReuseService] Za mało reusable IMAGE ({} < {}) — pomijam reuse. " +
+            log.info("[AssetReuseService] Too few reusable IMAGE ({} < {}) — skipping reuse. " +
                     "Tip: assets get reusable=true only for PRO/CREATOR plans.",
                     reusableImages.size(), MIN_REUSABLE_IMAGES);
             return;
@@ -186,7 +186,7 @@ public class AssetReuseService {
 
         List<SceneAsset> scenes = context.getScenes();
         if (scenes == null || scenes.isEmpty()) {
-            log.warn("[AssetReuseService] Brak scen w kontekście — pomijam reuse");
+            log.warn("[AssetReuseService] No scenes in the context — skipping reuse");
             return;
         }
 
@@ -198,7 +198,7 @@ public class AssetReuseService {
             log.info("[AssetReuseService] GPT matched {} IMAGE assets to {} scenes",
                     imageMatches.size(), scenes.size());
 
-            // GPT matching — wideo (jeśli są)
+            // GPT matching — video (if any)
             if (reusableVideos.size() >= MIN_REUSABLE_VIDEOS) {
                 Map<String, Asset> videoMatches = matchViaGpt(
                         context.getPrompt(), scenes, reusableVideos, "VIDEO");
@@ -217,7 +217,7 @@ public class AssetReuseService {
 
     /**
      * Sends GPT the list of assets + the list of scenes and asks for a match.
-     * GPT zwraca JSON: { "matches": [ { "sceneIndex": 0, "assetId": "uuid" }, ... ] }
+     * GPT returns JSON: { "matches": [ { "sceneIndex": 0, "assetId": "uuid" }, ... ] }
      * Scenes without a match have assetId = null.
      */
     private Map<String, Asset> matchViaGpt(
@@ -237,7 +237,7 @@ public class AssetReuseService {
                     i, asset.getId(), asset.getPrompt()));
         }
 
-        // Buduj opis scen dla GPT
+        // Build the scene description for GPT
         StringBuilder scenesDescription = new StringBuilder();
         for (SceneAsset scene : scenes) {
             scenesDescription.append(String.format(
@@ -355,7 +355,7 @@ public class AssetReuseService {
                         .ifPresent(scene -> {
                             result.put(scene.getImagePrompt(), asset);
                             usedAssetIds.add(assetId);
-                            log.info("[AssetReuseService] Match: scena {} → asset {} (prompt: {})",
+                            log.info("[AssetReuseService] Match: scene {} → asset {} (prompt: {})",
                                     sceneIndex, assetId,
                                     truncate(asset.getPrompt(), 50));
                         });

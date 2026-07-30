@@ -10,7 +10,7 @@ import lombok.NoArgsConstructor;
 import java.util.Map;
 
 /**
- * Przejscie miedzy segmentami — xfade, cut, dissolve, wipe, etc.
+ * Transition between segments — xfade, cut, dissolve, wipe, etc.
  */
 @Data
 @Builder

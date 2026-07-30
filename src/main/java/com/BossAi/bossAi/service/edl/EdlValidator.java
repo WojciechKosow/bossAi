@@ -11,7 +11,7 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 /**
- * Waliduje EDL przed zapisem i przed wyslaniem do Remotion renderer.
+ * Validates the EDL before saving and before sending it to the Remotion renderer.
  *
  * Two modes:
  *   - lenient (pipeline): auto-generated EDLs — structural errors only, timing
@@ -335,7 +335,7 @@ public class EdlValidator {
     }
 
     /**
-     * Sprawdza spojnosc timeline — gaps i nakladanie sie segmentow per layer.
+     * Checks timeline consistency — gaps and overlapping segments per layer.
      * In strict mode a primary-layer gap > 500ms (black hole in the video) and
      * same-layer overlap without a transition are rejected.
      */

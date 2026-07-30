@@ -12,8 +12,8 @@ import java.util.*;
  *
  * Combines three layers of data:
  *   A) NarrationAnalysis — WHAT and WHY (content semantics)
- *   B) SpeechTimingAnalysis — GDZIE (pauzy, zdania, tempo mowy)
- *   C) AudioAnalysisResponse — KIEDY (beaty, energia muzyki, sekcje)
+ *   B) SpeechTimingAnalysis — WHERE (pauses, sentences, speech tempo)
+ *   C) AudioAnalysisResponse — WHEN (beats, music energy, sections)
  *
  * Plus: EditingIntent — HOW (editing intent, pattern, arc)
  *
@@ -23,7 +23,7 @@ import java.util.*;
  *
  * Cut types:
  *   HARD — zmiana kadru: zmiana topic, importance > 0.75, hook start
- *   SOFT — lekka zmiana: koniec zdania + pauza, spadek energii
+ *   SOFT — a light change: sentence end + pause, energy drop
  *   MICRO — dynamiczna przebitka: wysoka energia, szybkie tempo, drop
  */
 @Slf4j
@@ -55,7 +55,7 @@ public class CutEngine {
     /**
      * Generates a list of justified cuts, taking the user's intent into account.
      *
-     * Nowa sygnatura z UserEditIntent — warstwa D.
+     * New signature with UserEditIntent — layer D.
      * If the user provided editing hints (e.g. "asset 0 = intro"),
      * CutEngine generates HARD CUTs that enforce those roles.
      */
@@ -79,9 +79,9 @@ public class CutEngine {
     /**
      * Generates a list of justified cuts.
      *
-     * @param narrationAnalysis analiza semantyczna narracji (warstwa A)
+     * @param narrationAnalysis semantic narration analysis (layer A)
      * @param speechAnalysis    speech timing analysis (layer B)
-     * @param audioAnalysis     analiza muzyki (warstwa C / opcjonalna)
+     * @param audioAnalysis     music analysis (layer C / optional)
      * @param wordTimings       per-word timestampy z WhisperX
      * @param totalDurationMs   total film duration
      * @param minCutMs          minimum shot duration (from EditDna)
@@ -208,7 +208,7 @@ public class CutEngine {
     /**
      * Fixes obvious errors in the generated cuts without extra GPT calls.
      *
-     * Sprawdza:
+     * Checks:
      *   1. Timeline continuity (endMs[i] == startMs[i+1]) — fixes gaps and overlaps
      *   2. Range correctness (start >= 0, end <= totalDurationMs, start < end)
      *   3. Coverage of the whole timeline (from 0 to totalDurationMs)
@@ -236,7 +236,7 @@ public class CutEngine {
             return dur <= 0 || dur < effectiveMin;
         });
 
-        // 3. Sortuj po startMs
+        // 3. Sort by startMs
         fixed.sort(Comparator.comparingInt(JustifiedCut::getStartMs));
 
         // 4. Fix continuity — eliminate gaps and overlaps
@@ -330,7 +330,7 @@ public class CutEngine {
             addMusicCandidates(candidates, audioAnalysis, totalDurationMs);
         }
 
-        // Sortuj po timestamp
+        // Sort by timestamp
         candidates.sort(Comparator.comparingInt(c -> c.timeMs));
 
         // Deduplication — merge candidates close to each other (<100ms)
@@ -496,7 +496,7 @@ public class CutEngine {
     }
 
     // =========================================================================
-    // WARSTWA D — USER INTENT CANDIDATES
+    // LAYER D — USER INTENT CANDIDATES
     // =========================================================================
 
     /**
@@ -510,7 +510,7 @@ public class CutEngine {
      * then snap to the nearest word boundary).
      *
      * Logika:
-     *   - Dzielimy timeline na segmenty proporcjonalnie do scen
+     *   - We divide the timeline into segments proportional to the scenes
      *   - For each placement with a role other than "auto" → HARD CUT at the boundary
      *   - intro → HARD CUT after it ends
      *   - outro → HARD CUT before it starts
@@ -1085,7 +1085,7 @@ public class CutEngine {
             case "slow_to_fast" -> 0.5 + position; // 0.5 at the start → 1.5 at the end
             case "fast_to_slow" -> 1.5 - position; // 1.5 at the start → 0.5 at the end
             case "wave" -> 0.7 + 0.6 * Math.sin(position * Math.PI * 2); // fala sinusoidalna
-            case "constant_high" -> 1.3; // zawsze wysoko
+            case "constant_high" -> 1.3; // always high
             case "long_hold_then_burst" -> position < 0.7 ? 0.5 : 1.8; // hold long → burst
             case "breathing_with_pauses" -> 0.8 + 0.4 * Math.sin(position * Math.PI * 3); // oddychanie
             case "on_beat_consistent" -> 1.0; // no modification — cuts on beats
@@ -1122,7 +1122,7 @@ public class CutEngine {
 
         // Greedy selection — pick the best candidates while respecting min/max
         List<Integer> selectedTimes = new ArrayList<>();
-        selectedTimes.add(0); // zawsze zaczynaj od 0
+        selectedTimes.add(0); // always start at 0
 
         for (CutCandidate c : candidates) {
             if (c.timeMs <= 0 || c.timeMs >= totalDurationMs) continue;
@@ -1192,7 +1192,7 @@ public class CutEngine {
                         .suggestedTransition(suggestTransition(source))
                         .assignedAssetIndex(source.assignedAssetIndex);
             } else {
-                // Wymuszony cut (max duration) lub pierwszy segment
+                // Forced cut (max duration) or the first segment
                 builder.classification(i == 0 ? JustifiedCut.CutClassification.HARD
                                 : JustifiedCut.CutClassification.SOFT)
                         .primaryReason(i == 0 ? JustifiedCut.CutReason.HOOK_START

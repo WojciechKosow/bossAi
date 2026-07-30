@@ -17,7 +17,7 @@ import java.util.UUID;
  * Decides when and which GIF overlays to add to the EDL.
  *
  * Logika (v1 — prosta, rozbudowywana iteracyjnie):
- *   - Subscribe/Follow GIF → zawsze na ostatniej scenie (layer=0, ostatni segment)
+ *   - Subscribe/Follow GIF → always on the last scene (layer=0, the last segment)
  *
  * Rozbudowa w kolejnych iteracjach:
  *   - Fire/Like GIF przy kulminacji narracji (energy > 0.85)
@@ -54,7 +54,7 @@ public class GifOverlayService {
         // Strategy: pick the right GIF category based on the DNA
         GifCategory ctaGifCategory = selectCtaGif(preset);
 
-        // Znajdź ostatnią scenę primary (layer=0) — GIF subscribe/follow zawsze tam
+        // Find the last primary scene (layer=0) — the subscribe/follow GIF always goes there
         EdlSegment lastPrimary = findLastPrimarySegment(segments);
         if (lastPrimary == null) {
             log.debug("[GifOverlay] No primary segments found — skipping GIF overlays");
@@ -108,8 +108,8 @@ public class GifOverlayService {
     }
 
     /**
-     * Zwraca ostatni segment z layer=0 (primary) posortowany wg startMs.
-     * Segmenty z layer != 0 to tła i overlay z poprzednich kroków — pomijamy je.
+     * Returns the last segment with layer=0 (primary) sorted by startMs.
+     * Segments with layer != 0 are backgrounds and overlays from previous steps — we skip them.
      */
     private EdlSegment findLastPrimarySegment(List<EdlSegment> segments) {
         EdlSegment last = null;

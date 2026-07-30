@@ -22,14 +22,14 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * ImageToClipStep — konwertuje statyczny obraz (PNG/JPG) do klipu MP4.
+ * ImageToClipStep — converts a static image (PNG/JPG) into an MP4 clip.
  *
- * FAZA 2 — nowy krok pipeline dla IMAGE-type scen.
+ * PHASE 2 — a new pipeline step for IMAGE-type scenes.
  *
  * The problem it solves:
- *   VideoStep kosztuje ~$0.07-0.14 per scena (Kling/Runway).
- *   Dla 7-scenowego educational video = ~$0.50-1.00 tylko na video.
- *   Większość scen nie "potrzebuje" animacji — statyczny obraz z dynamicznym
+ *   VideoStep costs ~$0.07-0.14 per scene (Kling/Runway).
+ *   For a 7-scene educational video = ~$0.50-1.00 on video alone.
+ *   Most scenes don't "need" animation — a static image with a dynamic
  *   tekstem overlay robi ten sam efekt i kosztuje $0.
  *
  * How it works:
@@ -37,20 +37,20 @@ import java.util.Locale;
  *   Optionally: a Ken Burns effect (slow zoom) for the illusion of movement.
  *
  * Pipeline:
- *   1. Pobierz PNG z imageUrl (z ImageStep) przez HTTP
- *   2. Konwertuj do MP4 przez FFmpeg loop (durationMs ze SceneAsset)
- *   3. Opcjonalnie dodaj Ken Burns zoom dla dynamiki
- *   4. Zapisz do workDir, ustaw scene.videoLocalPath
+ *   1. Fetch the PNG from imageUrl (from ImageStep) over HTTP
+ *   2. Convert to MP4 via an FFmpeg loop (durationMs from SceneAsset)
+ *   3. Optionally add a Ken Burns zoom for movement
+ *   4. Save to workDir, set scene.videoLocalPath
  *
  * Ken Burns effect:
- *   Powolny zoom in 100%→120% przez cały czas trwania sceny.
+ *   A slow zoom in 100%→120% over the whole scene duration.
  *   Makes a static image look "alive" on TikTok.
- *   Włączony domyślnie — wyłącz przez kenBurnsEnabled=false w properties.
+ *   Enabled by default — disable via kenBurnsEnabled=false in properties.
  *
  * Called by VideoStep in the mixed-media pipeline:
- *   VideoStep.execute() sprawdza mediaAssignment per scena:
+ *   VideoStep.execute() checks the mediaAssignment per scene:
  *     IMAGE → deleguje do ImageToClipStep
- *     VIDEO → wywołuje fal.ai jak poprzednio
+ *     VIDEO → calls fal.ai as before
  */
 @Slf4j
 @Service
@@ -66,7 +66,7 @@ public class ImageToClipStep {
     private boolean kenBurnsEnabled;
 
     /**
-     * Konwertuje jeden obraz do klipu MP4.
+     * Converts a single image into an MP4 clip.
      *
      * @param scene     a SceneAsset with imageUrl filled in (from ImageStep)
      * @param workDir   katalog roboczy FFmpeg dla tej generacji
@@ -75,16 +75,16 @@ public class ImageToClipStep {
     public String convertImageToClip(SceneAsset scene, Path workDir) throws Exception {
         if (scene.getImageUrl() == null || scene.getImageUrl().isBlank()) {
             throw new IllegalStateException(
-                    "[ImageToClipStep] Scena " + scene.getIndex() + " nie ma imageUrl — ImageStep się nie wykonał");
+                    "[ImageToClipStep] Scene " + scene.getIndex() + " has no imageUrl — ImageStep did not run");
         }
 
-        log.info("[ImageToClipStep] Scena {} — imageUrl: {}, durationMs: {}",
+        log.info("[ImageToClipStep] Scene {} — imageUrl: {}, durationMs: {}",
                 scene.getIndex(), scene.getImageUrl(), scene.getDurationMs());
 
-        // Pobierz PNG z URL
+        // Fetch the PNG from the URL
         Path imagePath = downloadImage(scene.getImageUrl(), scene.getIndex(), workDir);
 
-        // Konwertuj do MP4
+        // Convert to MP4
         String outputFilename = String.format("scene_%02d_image_clip.mp4", scene.getIndex());
         Path outputPath = workDir.resolve(outputFilename);
 
@@ -94,12 +94,12 @@ public class ImageToClipStep {
             runStaticConvert(imagePath, scene.getDurationMs(), outputPath);
         }
 
-        log.info("[ImageToClipStep] Scena {} DONE → {}", scene.getIndex(), outputPath);
+        log.info("[ImageToClipStep] Scene {} DONE → {}", scene.getIndex(), outputPath);
         return outputPath.toString();
     }
 
     /**
-     * Konwertuje lokalny plik obrazu do klipu MP4 — bez pobierania przez HTTP.
+     * Converts a local image file into an MP4 clip — without downloading over HTTP.
      * Used for user-uploaded custom image assets (they have no imageUrl, they're in storage).
      *
      * @param localImagePath path to the image file on disk
@@ -110,7 +110,7 @@ public class ImageToClipStep {
      */
     public String convertLocalImageToClip(Path localImagePath, int durationMs,
                                            int sceneIndex, Path workDir) throws Exception {
-        log.info("[ImageToClipStep] Scena {} — local image: {}, durationMs: {}",
+        log.info("[ImageToClipStep] Scene {} — local image: {}, durationMs: {}",
                 sceneIndex, localImagePath, durationMs);
 
         String outputFilename = String.format("scene_%02d_image_clip.mp4", sceneIndex);
@@ -122,7 +122,7 @@ public class ImageToClipStep {
             runStaticConvert(localImagePath, durationMs, outputPath);
         }
 
-        log.info("[ImageToClipStep] Scena {} DONE → {}", sceneIndex, outputPath);
+        log.info("[ImageToClipStep] Scene {} DONE → {}", sceneIndex, outputPath);
         return outputPath.toString();
     }
 
@@ -131,7 +131,7 @@ public class ImageToClipStep {
     // =========================================================================
 
     /**
-     * Statyczna konwersja — obraz wyświetlany przez durationMs bez ruchu.
+     * Static conversion — the image is displayed for durationMs without movement.
      *
      * ffmpeg -loop 1 -i image.png -t [duration]
      *   -vf "scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2:black"
@@ -151,13 +151,13 @@ public class ImageToClipStep {
     }
 
     /**
-     * Ken Burns effect — powolny zoom in 100%→120% przez cały czas sceny.
+     * Ken Burns effect — a slow zoom in 100%→120% over the whole scene.
      *
      * Effect: the image looks like footage, not a static graphic.
      * Bardzo popularny w TikTok educational content.
      *
      * FFmpeg zoompan filter:
-     *   z='min(zoom+0.0003,1.2)' — zoom od 1.0 do 1.2 przez całą scenę
+     *   z='min(zoom+0.0003,1.2)' — zoom from 1.0 to 1.2 over the whole scene
      *   d=[frames]               — liczba klatek = durationSec * fps (30fps)
      *   x='iw/2-(iw/zoom/2)'    — centruj w osi X
      *   y='ih/2-(ih/zoom/2)'    — centruj w osi Y
@@ -200,7 +200,7 @@ public class ImageToClipStep {
         cmd.addAll(List.of("-pix_fmt", "yuv420p")); // required by some players
         cmd.addAll(List.of("-r", "30"));             // constant framerate
         cmd.addAll(List.of("-an"));                  // brak audio — dodane w RenderStep mix
-        cmd.addAll(List.of("-movflags", "+faststart")); // moov atom na początku — wymagane przez Remotion (Chromium seek)
+        cmd.addAll(List.of("-movflags", "+faststart")); // moov atom at the start — required by Remotion (Chromium seek)
         cmd.add(output.toString());
         return cmd;
     }
@@ -210,9 +210,9 @@ public class ImageToClipStep {
     // =========================================================================
 
     /**
-     * Pobiera obraz z URL (fal.ai CDN) i zapisuje lokalnie.
+     * Downloads the image from a URL (fal.ai CDN) and saves it locally.
      * We use java.net.http to avoid bringing an OkHttp dependency here
-     * (OkHttp jest w FalAiService, ale tam jest @Service — nie chcemy circular).
+     * (OkHttp is in FalAiService, but that's a @Service — we don't want a circular dependency).
      */
     private Path downloadImage(String imageUrl, int sceneIndex, Path workDir) throws Exception {
         String ext = imageUrl.contains(".png") ? ".png" : ".jpg";

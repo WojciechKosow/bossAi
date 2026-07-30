@@ -14,7 +14,7 @@ public record MusicAnalysisResult(
         int totalDurationMs,
 
         /**
-         * Profil energii co 500ms — wartość 0.0-1.0 (znormalizowana).
+         * Energy profile every 500ms — value 0.0-1.0 (normalized).
          * Index i = energia w przedziale [i*500ms, (i+1)*500ms).
          */
         List<Double> energyProfile,
@@ -31,7 +31,7 @@ public record MusicAnalysisResult(
 ) {
 
     /**
-     * Segment muzyczny — ciągły fragment o określonym charakterze.
+     * Music segment — a continuous fragment with a specific character.
      */
     public record MusicSegment(
             int startMs,
@@ -42,15 +42,15 @@ public record MusicAnalysisResult(
     ) {}
 
     public enum SegmentType {
-        /** Cichy fragment — niska energia, dobry pod narrację */
+        /** Quiet fragment — low energy, good under narration */
         QUIET,
-        /** Build-up — rosnąca energia, prowadzi do dropu */
+        /** Build-up — rising energy, leads to the drop */
         BUILD_UP,
-        /** Drop — nagły wzrost energii, moment kulminacyjny */
+        /** Drop — a sudden energy increase, the climactic moment */
         DROP,
         /** Peak — utrzymana wysoka energia */
         PEAK,
-        /** Normalny fragment — średnia energia */
+        /** Normal fragment — average energy */
         NORMAL
     }
 }

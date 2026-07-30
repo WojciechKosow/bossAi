@@ -17,8 +17,8 @@ public class RemotionRendererProperties {
 
     /**
      * Base URL Spring Boot-a widziana z perspektywy Remotion renderera.
-     * Remotion uzywa tego aby pobrac assety z /internal/assets/{id}/file.
-     * Domyslnie localhost:8080 (docker-compose: http://spring-boot:8080).
+     * Remotion uses this to fetch assets from /internal/assets/{id}/file.
+     * Defaults to localhost:8080 (docker-compose: http://spring-boot:8080).
      */
     private String callbackBaseUrl = "http://localhost:8080";
 

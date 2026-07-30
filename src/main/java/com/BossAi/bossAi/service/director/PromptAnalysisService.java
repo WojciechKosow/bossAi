@@ -25,17 +25,17 @@ import java.util.UUID;
 /**
  * Dry-run analizy prompta (Phase 2.1 z CLAUDE.md).
  *
- * Bierze prompt + custom media assety i bez tworzenia Generation/VideoProject
+ * Takes the prompt + custom media assets and, without creating a Generation/VideoProject,
  * uruchamia:
  *   1. AssetAnalyzer (opcjonalnie)
  *   2. UserIntentParser
  *   3. ScriptStep (na transient GenerationContext)
  *
- * Wynik: PromptAnalysisResponse — proponowane sceny + intencja + dostępne assety.
+ * Result: PromptAnalysisResponse — proposed scenes + intent + available assets.
  * The frontend / Postman uses this as a preview, so the user can see the
  * script before generation and decide how to lay assets out across scenes.
  *
- * Uwaga: 2 GPT calle (UserIntentParser + ScriptStep) — rozważ caching jeśli
+ * Note: 2 GPT calls (UserIntentParser + ScriptStep) — consider caching if
  * the frontend will often query the same prompt repeatedly.
  */
 @Slf4j
