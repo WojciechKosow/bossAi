@@ -6,8 +6,8 @@ import lombok.Builder;
 import java.util.Map;
 
 /**
- * Request DTO wysyłany do mikroserwisu remotion-renderer (Node.js).
- * Zawiera pełny EDL + konfigurację renderowania.
+ * Request DTO sent to the remotion-renderer microservice (Node.js).
+ * Contains the full EDL + render configuration.
  */
 @Builder
 public record RemotionRenderRequest(

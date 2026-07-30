@@ -13,22 +13,22 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * ProgressService — zarządza SSE emitterami dla aktywnych generacji.
  *
- * Jak to działa:
+ * How it works:
  *   1. Frontend robi GET /api/generations/{id}/progress → tworzy SseEmitter
- *   2. Pipeline (każdy Step) wywołuje broadcast(generationId, step, %)
- *   3. ProgressService wysyła event do frontendu przez SSE
+ *   2. The pipeline (each Step) calls broadcast(generationId, step, %)
+ *   3. ProgressService sends an event to the frontend via SSE
  *   4. Po DONE lub FAILED emitter jest zamykany
  *
  * Używamy ConcurrentHashMap — pipeline i HTTP request są na różnych wątkach.
  *
- * Timeout SseEmitter: 5 minut (wystarczy na najdłuższą generację).
+ * SseEmitter timeout: 5 minutes (enough for the longest generation).
  * Jeśli frontend się rozłączy → emitter jest usuwany przy następnym broadcast.
  *
  * Event format (JSON):
  *   {
  *     "step": "SCRIPT",
  *     "percent": 15,
- *     "message": "Generuję scenariusz reklamy...",
+ *     "message": "Generating ad script...",
  *     "generationId": "uuid"
  *   }
  */
@@ -42,12 +42,12 @@ public class ProgressService {
     private final Map<UUID, SseEmitter> emitters = new ConcurrentHashMap<>();
 
     // =========================================================================
-    // REJESTRACJA EMITTERA (wywołane przez ProgressController)
+    // EMITTER REGISTRATION (called by ProgressController)
     // =========================================================================
 
     /**
      * Tworzy i rejestruje nowy SseEmitter dla danej generacji.
-     * Wywoływane przez GET /api/generations/{id}/progress.
+     * Called by GET /api/generations/{id}/progress.
      */
     public SseEmitter subscribe(UUID generationId) {
         SseEmitter emitter = new SseEmitter(SSE_TIMEOUT_MS);
@@ -70,7 +70,7 @@ public class ProgressService {
 
         emitters.put(generationId, emitter);
 
-        // Wyślij natychmiast event "connected" żeby frontend wiedział że połączenie działa
+        // Immediately send a "connected" event so the frontend knows the connection works
         sendEvent(generationId, emitter, buildEvent(
                 generationId,
                 GenerationStepName.INITIALIZING,
@@ -83,12 +83,12 @@ public class ProgressService {
     }
 
     // =========================================================================
-    // BROADCAST (wywołane przez GenerationService / pipeline)
+    // BROADCAST (called by GenerationService / pipeline)
     // =========================================================================
 
     /**
-     * Wysyła event postępu do frontendu.
-     * Wywołaj z GenerationService po każdej zmianie stanu w GenerationContext.
+     * Sends a progress event to the frontend.
+     * Call from GenerationService after every state change in GenerationContext.
      *
      * Jeśli nie ma subskrybenta (frontend nie otworzył SSE) → no-op.
      */

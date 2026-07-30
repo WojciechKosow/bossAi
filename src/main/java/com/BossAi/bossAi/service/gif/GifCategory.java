@@ -4,13 +4,13 @@ import lombok.Getter;
 import lombok.RequiredArgsConstructor;
 
 /**
- * Kategorie GIF-ów nakładanych autonomicznie na filmy.
+ * Categories of GIFs autonomously overlaid on videos.
  *
- * Każda kategoria ma:
- *   - key:         identyfikator (używany w konfiguracji i logach)
+ * Each category has:
+ *   - key:         an identifier (used in configuration and logs)
  *   - searchQuery: zapytanie do Giphy Stickers API
- *   - defaultPosition: domyślna pozycja na ekranie
- *   - defaultScale:    domyślna skala (0.0-1.0)
+ *   - defaultPosition: the default on-screen position
+ *   - defaultScale:    the default scale (0.0-1.0)
  */
 @Getter
 @RequiredArgsConstructor

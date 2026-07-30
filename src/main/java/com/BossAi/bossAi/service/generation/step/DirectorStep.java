@@ -17,25 +17,25 @@ import java.util.List;
  *
  * FAZA 1 BUGFIX:
  *
- *   1. context.setDirectorPlan(plan) był wywoływany tylko w bloku catch (fallback).
+ *   1. context.setDirectorPlan(plan) was called only in the catch block (fallback).
  *      Przy sukcesie AI planu — plan był generowany ale NIE zapisywany do kontekstu.
- *      RenderStep dostawał null i crashował. Naprawione: setDirectorPlan zawsze
- *      na końcu execute(), niezależnie od ścieżki (AI lub fallback).
+ *      RenderStep got null and crashed. Fixed: setDirectorPlan is always called
+ *      at the end of execute(), regardless of the path (AI or fallback).
  *
- *   2. Beat sync był stosowany po fallback planie zamiast po AI planie.
- *      Naprawione: beat sync stosowany na finalnym planie (niezależnie od źródła).
+ *   2. Beat sync was applied after the fallback plan instead of after the AI plan.
+ *      Fixed: beat sync is applied to the final plan (regardless of source).
  *
- *   3. effectAssigner.applyEffects był wywoływany dwukrotnie przy sukcesie AI.
+ *   3. effectAssigner.applyEffects was called twice on AI success.
  *      Raz w try, raz po beat sync. Naprawione: tylko raz, po beat sync.
  *
- *   4. callback.onStep w DIRECTOR krok używał GenerationStepName.SCRIPT zamiast
+ *   4. callback.onStep in the DIRECTOR step used GenerationStepName.SCRIPT instead
  *      dedykowanego kroku. Zostawiono SCRIPT bo DIRECTOR nie ma osobnego enum value —
  *      do poprawy w Fazie 2 gdy dodamy DIRECTOR do GenerationStepName.
  *
- * Przepływ:
- *   1. Próba generacji planu przez AI (DirectorAiService)
+ * Flow:
+ *   1. Attempt to generate the plan via AI (DirectorAiService)
  *   2. Jeśli AI failuje → fallback plan oparty na StyleConfig
- *   3. Beat sync (jeśli muzyka dostępna)
+ *   3. Beat sync (if music is available)
  *   4. Apply effects
  *   5. Zapisz plan do kontekstu (ZAWSZE)
  */
@@ -56,12 +56,12 @@ public class DirectorStep implements GenerationStep {
                 "Directing video..."
         );
 
-        // Krok 1: Próba AI planu, fallback przy błędzie
+        // Step 1: Try the AI plan, fallback on error
         DirectorPlan plan = generatePlanWithFallback(context);
 
-        // Krok 2: Beat sync (jeśli muzyka jest dostępna)
-        // Uwaga: w normalnym pipeline muzyka jest dostępna dopiero po MusicStep,
-        // który biegnie PO DirectorStep. Beat sync tutaj działa tylko gdy
+        // Step 2: Beat sync (if music is available)
+        // Note: in the normal pipeline, music is only available after MusicStep,
+        // which runs AFTER DirectorStep. Beat sync here only works when
         // context.musicLocalPath jest ustawiony z poprzedniej sesji lub user upload.
         if (context.getMusicLocalPath() != null) {
             log.info("[DirectorStep] Muzyka dostępna — stosuję beat sync");
@@ -74,7 +74,7 @@ public class DirectorStep implements GenerationStep {
             }
         }
 
-        // Krok 3: Efekty + przejścia między scenami (music-aware)
+        // Step 3: Effects + transitions between scenes (music-aware)
         String contentType = context.getScript() != null ? context.getScript().contentType() : null;
         var audioAnalysis = context.getCachedAudioAnalysis();
         effectAssigner.applyEffects(plan, context.getStyle(), contentType, audioAnalysis);
@@ -94,12 +94,12 @@ public class DirectorStep implements GenerationStep {
     // =========================================================================
 
     /**
-     * Próbuje wygenerować plan przez AI.
+     * Attempts to generate the plan via AI.
      * Przy każdym błędzie loguje i zwraca fallback plan — pipeline nigdy się nie zatrzymuje.
      */
     private DirectorPlan generatePlanWithFallback(GenerationContext context) {
         try {
-            log.info("[DirectorStep] Generuję AI plan dla {} scen", context.getScenes().size());
+            log.info("[DirectorStep] Generating AI plan for {} scenes", context.getScenes().size());
             DirectorPlan aiPlan = directorAiService.generatePlan(context);
 
             log.info("[DirectorStep] AI plan OK — {} scen", aiPlan.getScenes().size());
@@ -112,8 +112,8 @@ public class DirectorStep implements GenerationStep {
     }
 
     /**
-     * Generuje prosty, deterministyczny plan cięć oparty na StyleConfig.
-     * Używany gdy AI director failuje lub timeout.
+     * Generates a simple, deterministic cut plan based on StyleConfig.
+     * Used when the AI director fails or times out.
      *
      * Fallback nie jest "złym" planem — to plan spójny z wybranym stylem,
      * tylko bez AI-driven dramaturgii.
@@ -180,10 +180,10 @@ public class DirectorStep implements GenerationStep {
     }
 
     /**
-     * Mapuje beaty na cuty wewnątrz sceny.
+     * Maps beats to cuts within a scene.
      * Beaty to pozycje absolutne na timeline muzyki.
-     * sceneOffsetMs = początek sceny na timeline wideo.
-     * Cuty mają startMs/endMs RELATYWNE do sceny (0 = początek sceny).
+     * sceneOffsetMs = the scene's start on the video timeline.
+     * Cuts have startMs/endMs RELATIVE to the scene (0 = scene start).
      */
     private List<Cut> mapBeatsToScene(List<Integer> beats, int durationMs, int sceneOffsetMs) {
         List<Cut> cuts = new ArrayList<>();
@@ -191,9 +191,9 @@ public class DirectorStep implements GenerationStep {
         int current = 0; // relatywny do sceny
 
         for (int beat : beats) {
-            // Pomiń beaty sprzed tej sceny
+            // Skip beats from before this scene
             if (beat < sceneOffsetMs) continue;
-            // Stop gdy beat za sceną
+            // Stop when a beat is past the scene
             if (beat >= sceneEndMs) break;
 
             int relBeat = beat - sceneOffsetMs;
@@ -208,7 +208,7 @@ public class DirectorStep implements GenerationStep {
             current = relBeat;
         }
 
-        // Domknij ostatni cut do końca sceny
+        // Close the last cut to the end of the scene
         if (current < durationMs) {
             cuts.add(Cut.builder()
                     .startMs(current)
@@ -231,7 +231,7 @@ public class DirectorStep implements GenerationStep {
     // =========================================================================
 
     /**
-     * Generuje równomiernie rozłożone cuts na podstawie pacing ze StyleConfig.
+     * Generates evenly distributed cuts based on the pacing from StyleConfig.
      * FAST → 500ms cuts, MEDIUM → 1000ms, SLOW → cała scena jako jeden cut.
      */
     private List<Cut> generateCuts(int durationMs, GenerationContext context) {

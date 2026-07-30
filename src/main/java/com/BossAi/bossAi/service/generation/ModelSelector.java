@@ -10,9 +10,9 @@ import org.springframework.stereotype.Component;
  *
  * FAZA 1 BUGFIX — video modele:
  *
- *   Kling image-to-video wymaga INNEGO endpointu niż text-to-video.
- *   Wcześniejszy kod używał endpointów text-to-video, przez co obraz
- *   był ignorowany i generator produkował losowe klipy.
+ *   Kling image-to-video requires a DIFFERENT endpoint than text-to-video.
+ *   The earlier code used text-to-video endpoints, which meant the image
+ *   was ignored and the generator produced random clips.
  *
  *   Poprawne endpointy fal.ai dla Kling image-to-video:
  *     Standard: fal-ai/kling-video/v1/standard/image-to-video
@@ -41,7 +41,7 @@ public class ModelSelector {
 
     private final FalAiProperties falAiProperties;
 
-    // Hardkodowane endpointy image-to-video (poprawne ścieżki Kling API)
+    // Hardcoded image-to-video endpoints (correct Kling API paths)
     private static final String VIDEO_MODEL_FREE     = "fal-ai/ltx-video";
     private static final String VIDEO_MODEL_STANDARD = "fal-ai/kling-video/v1/standard/image-to-video";
     private static final String VIDEO_MODEL_PRO      = "fal-ai/kling-video/v1.6/pro/image-to-video";
@@ -60,8 +60,8 @@ public class ModelSelector {
     /**
      * Zwraca identyfikator modelu video generation (image-to-video) dla danego planu.
      *
-     * WAŻNE: Zwracane endpointy muszą być image-to-video, nie text-to-video.
-     * FalAiService.buildVideoRequestBody() dobiera strukturę body na podstawie
+     * IMPORTANT: The returned endpoints must be image-to-video, not text-to-video.
+     * FalAiService.buildVideoRequestBody() picks the body structure based on
      * rozpoznanego modelu (isKlingModel, isLtxModel itd.).
      */
     public String videoModel(PlanType planType) {

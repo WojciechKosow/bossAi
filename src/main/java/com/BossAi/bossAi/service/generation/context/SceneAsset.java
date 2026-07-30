@@ -10,7 +10,7 @@ import java.util.UUID;
 /**
  * Assety wygenerowane dla jednej sceny TikTok Ad.
  *
- * Wypełniany kolejno przez:
+ * Filled in sequentially by:
  *   - ImageStep  → imageUrl
  *   - VideoStep  → videoUrl, videoLocalPath
  *   - LayerAssetGenerator → layerAssetIds (dla multi-layer scen)
@@ -54,9 +54,9 @@ public class SceneAsset {
     private String videoUrl;
 
     /**
-     * Ścieżka lokalnego pliku wideo po pobraniu z fal.ai CDN.
+     * Local path of the video file after downloading from the fal.ai CDN.
      * Ustawiany przez VideoStep po zapisie przez StorageService.
-     * RenderStep używa tej ścieżki do FFmpeg concat.
+     * RenderStep uses this path for the FFmpeg concat.
      */
     private String videoLocalPath;
 
@@ -67,10 +67,10 @@ public class SceneAsset {
 
     /**
      * Mapa layerIndex → ProjectAsset UUID dla dodatkowych warstw.
-     * Layer 0 = główny asset (imageUrl/videoUrl powyżej).
+     * Layer 0 = the main asset (imageUrl/videoUrl above).
      * Layer 1+ = wygenerowane przez LayerAssetGenerator.
      *
-     * Używane przez EdlGeneratorService do emitowania multi-layer segmentów.
+     * Used by EdlGeneratorService to emit multi-layer segments.
      */
     @Builder.Default
     private Map<Integer, UUID> layerAssetIds = new HashMap<>();

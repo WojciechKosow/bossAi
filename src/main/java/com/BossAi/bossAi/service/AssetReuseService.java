@@ -23,15 +23,15 @@ import java.util.stream.Collectors;
  * AssetReuseService — analizuje wcześniej wygenerowane assety usera
  * i dopasowuje je tematycznie do nowych scen przez GPT.
  *
- * Przepływ:
+ * Flow:
  *   1. Pobierz reusable assety usera (IMAGE, VIDEO) z bazy
- *   2. Wyślij do GPT listę assetów (prompt/opis) + listę nowych scen (imagePrompt)
+ *   2. Send GPT the list of assets (prompt/description) + the list of new scenes (imagePrompt)
  *   3. GPT zwraca mapowanie: sceneIndex → assetId (lub null jeśli brak dopasowania)
  *   4. Wynik trafia do GenerationContext.reusedImageAssets / reusedVideoAssets
  *
  * Minimalne wymagania do reuse (normal mode):
- *   - User musi mieć min. 1 reusable IMAGE asset (changed from 3)
- *   - Plan > BASIC (STARTER i FREE nie mają dostępu)
+ *   - The user must have at least 1 reusable IMAGE asset (changed from 3)
+ *   - Plan > BASIC (STARTER and FREE don't have access)
  *
  * TEST MODE (forceReuseForTesting):
  *   - Bypasses all thresholds and GPT matching
@@ -70,8 +70,8 @@ public class AssetReuseService {
     }
 
     /**
-     * Analizuje assety usera i wypełnia context.reusedImageAssets / reusedVideoAssets.
-     * Wywoływany po ScriptStep (potrzebujemy scen z imagePrompt).
+     * Analyzes the user's assets and fills context.reusedImageAssets / reusedVideoAssets.
+     * Called after ScriptStep (we need scenes with imagePrompt).
      */
     public void matchReusableAssets(GenerationContext context) {
         if (betaConfig.isBetaMode()) {
@@ -195,7 +195,7 @@ public class AssetReuseService {
             Map<String, Asset> imageMatches = matchViaGpt(
                     context.getPrompt(), scenes, reusableImages, "IMAGE");
             context.setReusedImageAssets(imageMatches);
-            log.info("[AssetReuseService] GPT dopasował {} IMAGE assetów do {} scen",
+            log.info("[AssetReuseService] GPT matched {} IMAGE assets to {} scenes",
                     imageMatches.size(), scenes.size());
 
             // GPT matching — wideo (jeśli są)
@@ -203,7 +203,7 @@ public class AssetReuseService {
                 Map<String, Asset> videoMatches = matchViaGpt(
                         context.getPrompt(), scenes, reusableVideos, "VIDEO");
                 context.setReusedVideoAssets(videoMatches);
-                log.info("[AssetReuseService] GPT dopasował {} VIDEO assetów do {} scen",
+                log.info("[AssetReuseService] GPT matched {} VIDEO assets to {} scenes",
                         videoMatches.size(), scenes.size());
             }
 
@@ -216,9 +216,9 @@ public class AssetReuseService {
     }
 
     /**
-     * Wysyła do GPT listę assetów + listę scen i prosi o dopasowanie.
+     * Sends GPT the list of assets + the list of scenes and asks for a match.
      * GPT zwraca JSON: { "matches": [ { "sceneIndex": 0, "assetId": "uuid" }, ... ] }
-     * Sceny bez dopasowania mają assetId = null.
+     * Scenes without a match have assetId = null.
      */
     private Map<String, Asset> matchViaGpt(
             String userPrompt,
@@ -226,7 +226,7 @@ public class AssetReuseService {
             List<Asset> availableAssets,
             String assetType
     ) {
-        // Buduj opis assetów dla GPT
+        // Build the asset description for GPT
         StringBuilder assetsDescription = new StringBuilder();
         Map<String, Asset> assetMap = new HashMap<>();
         for (int i = 0; i < availableAssets.size(); i++) {
@@ -323,7 +323,7 @@ public class AssetReuseService {
             JsonNode matches = matchRoot.path("matches");
 
             if (!matches.isArray()) {
-                log.warn("[AssetReuseService] GPT nie zwrócił tablicy matches");
+                log.warn("[AssetReuseService] GPT did not return a matches array");
                 return result;
             }
 
@@ -337,18 +337,18 @@ public class AssetReuseService {
                     continue;
                 }
 
-                // Nie używaj tego samego assetu dwukrotnie
+                // Don't use the same asset twice
                 if (usedAssetIds.contains(assetId)) {
                     continue;
                 }
 
                 Asset asset = assetMap.get(assetId);
                 if (asset == null) {
-                    log.warn("[AssetReuseService] GPT zwrócił nieznany assetId: {}", assetId);
+                    log.warn("[AssetReuseService] GPT returned an unknown assetId: {}", assetId);
                     continue;
                 }
 
-                // Znajdź imagePrompt sceny jako klucz
+                // Find the scene's imagePrompt as the key
                 scenes.stream()
                         .filter(s -> s.getIndex() == sceneIndex)
                         .findFirst()
@@ -367,7 +367,7 @@ public class AssetReuseService {
             }
 
         } catch (Exception e) {
-            log.error("[AssetReuseService] Błąd parsowania GPT response: {}", e.getMessage());
+            log.error("[AssetReuseService] Error parsing the GPT response: {}", e.getMessage());
         }
 
         return result;

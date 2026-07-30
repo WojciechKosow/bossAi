@@ -517,15 +517,15 @@ public class OpenAiService {
     // =========================================================================
 
     /**
-     * Transkrybuje audio (MP3) przez Whisper API z dokładnymi timestampami per słowo.
+     * Transcribes audio (MP3) via the Whisper API with precise per-word timestamps.
      *
      * Endpoint: POST /audio/transcriptions
      * Model: whisper-1
      * response_format: verbose_json
      * timestamp_granularities[]: word
      *
-     * Zwraca listę WordTiming (word, startMs, endMs) zsynchronizowaną z faktycznym TTS.
-     * Używane przez RenderStep do word-by-word subtitle rendering.
+     * Returns a list of WordTiming (word, startMs, endMs) synchronized with the actual TTS.
+     * Used by RenderStep for word-by-word subtitle rendering.
      */
     public List<SubtitleService.WordTiming> transcribeWordTimestamps(byte[] audioBytes) {
         log.info("[OpenAiService] Whisper word timestamps — {} bytes audio", audioBytes.length);
@@ -600,7 +600,7 @@ public class OpenAiService {
      *
      * @param frames   lista klatek jako byte[] (JPEG)
      * @param prompt   instrukcja analizy
-     * @return surowa odpowiedź JSON z GPT
+     * @return the raw JSON response from GPT
      */
     public String analyzeWithVision(List<byte[]> frames, String prompt) {
         log.info("[OpenAiService] Vision analysis — {} frames", frames.size());

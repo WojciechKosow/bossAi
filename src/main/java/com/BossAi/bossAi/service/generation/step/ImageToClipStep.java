@@ -26,15 +26,15 @@ import java.util.Locale;
  *
  * FAZA 2 — nowy krok pipeline dla IMAGE-type scen.
  *
- * Problem który rozwiązuje:
+ * The problem it solves:
  *   VideoStep kosztuje ~$0.07-0.14 per scena (Kling/Runway).
  *   Dla 7-scenowego educational video = ~$0.50-1.00 tylko na video.
  *   Większość scen nie "potrzebuje" animacji — statyczny obraz z dynamicznym
  *   tekstem overlay robi ten sam efekt i kosztuje $0.
  *
- * Jak działa:
+ * How it works:
  *   FFmpeg -loop 1 -i image.png -t [duration] -vf scale=1080:1920 clip.mp4
- *   Opcjonalnie: Ken Burns effect (powolny zoom) dla złudzenia ruchu.
+ *   Optionally: a Ken Burns effect (slow zoom) for the illusion of movement.
  *
  * Pipeline:
  *   1. Pobierz PNG z imageUrl (z ImageStep) przez HTTP
@@ -44,10 +44,10 @@ import java.util.Locale;
  *
  * Ken Burns effect:
  *   Powolny zoom in 100%→120% przez cały czas trwania sceny.
- *   Sprawia że statyczny obraz wygląda "żywo" na TikToku.
+ *   Makes a static image look "alive" on TikTok.
  *   Włączony domyślnie — wyłącz przez kenBurnsEnabled=false w properties.
  *
- * Wywoływany przez VideoStep w mixed media pipeline:
+ * Called by VideoStep in the mixed-media pipeline:
  *   VideoStep.execute() sprawdza mediaAssignment per scena:
  *     IMAGE → deleguje do ImageToClipStep
  *     VIDEO → wywołuje fal.ai jak poprzednio
@@ -68,9 +68,9 @@ public class ImageToClipStep {
     /**
      * Konwertuje jeden obraz do klipu MP4.
      *
-     * @param scene     SceneAsset z wypełnionym imageUrl (z ImageStep)
+     * @param scene     a SceneAsset with imageUrl filled in (from ImageStep)
      * @param workDir   katalog roboczy FFmpeg dla tej generacji
-     * @return ścieżka do wygenerowanego MP4
+     * @return path to the generated MP4
      */
     public String convertImageToClip(SceneAsset scene, Path workDir) throws Exception {
         if (scene.getImageUrl() == null || scene.getImageUrl().isBlank()) {
@@ -100,13 +100,13 @@ public class ImageToClipStep {
 
     /**
      * Konwertuje lokalny plik obrazu do klipu MP4 — bez pobierania przez HTTP.
-     * Używane dla user-uploaded custom image assets (nie mają imageUrl, są w storage).
+     * Used for user-uploaded custom image assets (they have no imageUrl, they're in storage).
      *
-     * @param localImagePath ścieżka do pliku obrazu na dysku
+     * @param localImagePath path to the image file on disk
      * @param durationMs     czas trwania klipu
-     * @param sceneIndex     indeks sceny (do nazwy pliku wyjściowego)
+     * @param sceneIndex     the scene index (for the output file name)
      * @param workDir        katalog roboczy FFmpeg
-     * @return ścieżka do wygenerowanego MP4
+     * @return path to the generated MP4
      */
     public String convertLocalImageToClip(Path localImagePath, int durationMs,
                                            int sceneIndex, Path workDir) throws Exception {
@@ -141,7 +141,7 @@ public class ImageToClipStep {
     private void runStaticConvert(Path imagePath, int durationMs, Path output) throws Exception {
         double durationSec = durationMs / 1000.0;
 
-        // Scale + pad do 1080x1920 zachowując proporcje, czarne pasy jeśli potrzeba
+        // Scale + pad to 1080x1920 preserving aspect ratio, black bars if needed
         String vf = "scale=1080:1920:force_original_aspect_ratio=decrease," +
                 "pad=1080:1920:(ow-iw)/2:(oh-ih)/2:black," +
                 "setsar=1";
@@ -153,7 +153,7 @@ public class ImageToClipStep {
     /**
      * Ken Burns effect — powolny zoom in 100%→120% przez cały czas sceny.
      *
-     * Efekt: obraz wygląda jak nagranie, nie jak statyczna grafika.
+     * Effect: the image looks like footage, not a static graphic.
      * Bardzo popularny w TikTok educational content.
      *
      * FFmpeg zoompan filter:
@@ -167,8 +167,8 @@ public class ImageToClipStep {
         double durationSec = durationMs / 1000.0;
         int totalFrames    = (int) (durationSec * 30); // 30fps
 
-        // Oblicz step zooma: chcemy dojść z 1.0 do 1.2 przez totalFrames klatek
-        // zoom_step = 0.2 / totalFrames (ale nie więcej niż 0.002 żeby nie było za szybko)
+        // Compute the zoom step: we want to go from 1.0 to 1.2 over totalFrames frames
+        // zoom_step = 0.2 / totalFrames (but no more than 0.002 so it's not too fast)
         double zoomStep = Math.min(0.2 / Math.max(totalFrames, 1), 0.002);
 
         String zoompan = String.format(Locale.US,
@@ -176,7 +176,7 @@ public class ImageToClipStep {
                 zoomStep, totalFrames
         );;
 
-        // scale przed zoompan żeby mieć pewność że wejście jest odpowiednie
+        // scale before zoompan to make sure the input is appropriate
         String vf = "scale=1080:1920:force_original_aspect_ratio=increase," +
                 "crop=1080:1920," +
                 zoompan + "," +
@@ -197,8 +197,8 @@ public class ImageToClipStep {
         cmd.addAll(List.of("-c:v", "libx264"));
         cmd.addAll(List.of("-preset", "fast"));
         cmd.addAll(List.of("-crf", "23"));
-        cmd.addAll(List.of("-pix_fmt", "yuv420p")); // wymagane przez niektóre players
-        cmd.addAll(List.of("-r", "30"));             // stały framerate
+        cmd.addAll(List.of("-pix_fmt", "yuv420p")); // required by some players
+        cmd.addAll(List.of("-r", "30"));             // constant framerate
         cmd.addAll(List.of("-an"));                  // brak audio — dodane w RenderStep mix
         cmd.addAll(List.of("-movflags", "+faststart")); // moov atom na początku — wymagane przez Remotion (Chromium seek)
         cmd.add(output.toString());
@@ -211,7 +211,7 @@ public class ImageToClipStep {
 
     /**
      * Pobiera obraz z URL (fal.ai CDN) i zapisuje lokalnie.
-     * Używamy java.net.http żeby nie wnosić OkHttp dependency tutaj
+     * We use java.net.http to avoid bringing an OkHttp dependency here
      * (OkHttp jest w FalAiService, ale tam jest @Service — nie chcemy circular).
      */
     private Path downloadImage(String imageUrl, int sceneIndex, Path workDir) throws Exception {
@@ -219,7 +219,7 @@ public class ImageToClipStep {
         Path imagePath = workDir.resolve(String.format("scene_%02d_image%s", sceneIndex, ext));
 
         if (Files.exists(imagePath)) {
-            log.debug("[ImageToClipStep] Obraz już pobrany: {}", imagePath);
+            log.debug("[ImageToClipStep] Image already downloaded: {}", imagePath);
             return imagePath;
         }
 
@@ -235,7 +235,7 @@ public class ImageToClipStep {
 
         if (response.statusCode() != 200) {
             throw new RuntimeException("[ImageToClipStep] HTTP " + response.statusCode()
-                    + " pobierając obraz: " + imageUrl);
+                    + " while downloading the image: " + imageUrl);
         }
 
         Files.write(imagePath, response.body());

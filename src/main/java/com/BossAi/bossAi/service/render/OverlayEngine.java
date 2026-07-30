@@ -11,14 +11,14 @@ import java.util.List;
  * <p>
  * FAZA 2 — serce dynamicznego tekstu.
  * <p>
- * Każdy TextOverlay z ScriptResult.overlays[] jest zamieniany na jeden
+ * Each TextOverlay from ScriptResult.overlays[] is turned into one
  * FFmpeg drawtext filter z:
  * - enable='between(t,startSec,endSec)'    — timing
  * - x, y                                   — pozycja (TOP/CENTER/BOTTOM)
  * - fontsize, fontcolor, shadowcolor        — styl (HOOK/BODY/FACT/CTA)
  * - alpha expression                        — animacja (FADE/SLIDE_IN/POP)
  * <p>
- * Wszystkie overlay filtry są łączone w jeden filter_complex chain:
+ * All overlay filters are combined into one filter_complex chain:
  * [0:v]drawtext=...[v1];[v1]drawtext=...[v2];[v2]drawtext=...[vout]
  * <p>
  * ANIMACJE przez FFmpeg expressions:
@@ -39,15 +39,15 @@ import java.util.List;
  * <p>
  * UWAGA na escapowanie:
  * Ten plik generuje fragmenty filter_complex zapisywane do pliku
- * (filter_complex_script). W pliku przecinki wewnątrz wyrażeń FFmpeg
- * (between, if, lt, gt, min, max) NIE są escapowane backslashem.
+ * (filter_complex_script). In the file, commas inside FFmpeg expressions
+ * (between, if, lt, gt, min, max) are NOT escaped with a backslash.
  * Backslash przed przecinkiem jest wymagany tylko w argumencie cmdline.
  */
 @Slf4j
 @Component
 public class OverlayEngine {
 
-    // Domyślne czcionki
+    // Default fonts
     private static final String FONT_BOLD = "Arial";
     private static final String FONT_REGULAR = "Arial";
 
@@ -60,10 +60,10 @@ public class OverlayEngine {
      * Buduje kompletny video filter string z listy overlays.
      *
      * @param overlays    lista TextOverlay z ScriptResult
-     * @param inputLabel  label wejściowy (np. "[0:v]" lub "[worded]")
-     * @param outputLabel label wyjściowy (np. "[vout]")
+     * @param inputLabel  the input label (e.g. "[0:v]" or "[worded]")
+     * @param outputLabel the output label (e.g. "[vout]")
      * @return filter_complex string gotowy do pliku filter_complex_script,
-     * lub null jeśli overlays jest puste/nieprawidłowe
+     * or null if overlays is empty/invalid
      */
     public String buildOverlayFilter(
             List<ScriptResult.TextOverlay> overlays,
@@ -75,18 +75,18 @@ public class OverlayEngine {
             return null;
         }
 
-        // Filtruj overlaye z nieprawidłowym timingiem lub pustym tekstem
+        // Filter out overlays with invalid timing or empty text
         List<ScriptResult.TextOverlay> valid = overlays.stream()
                 .filter(o -> o.endMs() > o.startMs())
                 .filter(o -> o.text() != null && !o.text().isBlank())
                 .toList();
 
         if (valid.isEmpty()) {
-            log.warn("[OverlayEngine] Wszystkie overlays mają nieprawidłowy timing lub pusty tekst");
+            log.warn("[OverlayEngine] All overlays have invalid timing or empty text");
             return null;
         }
 
-        log.info("[OverlayEngine] Buduję {} overlay filtry", valid.size());
+        log.info("[OverlayEngine] Building {} overlay filters", valid.size());
 
         StringBuilder filterChain = new StringBuilder();
         String currentInput = inputLabel;
@@ -202,11 +202,11 @@ public class OverlayEngine {
     }
 
     /**
-     * Oblicza pozycję X, Y dla drawtext.
+     * Computes the X, Y position for drawtext.
      * <p>
      * FFmpeg drawtext expressions:
-     * W  = szerokość wideo
-     * H  = wysokość wideo
+     * W  = video width
+     * H  = video height
      * tw = text width (wyliczone automatycznie przez FFmpeg)
      * th = text height
      * <p>
@@ -241,7 +241,7 @@ public class OverlayEngine {
      * <p>
      * FADE / SLIDE_IN : fade in przez FADE_DURATION + fade out przez FADE_DURATION
      * POP             : szybki fade in POP_DURATION, bez fade out
-     * NONE / default  : stały alpha=1
+     * NONE / default  : constant alpha=1
      */
     private String buildAlphaExpression(String animation, double startSec, double endSec) {
         if (animation == null) return "1";
@@ -285,7 +285,7 @@ public class OverlayEngine {
      * Escapuje tekst dla FFmpeg drawtext.
      * <p>
      * Kolejność escapowania jest istotna — backslashe najpierw,
-     * żeby nie podwójnie escapować znaków dodanych w kolejnych krokach.
+     * so we don't double-escape characters added in later steps.
      * <p>
      * \  → \\   backslash (musi być pierwszy)
      * '  → \'   apostrof — zamknąłby string text='...' przedwcześnie
@@ -303,7 +303,7 @@ public class OverlayEngine {
 
     /**
      * Formatuje double do 3 miejsc po przecinku dla FFmpeg expressions.
-     * Locale.US gwarantuje kropkę dziesiętną (nie przecinek) niezależnie
+     * Locale.US guarantees a decimal point (not a comma) regardless
      * od ustawień systemowych — KLUCZOWE na Windows z polskim locale.
      */
     private String f(double value) {

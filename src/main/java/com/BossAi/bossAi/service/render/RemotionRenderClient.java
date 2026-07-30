@@ -44,8 +44,8 @@ public class RemotionRenderClient {
     /**
      * Zleca renderowanie wideo na podstawie EDL.
      *
-     * @param request RemotionRenderRequest z EDL i konfiguracją outputu
-     * @return RemotionRenderResponse z render_id i statusem początkowym
+     * @param request a RemotionRenderRequest with the EDL and output configuration
+     * @return a RemotionRenderResponse with the render_id and initial status
      */
     public RemotionRenderResponse triggerRender(RemotionRenderRequest request) {
         log.info("[RemotionRenderClient] Triggering render — renderId: {}", request.renderId());
@@ -87,8 +87,8 @@ public class RemotionRenderClient {
     /**
      * Pobiera surowe bajty wyrenderowanego pliku z Remotiona.
      *
-     * @param outputPath ścieżka zwrócona przez Remotion (np. "/output/{renderId}.mp4"),
-     *                   względna do baseUrl renderera
+     * @param outputPath the path returned by Remotion (e.g. "/output/{renderId}.mp4"),
+     *                   relative to the renderer's baseUrl
      * @return bajty pliku MP4
      */
     public byte[] downloadOutput(String outputPath) {
@@ -120,14 +120,14 @@ public class RemotionRenderClient {
     }
 
     /**
-     * Polluje status renderowania aż do zakończenia (completed/failed).
-     * Używa konfiguracji z RemotionRendererProperties (maxAttempts, intervalMs).
+     * Polls the render status until completion (completed/failed).
+     * Uses the configuration from RemotionRendererProperties (maxAttempts, intervalMs).
      * Odporny na transient network errors (Connection reset, timeout) — retry do 3 razy per attempt.
      *
      * @param renderId identyfikator renderowania
      * @return ostateczny RemotionRenderStatusResponse
      * @throws RenderTimeoutException gdy przekroczono maxAttempts
-     * @throws RenderFailedException gdy render zakończył się błędem
+     * @throws RenderFailedException when the render finished with an error
      */
     public RemotionRenderStatusResponse pollUntilComplete(String renderId) {
         return pollUntilComplete(renderId, null);
@@ -198,7 +198,7 @@ public class RemotionRenderClient {
 
     /**
      * Pobiera status z retry na transient errors (Connection reset, timeout).
-     * Zwraca null jeśli wszystkie próby zawiodły (caller decyduje co dalej).
+     * Returns null if all attempts failed (the caller decides what next).
      */
     private RemotionRenderStatusResponse getStatusWithRetry(String renderId) {
         int retries = 3;

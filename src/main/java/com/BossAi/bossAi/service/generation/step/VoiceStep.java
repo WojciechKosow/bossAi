@@ -34,7 +34,7 @@ import java.util.List;
  *   2. OpenAI Whisper word timestamps (fallback, ~50-100ms)
  *   3. Estimated timings from SubtitleService (last resort)
  *
- * Input:  context.script.narration(), context.userVoiceAsset (może być null)
+ * Input:  context.script.narration(), context.userVoiceAsset (may be null)
  * Output: context.voiceLocalPath, context.wordTimings
  */
 @Slf4j
@@ -106,8 +106,8 @@ public class VoiceStep implements GenerationStep {
     // =========================================================================
 
     /**
-     * Wyciąga per-word timestamps z audio. Priorytet:
-     *   1. WhisperX forced alignment (najlepsza jakość, <20ms)
+     * Extracts per-word timestamps from the audio. Priority:
+     *   1. WhisperX forced alignment (best quality, <20ms)
      *   2. OpenAI Whisper (fallback, ~50-100ms)
      */
     private List<SubtitleService.WordTiming> extractWordTimings(
@@ -168,8 +168,8 @@ public class VoiceStep implements GenerationStep {
     // =========================================================================
 
     /**
-     * Scala tokeny Whisper w czytelne słowa wyświetlane na ekranie.
-     * Używane TYLKO jako fallback gdy WhisperX jest niedostępny.
+     * Merges Whisper tokens into readable words displayed on screen.
+     * Used ONLY as a fallback when WhisperX is unavailable.
      */
     private List<SubtitleService.WordTiming> mergeWhisperTokens(
             List<SubtitleService.WordTiming> tokens) {
@@ -221,13 +221,13 @@ public class VoiceStep implements GenerationStep {
                 }
                 log.warn("[VoiceStep] Whisper próba {} — 0 tokenów", attempt);
             } catch (Exception e) {
-                log.warn("[VoiceStep] Whisper próba {} failed: {}", attempt, e.getMessage());
+                log.warn("[VoiceStep] Whisper attempt {} failed: {}", attempt, e.getMessage());
             }
 
             try { Thread.sleep(500L * attempt); } catch (InterruptedException ignored) {}
         }
 
-        log.error("[VoiceStep] Whisper failed po 3 próbach");
+        log.error("[VoiceStep] Whisper failed after 3 attempts");
         return List.of();
     }
 

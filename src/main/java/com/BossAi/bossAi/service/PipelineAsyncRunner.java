@@ -21,16 +21,16 @@ import java.util.UUID;
  * Osobny bean do asynchronicznego uruchamiania pipeline.
  *
  * DLACZEGO OSOBNY BEAN:
- * Spring @Async działa przez proxy. Gdy metoda @Async jest wywoływana
- * z tego samego beanu (self-invocation), proxy nie przechwytuje wywołania
+ * Spring @Async works via a proxy. When an @Async method is called
+ * from the same bean (self-invocation), the proxy doesn't intercept the call
  * i metoda działa SYNCHRONICZNIE — wewnątrz transakcji wywołującej.
  *
  * DLACZEGO UUID zamiast Generation entity:
  * generateTikTokAd() jest @Transactional — entity jest managed w tej transakcji.
- * Po powrocie z metody transakcja commituje i entity staje się DETACHED.
- * Async thread próbujący save() detached entity dostaje
+ * After the method returns, the transaction commits and the entity becomes DETACHED.
+ * An async thread trying to save() a detached entity gets
  * StaleObjectStateException (optimistic lock na merge).
- * Rozwiązanie: przekazujemy UUID i robimy findById() na świeżym persistence context.
+ * Solution: we pass the UUID and do a findById() on a fresh persistence context.
  */
 @Service
 @Slf4j
@@ -54,7 +54,7 @@ public class PipelineAsyncRunner {
             UUID generationId,
             GenerationContext context
     ) {
-        // Załaduj świeżą encję z DB + eagerly fetch User (unikamy LazyInitializationException w async)
+        // Load a fresh entity from the DB + eagerly fetch User (avoids LazyInitializationException in async)
         Generation generation = generationRepository.findByIdWithUser(generationId)
                 .orElseThrow(() -> new IllegalStateException(
                         "Generation not found: " + generationId));

@@ -29,7 +29,7 @@ import java.util.stream.Collectors;
 /**
  * RenderStep v4 — animated effects + scene transitions + word-by-word subtitles.
  * <p>
- * KLUCZOWA ZASADA: ZAWSZE używaj f() dla wartości double przekazywanych do FFmpeg.
+ * KEY RULE: ALWAYS use f() for double values passed to FFmpeg.
  * <p>
  * FAZA 4 zmiany:
  * 1. Animated effects — ZOOM_IN/OUT/FAST_ZOOM progressive over duration.
@@ -322,7 +322,7 @@ public class RenderStep implements GenerationStep {
             Files.writeString(srtFile, srtContent);
         }
 
-        // === Buduj komendę ===
+        // === Build the command ===
         List<String> cmd = new ArrayList<>();
         cmd.add(ffmpegProperties.getBinary().getPath());
         cmd.add("-y");
@@ -365,9 +365,9 @@ public class RenderStep implements GenerationStep {
         Path filterScript = workDir.resolve("filter_complex.txt");
         Files.writeString(filterScript, filterComplex);
 
-        cmd.addAll(List.of("-filter_complex_script", filterScript.toString())); // ← tylko raz
-        cmd.addAll(List.of("-map", "[vout]"));                             // ← tylko raz
-        cmd.addAll(List.of("-map", hasMusic ? "[audio]" : "1:a"));        // ← tylko raz
+        cmd.addAll(List.of("-filter_complex_script", filterScript.toString())); // ← only once
+        cmd.addAll(List.of("-map", "[vout]"));                             // ← only once
+        cmd.addAll(List.of("-map", hasMusic ? "[audio]" : "1:a"));        // ← only once
 
         cmd.addAll(List.of(
                 "-c:v", cfg.getVideoCodec(),
@@ -387,7 +387,7 @@ public class RenderStep implements GenerationStep {
 
     /**
      * Buduje kompletny filter_complex zapisywany do pliku.
-     * Przecinki wewnątrz wyrażeń FFmpeg są zwykłymi przecinkami (nie \,).
+     * Commas inside FFmpeg expressions are ordinary commas (not \,).
      */
     private String buildFilterComplex(
             GenerationContext context,
@@ -429,7 +429,7 @@ public class RenderStep implements GenerationStep {
             fc.append(buildSrtFilter(srtFile, "[0:v]", afterSrtLabel));
 
         } else {
-            // Brak napisów w ogóle
+            // No subtitles at all
             if (hasOverlays) {
                 fc.append("[0:v]null[subtitled]");
             } else {
@@ -471,8 +471,8 @@ public class RenderStep implements GenerationStep {
 
     /**
      * Buduje karaoke-style word-by-word subtitles:
-     *   - Słowa są grupowane w małe grupy (max 5 słów)
-     *   - Cała grupa jest widoczna na ekranie (białe litery)
+     *   - Words are grouped into small groups (max 5 words)
+     *   - The whole group is visible on screen (white letters)
      *   - Aktualnie mówione słowo jest podświetlone (żółte) — nakładane jako osobny drawtext
      *
      * Struktura FFmpeg filter chain:
@@ -486,7 +486,7 @@ public class RenderStep implements GenerationStep {
     ) {
         if (words.isEmpty()) return "";
 
-        // Grupuj słowa w grupy po MAX_WORDS_PER_GROUP
+        // Group words into groups of MAX_WORDS_PER_GROUP
         List<WordGroup> groups = groupWordsForKaraoke(words);
 
         if (groups.isEmpty()) {
@@ -500,7 +500,7 @@ public class RenderStep implements GenerationStep {
         int totalNodes = countTotalNodes(groups);
 
         for (WordGroup group : groups) {
-            // --- Warstwa bazowa: cała grupa w białym kolorze ---
+            // --- Base layer: the whole group in white ---
             boolean isLastNode = (nodeIndex == totalNodes - 1) && group.wordEntries.size() == 0;
             String groupOutput = isLastNode ? outputLabel : "[n" + nodeIndex + "]";
 
@@ -523,14 +523,14 @@ public class RenderStep implements GenerationStep {
             currentInput = groupOutput;
             nodeIndex++;
 
-            // --- Warstwy podświetlenia: każde słowo osobno w highlight color ---
+            // --- Highlight layers: each word separately in the highlight color ---
             for (int w = 0; w < group.wordEntries.size(); w++) {
                 WordEntry entry = group.wordEntries.get(w);
                 boolean isLast = (nodeIndex == totalNodes - 1);
                 String wordOutput = isLast ? outputLabel : "[n" + nodeIndex + "]";
 
-                // Oblicz pozycję X słowa w grupie
-                // Używamy proporcjonalnego przesunięcia opartego na znakach
+                // Compute the word's X position within the group
+                // We use a proportional offset based on characters
                 String xExpr = calculateWordXPosition(entry, group);
 
                 String alpha = String.format(Locale.US,
@@ -569,7 +569,7 @@ public class RenderStep implements GenerationStep {
         return chain.toString();
     }
 
-    /** Oblicza fontSize na podstawie długości tekstu grupy. */
+    /** Computes the fontSize based on the group's text length. */
     private int calculateFontSize(String text) {
         int len = text.length();
         if (len <= 8) return 80;
@@ -580,20 +580,20 @@ public class RenderStep implements GenerationStep {
     }
 
     /**
-     * Oblicza wyrażenie FFmpeg dla pozycji X słowa wewnątrz wycentrowanej grupy.
+     * Computes the FFmpeg expression for the word's X position within a centered group.
      *
-     * Strategia: znamy pozycję znakową słowa w grupie (charOffset / totalChars).
-     * Obliczamy proporcjonalną pozycję X używając text_w grupy.
+     * Strategy: we know the word's character position in the group (charOffset / totalChars).
+     * We compute a proportional X position using the group's text_w.
      *
      * X = (W - groupTextWidth) / 2 + charOffset / totalChars * groupTextWidth
      *
-     * W FFmpeg nie mamy groupTextWidth wprost, ale wiemy, że drawtext grupy
-     * używa tego samego fontu/rozmiaru, więc approx:
+     * In FFmpeg we don't have groupTextWidth directly, but we know the group's drawtext
+     * uses the same font/size, so approx:
      *   groupTextWidth ≈ totalChars * (tw / wordChars)
      *   ale tw dotyczy AKTUALNEGO drawtext, nie grupy.
      *
-     * Najprostsze podejście: zakładamy średnią szerokość znaku i liczymy pixel offset.
-     * Przy foncie 60px Arial, średnia szerokość znaku ≈ 0.55 * fontSize.
+     * Simplest approach: assume an average character width and compute a pixel offset.
+     * With a 60px Arial font, the average character width ≈ 0.55 * fontSize.
      */
     private String calculateWordXPosition(WordEntry entry, WordGroup group) {
         int totalChars = group.fullText.length();
@@ -633,7 +633,7 @@ public class RenderStep implements GenerationStep {
     /**
      * Grupuje WordTimings w grupy do MAX_WORDS_PER_GROUP.
      * Rozdziela na granicach scen (przerwa > 800ms) i przy interpunkcji.
-     * Każda grupa zawiera: pełny tekst, timing, i per-word entries z charOffset.
+     * Each group contains: the full text, timing, and per-word entries with charOffset.
      */
     private List<WordGroup> groupWordsForKaraoke(List<SubtitleService.WordTiming> words) {
         List<WordGroup> groups = new ArrayList<>();
@@ -649,10 +649,10 @@ public class RenderStep implements GenerationStep {
 
                 if (!groupWords.isEmpty()) {
                     double gap = (wt.startMs() / 1000.0) - groupEnd;
-                    // Przerwij grupę przy dużej pauzie (koniec zdania/myśli)
+                    // Break the group on a large pause (end of sentence/thought)
                     if (gap > 0.8) break;
 
-                    // Przerwij przy interpunkcji końcowej poprzedniego słowa
+                    // Break on ending punctuation of the previous word
                     String prevWord = groupWords.get(groupWords.size() - 1).word();
                     if (!prevWord.isEmpty()) {
                         char lastChar = prevWord.charAt(prevWord.length() - 1);
@@ -904,7 +904,7 @@ public class RenderStep implements GenerationStep {
         cmd.add(ffmpegProperties.getBinary().getPath());
         cmd.add("-y");
         cmd.addAll(List.of("-ss", f(startSec)));
-        cmd.addAll(List.of("-i", input));  // ← -t USUNIĘTE przed -i
+        cmd.addAll(List.of("-i", input));  // ← -t REMOVED before -i
 
         if (filter != null) {
             String resetFilter = "setpts=PTS-STARTPTS," + filter;
@@ -929,8 +929,8 @@ public class RenderStep implements GenerationStep {
     }
 
     /**
-     * Mapuje nazwy przejść z EffectRegistry (format z podkreślnikami) na nazwy
-     * obsługiwane przez FFmpeg xfade filter (brak podkreślników).
+     * Maps transition names from EffectRegistry (underscore format) to names
+     * supported by the FFmpeg xfade filter (no underscores).
      * Nieznane wartości → "fade" jako bezpieczny fallback.
      */
     private String mapToXfadeName(String registryName) {
@@ -1008,11 +1008,11 @@ public class RenderStep implements GenerationStep {
             case SMASH_ZOOM -> String.format(Locale.US,
                     "zoompan=z='if(lt(on,8),1+on*0.075,1.6)':d=%d:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=1080x1920:fps=30",
                     totalFrames);
-            // BLUR_TRANSITION: delikatny blur + minimalny zoom (przybliżenie TikTok flow)
+            // BLUR_TRANSITION: subtle blur + minimal zoom (approximating TikTok flow)
             case BLUR_TRANSITION -> String.format(Locale.US,
                     "zoompan=z='1.05':d=%d:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=1080x1920:fps=30,avgblur=sizeX=3:sizeY=3",
                     totalFrames);
-            // BRIGHTNESS_BURST: skok jasności przez pierwsze klatki (punch na bicie)
+            // BRIGHTNESS_BURST: brightness jump over the first frames (punch on the beat)
             case BRIGHTNESS_BURST -> String.format(Locale.US,
                     "zoompan=z='1.02':d=%d:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=1080x1920:fps=30,eq=brightness=0.15:saturation=1.1",
                     totalFrames);
@@ -1041,7 +1041,7 @@ public class RenderStep implements GenerationStep {
     // =========================================================================
 
     private boolean hasOverlays(GenerationContext context) {
-        // Watermark zawsze liczy się jako overlay
+        // The watermark always counts as an overlay
         if (context.isWatermarkEnabled()) return true;
 
         List<ScriptResult.TextOverlay> overlays = context.getScript().overlays();
@@ -1049,7 +1049,7 @@ public class RenderStep implements GenerationStep {
 
         // Filtruj overlays które są SUBTITLE_TYPE — te obsługuje phrase system
         // Zostawiaj tylko dekoracyjne overlays: HOOK banner, CTA button itp.
-        // które mają pozycję inną niż BOTTOM (gdzie są phrase subtitles)
+        // that have a position other than BOTTOM (where the phrase subtitles are)
         return overlays.stream().anyMatch(o ->
                 o.position() != null && !o.position().equalsIgnoreCase("BOTTOM")
         );
@@ -1096,7 +1096,7 @@ public class RenderStep implements GenerationStep {
     }
 
     /**
-     * Escapuje tekst słowa dla FFmpeg drawtext.
+     * Escapes the word text for FFmpeg drawtext.
      * \  → \\   backslash (pierwszy!)
      * '  → \'   apostrof
      * :  → \:   separator opcji drawtext
@@ -1114,7 +1114,7 @@ public class RenderStep implements GenerationStep {
 
     /**
      * JEDYNA metoda konwersji double → String dla FFmpeg.
-     * Locale.US gwarantuje kropkę dziesiętną niezależnie od ustawień systemowych.
+     * Locale.US guarantees a decimal point regardless of system settings.
      */
     private String f(double value) {
         return String.format(Locale.US, "%.3f", value);

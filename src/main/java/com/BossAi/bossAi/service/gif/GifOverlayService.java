@@ -14,7 +14,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 /**
- * Decyduje kiedy i jakie GIF overlays dodać do EDL.
+ * Decides when and which GIF overlays to add to the EDL.
  *
  * Logika (v1 — prosta, rozbudowywana iteracyjnie):
  *   - Subscribe/Follow GIF → zawsze na ostatniej scenie (layer=0, ostatni segment)
@@ -22,7 +22,7 @@ import java.util.UUID;
  * Rozbudowa w kolejnych iteracjach:
  *   - Fire/Like GIF przy kulminacji narracji (energy > 0.85)
  *   - Swipe-up przy CTA
- *   - Per-DNA-preset konfiguracja kiedy dodawać
+ *   - Per-DNA-preset configuration of when to add them
  */
 @Slf4j
 @Service
@@ -32,7 +32,7 @@ public class GifOverlayService {
     private final GifLibraryService gifLibraryService;
 
     /**
-     * Generuje listę GIF overlays dla danego EDL.
+     * Generates the list of GIF overlays for a given EDL.
      *
      * @param segments  gotowe segmenty EDL (layer=0, posortowane wg startMs)
      * @param context   GenerationContext z DNA preset i narration
@@ -51,7 +51,7 @@ public class GifOverlayService {
 
         DnaPreset preset = context.getDnaPreset();
 
-        // Strategia: wybierz odpowiednią kategorię GIF-a na podstawie DNA
+        // Strategy: pick the right GIF category based on the DNA
         GifCategory ctaGifCategory = selectCtaGif(preset);
 
         // Znajdź ostatnią scenę primary (layer=0) — GIF subscribe/follow zawsze tam
@@ -94,8 +94,8 @@ public class GifOverlayService {
     // =========================================================================
 
     /**
-     * Wybiera kategorię GIF-a CTA na podstawie DNA preset.
-     * Domyślnie: SUBSCRIBE_BUTTON (najbardziej uniwersalne dla TikToka).
+     * Selects the CTA GIF category based on the DNA preset.
+     * Default: SUBSCRIBE_BUTTON (the most universal for TikTok).
      */
     private GifCategory selectCtaGif(DnaPreset preset) {
         if (preset == null) return GifCategory.SUBSCRIBE_BUTTON;

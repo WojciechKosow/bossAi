@@ -34,15 +34,15 @@ import java.util.stream.Collectors;
  *
  * FAZA 2 zmiany:
  *
- *   Mixed media: nie każda scena jest animowanym video przez fal.ai.
- *   GPT-4o decyduje (przez mediaAssignments w ScriptResult) które sceny
- *   potrzebują animacji (VIDEO) a które mogą być statycznym obrazem (IMAGE).
+ *   Mixed media: not every scene is an animated video via fal.ai.
+ *   GPT-4o decides (via mediaAssignments in ScriptResult) which scenes
+ *   need animation (VIDEO) and which can be a static image (IMAGE).
  *
  *   VIDEO scena → fal.ai Kling/LTX (drogie, dynamiczne, używamy dla hook + CTA)
  *   IMAGE scena → ImageToClipStep (FFmpeg loop, $0, używamy dla treści)
  *
- *   Limit: max 2 sceny VIDEO. Enforce tutaj jako safety check jeśli GPT
- *   wygeneruje za dużo VIDEO scen (co oszczędza koszt przy błędzie promptu).
+ *   Limit: max 2 VIDEO scenes. Enforced here as a safety check if GPT
+ *   generates too many VIDEO scenes (which saves cost on a prompt error).
  *
  *   Fallback: jeśli mediaAssignments null/empty (stary format) → używamy
  *   starego zachowania (pierwsze + ostatnie = VIDEO, reszta = IMAGE).
@@ -130,7 +130,7 @@ public class VideoStep implements GenerationStep {
             context.updateProgress(
                     GenerationStepName.VIDEO,
                     GenerationStepName.VIDEO.getProgressPercent(),
-                    String.format("TEST MODE: przetwarzam scenę %d/%d...", i + 1, scenes.size())
+                    String.format("TEST MODE: processing scene %d/%d...", i + 1, scenes.size())
             );
 
             // Try reusing existing VIDEO asset first
@@ -198,7 +198,7 @@ public class VideoStep implements GenerationStep {
         List<Asset> customMedia = context.getCustomMediaAssets();
         boolean hasCustomMedia = context.hasCustomMedia();
 
-        // Ustal które sceny są VIDEO (animowane) a które IMAGE (statyczne)
+        // Determine which scenes are VIDEO (animated) and which are IMAGE (static)
         Set<Integer> videoSceneIndices = resolveVideoSceneIndices(context);
 
         log.info("[VideoStep] Mixed media plan: VIDEO sceny={}, IMAGE sceny={}, customMedia={}",
@@ -209,7 +209,7 @@ public class VideoStep implements GenerationStep {
                         .collect(Collectors.toList()),
                 hasCustomMedia ? customMedia.size() : 0);
 
-        // Przetwarzaj każdą scenę
+        // Process each scene
         int videoCount = 0;
         int reusedCount = 0;
         int customCount = 0;
@@ -220,8 +220,8 @@ public class VideoStep implements GenerationStep {
             context.updateProgress(
                     GenerationStepName.VIDEO,
                     GenerationStepName.VIDEO.getProgressPercent(),
-                    String.format("%s scenę %d/%d...",
-                            isVideo ? "Animuję" : "Konwertuję", i + 1, scenes.size())
+                    String.format("%s scene %d/%d...",
+                            isVideo ? "Animating" : "Converting", i + 1, scenes.size())
             );
 
             // Check for custom VIDEO asset at this scene index
@@ -266,7 +266,7 @@ public class VideoStep implements GenerationStep {
             }
 
             if (isVideo) {
-                // Sprawdź czy mamy reusable VIDEO asset
+                // Check whether we have a reusable VIDEO asset
                 Asset reusedAsset = reusedVideos != null
                         ? reusedVideos.get(scene.getImagePrompt())
                         : null;
@@ -299,7 +299,7 @@ public class VideoStep implements GenerationStep {
                     throw new IllegalStateException(
                             "[VideoStep] Brak reusable assetu VIDEO dla sceny "
                                     + scene.getIndex()
-                                    + " (tryb reuse-only włączony)"
+                                    + " (reuse-only mode enabled)"
                     );
                 }
 
@@ -319,7 +319,7 @@ public class VideoStep implements GenerationStep {
     // PRZETWARZANIE SCEN
     // =========================================================================
 
-    /** Animuje scenę przez fal.ai (drogi, dynamiczny) */
+    /** Animates the scene via fal.ai (expensive, dynamic) */
     private void processVideoScene(SceneAsset scene, String modelId,
                                    Path workDir, GenerationContext context) throws Exception {
         log.info("[VideoStep] VIDEO scena {} — fal.ai animation", scene.getIndex());
@@ -365,18 +365,18 @@ public class VideoStep implements GenerationStep {
     // =========================================================================
 
     /**
-     * Ustala które sceny mają być animowane przez fal.ai.
+     * Determines which scenes should be animated via fal.ai.
      *
      * Priorytet:
      *   1. mediaAssignments z ScriptResult (GPT-4o decyzja) — jeśli dostępne
      *   2. Fallback: scena 0 (hook) + ostatnia (CTA)
-     *   Safety cap: max MAX_VIDEO_SCENES niezależnie od źródła
+     *   Safety cap: max MAX_VIDEO_SCENES regardless of source
      */
     private Set<Integer> resolveVideoSceneIndices(GenerationContext context) {
         List<ScriptResult.MediaAssignment> assignments = context.getScript().mediaAssignments();
 
         if (assignments != null && !assignments.isEmpty()) {
-            // Używamy GPT-4o decyzji, ale limitujemy do MAX_VIDEO_SCENES
+            // We use GPT-4o's decision, but limit to MAX_VIDEO_SCENES
             List<Integer> videoIndices = assignments.stream()
                     .filter(ScriptResult.MediaAssignment::isVideo)
                     .map(ScriptResult.MediaAssignment::sceneIndex)
@@ -386,11 +386,11 @@ public class VideoStep implements GenerationStep {
             if (videoIndices.size() > MAX_VIDEO_SCENES) {
                 log.warn("[VideoStep] GPT-4o wybrał {} VIDEO scen — ograniczam do {} (hook + CTA)",
                         videoIndices.size(), MAX_VIDEO_SCENES);
-                // Zawsze bierz pierwszą (hook) i ostatnią (CTA) z listy video scen
+                // Always take the first (hook) and last (CTA) from the video scene list
                 videoIndices = List.of(videoIndices.get(0), videoIndices.get(videoIndices.size() - 1));
             }
 
-            log.info("[VideoStep] Używam GPT mediaAssignments: VIDEO sceny = {}", videoIndices);
+            log.info("[VideoStep] Using GPT mediaAssignments: VIDEO scenes = {}", videoIndices);
             return Set.copyOf(videoIndices);
         }
 

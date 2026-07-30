@@ -16,13 +16,13 @@ import java.util.Optional;
 import java.util.concurrent.ThreadLocalRandom;
 
 /**
- * Pobiera URL-e GIF-ów z Giphy Stickers API i cachuje wyniki.
+ * Fetches GIF URLs from the Giphy Stickers API and caches the results.
  *
- * Giphy Stickers API (bezpłatne):
+ * Giphy Stickers API (free):
  *   GET https://api.giphy.com/v1/stickers/search?api_key={key}&q={query}&limit=5&rating=g
  *   Odpowiedź: data[0].images.original.url → URL do GIF-a z przezroczystym tłem
  *
- * Cache: in-memory per kategoria (refreshuje się po restarcie aplikacji).
+ * Cache: in-memory per category (refreshes after the app restarts).
  * Jeśli Giphy jest niedostępne lub klucz nie skonfigurowany → zwraca Optional.empty()
  * i EdlGeneratorService pomija GIF overlay dla tej sceny.
  */
@@ -42,9 +42,9 @@ public class GifLibraryService {
     /**
      * Zwraca URL GIF-a dla podanej kategorii.
      *
-     * Kolejność:
-     *   1. Cache (jeśli istnieje)
-     *   2. Giphy API (jeśli skonfigurowany klucz)
+     * Order:
+     *   1. Cache (if it exists)
+     *   2. Giphy API (if a key is configured)
      *   3. Optional.empty() (brak GIF-a)
      */
     public Optional<String> getGifUrl(GifCategory category) {
@@ -70,7 +70,7 @@ public class GifLibraryService {
     }
 
     /**
-     * Czyści cache dla konkretnej kategorii.
+     * Clears the cache for a specific category.
      */
     public void clearCache(GifCategory category) {
         cache.remove(category);

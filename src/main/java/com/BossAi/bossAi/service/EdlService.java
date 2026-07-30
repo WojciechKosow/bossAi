@@ -23,7 +23,7 @@ public class EdlService {
     private final VideoProjectRepository projectRepository;
 
     /**
-     * Zapisuje nową wersję EDL dla projektu.
+     * Saves a new EDL version for the project.
      * Automatycznie inkrementuje numer wersji.
      * Ustawia nowy EDL jako currentEdl w projekcie.
      */

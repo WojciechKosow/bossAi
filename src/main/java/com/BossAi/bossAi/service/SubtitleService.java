@@ -32,10 +32,10 @@ public class SubtitleService {
      * Kazda scena ma subtitleText rozbijany na slowa dystrybuowane rownomiernie.
      *
      * Ulepszenia:
-     *   - Elementy wyliczeń (po przecinku) dostają krótszą pauzę między sobą
-     *   - Słowa po kropce/wykrzykniku dostają dłuższą przerwę (natural sentence break)
-     *   - Krótkie słowa (1-3 znaki: "a", "to", "etc") dostają mniej czasu
-     *   - Długie słowa dostają proporcjonalnie więcej czasu
+     *   - Enumeration items (after a comma) get a shorter pause between them
+     *   - Words after a period/exclamation mark get a longer break (natural sentence break)
+     *   - Short words (1-3 chars: "a", "to", "etc") get less time
+     *   - Long words get proportionally more time
      */
     public List<WordTiming> generateWordTimings(ScriptResult script) {
         List<WordTiming> timings = new ArrayList<>();

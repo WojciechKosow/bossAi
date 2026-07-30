@@ -93,7 +93,7 @@ public class GenerationServiceImpl implements GenerationService {
 //        if (request.getMusicFile() != null && !request.getMusicFile().isEmpty()) {
 //            AssetDTO musicAssetDto = assetService.createUserUpload(
 //                    email, AssetType.MUSIC, request.getMusicFile());
-//            // Dodaj do assetIds żeby buildContext go znalazł
+//            // Add to assetIds so buildContext finds it
 //            Asset musicAsset = assetRepository.findById(musicAssetDto.getId()).orElseThrow();
 //            userAssets = new java.util.ArrayList<>(userAssets);
 //            userAssets.add(musicAsset);
@@ -119,7 +119,7 @@ public class GenerationServiceImpl implements GenerationService {
 
         GenerationContext context = buildContext(generation, request, userPlan, userAssets, user);
 
-        // Obsługa bezpośredniego uploadu muzyki z requestu (musicFile takes lower priority than musicAssetId)
+        // Handle direct music upload from the request (musicFile takes lower priority than musicAssetId)
         if (request.getMusicAssetId() == null
                 && request.getMusicFile() != null && !request.getMusicFile().isEmpty()) {
             String tempDirPath = ffmpegProperties.getTemp().getDir();
@@ -556,20 +556,20 @@ public class GenerationServiceImpl implements GenerationService {
     /**
      * Phase 2.3 — układa assety w kolejności scen wg explicit sceneAssignments.
      *
-     * Wejście:
+     * Input:
      *   customMedia — assety usera już posortowane po orderIndex
      *   assignments — lista par (sceneIndex, assetId) od usera
      *
-     * Wyjście: lista assetów w kolejności scen. Sceny bez wpisu są dopełniane
-     * pozostałymi (nieprzypisanymi) assetami w istniejącej kolejności orderIndex.
+     * Output: a list of assets in scene order. Scenes without an entry are filled
+     * with the remaining (unassigned) assets in the existing orderIndex order.
      *
-     * Walidacje (rzucają 400):
-     *   - assetId musi być w customMedia
+     * Validations (throw 400):
+     *   - assetId must be in customMedia
      *   - sceneIndex w [0, customMedia.size())
      *   - duplicate sceneIndex / duplicate assetId zabronione
      *
      * Niezmiennik z CLAUDE.md (scene count == media.size()) zachowany — wynikowa lista
-     * ma dokładnie tyle elementów co customMedia.
+     * has exactly as many elements as customMedia.
      */
     private List<Asset> applySceneAssignments(List<Asset> customMedia,
                                               List<com.BossAi.bossAi.request.SceneAssignment> assignments) {
