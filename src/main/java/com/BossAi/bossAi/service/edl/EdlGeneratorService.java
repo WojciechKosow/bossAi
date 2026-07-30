@@ -92,15 +92,15 @@ public class EdlGeneratorService {
     }
 
     /**
-     * Generuje EDL z pelnym kontekstem audio + wideo + EditDna (osobowość montażu).
+     * Generates the EDL with the full audio + video context + EditDna (the editing personality).
      *
      * STRATEGIA (v3):
      *   Jeśli CutEngine wygenerował JustifiedCuts → DETERMINISTIC PATH (spójne cięcia)
      *   Jeśli brak JustifiedCuts → GPT EDL (fallback na pełną generację)
      *
-     * Dlaczego: CutEngine łączy 4 warstwy analizy (narracja + mowa + muzyka + user intent)
-     * i podejmuje uzasadnione decyzje o cięciach. Dodatkowy GPT call w EdlGenerator
-     * mógł się rozmijać z tymi decyzjami, generując niespójny timeline.
+     * Why: CutEngine combines 4 analysis layers (narration + speech + music + user intent)
+     * and makes justified decisions about cuts. An extra GPT call in EdlGenerator
+     * could diverge from those decisions, producing an inconsistent timeline.
      * Teraz deterministic path jest domyślny — GPT jest fallbackiem.
      */
     public EdlDto generateEdl(GenerationContext context,
@@ -385,17 +385,17 @@ public class EdlGeneratorService {
         List<EdlSegment> segments = new ArrayList<>();
         List<JustifiedCut> justifiedCuts = context.getJustifiedCuts();
 
-        // === CUSTOM TTS: segmenty 1:1 z klipami głosowymi (probed durations) ===
-        // Gdy user dostarcza własne klipy TTS, każda scena musi trwać dokładnie tyle
+        // === CUSTOM TTS: segments 1:1 with the voice clips (probed durations) ===
+        // When the user provides their own TTS clips, each scene must last exactly as long
         // co odpowiadający klip — inaczej audio_tracks i segmenty są rozjechane.
         if (context.hasCustomTts() && !context.getCustomTtsAssets().isEmpty()) {
             segments = buildCustomTtsSegments(context, audioAnalysis, projectAssets);
         } else if (justifiedCuts != null && !justifiedCuts.isEmpty()) {
-            // === NOWA ŚCIEŻKA: buduj segmenty z justified cuts ===
+            // === NEW PATH: build segments from justified cuts ===
             segments = buildSegmentsFromJustifiedCuts(justifiedCuts, context, audioAnalysis,
                     projectAssets);
         } else {
-            // === STARA ŚCIEŻKA: buduj segmenty ze scen (1 scena = 1 segment) ===
+            // === OLD PATH: build segments from scenes (1 scene = 1 segment) ===
             // Oblicz prawdziwy czas trwania z voice-over (master clock)
             int voiceDurationMs = 0;
             if (context.getWordTimings() != null && !context.getWordTimings().isEmpty()) {
@@ -406,7 +406,7 @@ public class EdlGeneratorService {
             int sceneDurationMs = context.getScenes().stream()
                     .mapToInt(SceneAsset::getDurationMs).sum();
 
-            // Jeśli voice jest dłuższy niż sceny, przeskaluj proportionally
+            // If the voice is longer than the scenes, rescale proportionally
             double scale = (voiceDurationMs > sceneDurationMs && sceneDurationMs > 0)
                     ? (double) voiceDurationMs / sceneDurationMs
                     : 1.0;
@@ -516,12 +516,12 @@ public class EdlGeneratorService {
 
     /**
      * Dla scen z wypełnioną mapą layerAssetIds (layerIndex → ProjectAsset UUID)
-     * dorzuca do EDL dodatkowe EdlSegmenty z layer>0. Każdy taki segment pokrywa
-     * pełen przedział czasowy sceny zrekonstruowany z istniejących primary segmentów
-     * (layer=0). Liczba scen i ich layout layer=0 nie zmieniają się.
+     * adds extra EdlSegments with layer>0 to the EDL. Each such segment covers
+     * the full time range of the scene, reconstructed from the existing primary segments
+     * (layer=0). The number of scenes and their layer=0 layout don't change.
      *
      * Wynik: Remotion dostaje stos warstw — np. layer 0 = wygenerowane stock footage,
-     * layer 1 = filmik usera nakładany na to tło.
+     * layer 1 = the user's clip overlaid on that background.
      */
     private void appendLayerSegments(EdlDto edl,
                                      GenerationContext context,
@@ -560,7 +560,7 @@ public class EdlGeneratorService {
             Map<Integer, UUID> layers = scene.getLayerAssetIds();
             if (layers == null || layers.isEmpty()) continue;
 
-            // Wylicz czas trwania sceny z primary segmentów, które używają jej assetu
+            // Compute the scene duration from the primary segments that use its asset
             int sceneStart = Integer.MAX_VALUE;
             int sceneEnd = Integer.MIN_VALUE;
             for (EdlSegment seg : primarySegments) {
@@ -846,20 +846,20 @@ public class EdlGeneratorService {
     /**
      * Buduje segmenty EDL na podstawie justified cuts z CutEngine.
      *
-     * ASSET ASSIGNMENT PRIORITY (od najwyższego do najniższego):
+     * ASSET ASSIGNMENT PRIORITY (from highest to lowest):
      *   1. EXPLICIT — JustifiedCut.assignedAssetIndex >= 0 (z UserEditIntent / Layer D)
      *      User powiedział "ten klip jako intro" → CutEngine oznaczył segment → MUST use
      *   2. SCENE-AWARE — pozycja cuta w timeline mapowana na scenę → asset sceny
-     *      Scena definiuje temat wizualny, cut w obrębie sceny dostaje jej asset
+     *      A scene defines the visual topic; a cut within the scene gets its asset
      *   3. INTENT-AWARE FALLBACK — szuka assetu respektując role (nie daj intro w środku,
-     *      nie daj outro na początku), preferencja dla assetu z najbliższej sceny
+     *      don't put an outro at the start), preference for the asset from the nearest scene
      *
      * Cel: user mówi "las jako intro, pustynia 2-4" → dokładnie tak wyjdzie, od początku do końca.
      */
     /**
      * Buduje segmenty EDL 1:1 z klipami TTS — scena i trwa dokładnie tyle co klip i.
-     * Używane gdy user dostarcza własne nagrania TTS, żeby audio_tracks i segmenty
-     * były idealnie zsynchronizowane z whisper_words z concatenated audio.
+     * Used when the user provides their own TTS recordings, so audio_tracks and segments
+     * are perfectly synchronized with the whisper_words from the concatenated audio.
      */
     private List<EdlSegment> buildCustomTtsSegments(
             GenerationContext context,
@@ -930,7 +930,7 @@ public class EdlGeneratorService {
         List<EdlSegment> segments = new ArrayList<>();
         String callbackBase = remotionProperties.getCallbackBaseUrl();
 
-        // Zbierz unikalne VIDEO/IMAGE assety (w kolejności dodania = scene order)
+        // Collect the unique VIDEO/IMAGE assets (in insertion order = scene order)
         List<ProjectAsset> visualAssets = new ArrayList<>();
         for (ProjectAsset asset : projectAssets) {
             String typeName = asset.getType().name();
@@ -962,7 +962,7 @@ public class EdlGeneratorService {
         }
         int sceneDurationMs = scenes.stream().mapToInt(SceneAsset::getDurationMs).sum();
 
-        // Przeskaluj granice scen jeśli voice jest dłuższy
+        // Rescale the scene boundaries if the voice is longer
         if (voiceDurationMs > sceneDurationMs && sceneDurationMs > 0) {
             double scale = (double) voiceDurationMs / sceneDurationMs;
             sceneBounds = scaleSceneBounds(sceneBounds, scale, voiceDurationMs);
@@ -1042,7 +1042,7 @@ public class EdlGeneratorService {
                 effects = buildEffectsForScene(context, audioAnalysis, effectSceneIdx);
             }
 
-            // Przejście z klasyfikacji cięcia
+            // Transition from the cut classification
             EdlTransition transition = null;
             if (i < cuts.size() - 1) {
                 String transType = cut.getSuggestedTransition() != null
@@ -1131,7 +1131,7 @@ public class EdlGeneratorService {
      *   - Segment na końcu (positionPct > 0.85) → preferuj outro/cta assets
      *   - Segment w środku → preferuj content assets, unikaj intro/outro
      *   - Nigdy ten sam asset co w poprzednim segmencie (no-consecutive)
-     *   - Preferuj assety użyte NAJMNIEJ razy (equal distribution)
+     *   - Prefer the assets used the FEWEST times (equal distribution)
      */
     private ProjectAsset findIntentAwareFallbackAsset(
             double positionPct,
@@ -1199,7 +1199,7 @@ public class EdlGeneratorService {
 
     /**
      * Oblicz kumulatywne granice czasowe scen.
-     * Zwraca listę [startMs, endMs, sceneIndex] per scena.
+     * Returns a list of [startMs, endMs, sceneIndex] per scene.
      */
     private List<int[]> buildSceneBounds(List<SceneAsset> scenes) {
         List<int[]> bounds = new ArrayList<>();
@@ -1214,7 +1214,7 @@ public class EdlGeneratorService {
 
     /**
      * Skaluje granice scen proportionally do nowego totalDuration.
-     * Np. jeśli voice jest 35s a sceny sumują 25s, rozciąga granice.
+     * E.g. if the voice is 35s and the scenes sum to 25s, it stretches the boundaries.
      */
     private List<int[]> scaleSceneBounds(List<int[]> bounds, double scale, int totalDurationMs) {
         List<int[]> scaled = new ArrayList<>();
@@ -1223,7 +1223,7 @@ public class EdlGeneratorService {
             int end = (int)(b[1] * scale);
             scaled.add(new int[]{start, end, b[2]});
         }
-        // Upewnij się że ostatnia granica sięga do totalDuration
+        // Make sure the last boundary reaches totalDuration
         if (!scaled.isEmpty()) {
             scaled.get(scaled.size() - 1)[1] = totalDurationMs;
         }
@@ -1231,7 +1231,7 @@ public class EdlGeneratorService {
     }
 
     /**
-     * Znajdź scenę, w której wypada dany timestamp.
+     * Find the scene in which the given timestamp falls.
      */
     private int findSceneAtMs(int timeMs, List<int[]> sceneBounds) {
         for (int[] bound : sceneBounds) {

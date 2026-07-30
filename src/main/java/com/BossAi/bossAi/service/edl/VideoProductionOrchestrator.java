@@ -30,7 +30,7 @@ import java.util.UUID;
 /**
  * Orkiestrator nowego pipeline produkcji wideo (Timeline-First).
  *
- * Przepływ:
+ * Flow:
  *   1. Istniejacy pipeline generuje assety (script, images, video, voice, music)
  *   2. Ten orkiestrator przejmuje po fazie assetow:
  *      a) Analizuje muzyke (Python/FastAPI)
@@ -69,8 +69,8 @@ public class VideoProductionOrchestrator {
     private final com.BossAi.bossAi.repository.GenerationRepository generationRepository;
 
     /**
-     * Uruchamia pelny przepływ produkcji wideo dla istniejacego projektu.
-     * Wywoływany po zakonczeniu fazy generowania assetow przez stary pipeline.
+     * Runs the full video production flow for an existing project.
+     * Called after the old pipeline finishes the asset-generation phase.
      *
      * @param projectId ID projektu VideoProject
      * @param context   GenerationContext z zakonczonym pipeline assetow
@@ -88,7 +88,7 @@ public class VideoProductionOrchestrator {
             // 2. Pobierz assety projektu z bazy
             List<ProjectAsset> projectAssets = projectAssetService.getProjectAssetEntities(projectId);
 
-            // 2.5 NOWE: Analiza assetów + parsowanie intencji usera
+            // 2.5 NEW: Asset analysis + parsing the user's intent
             //   Te dwa kroki dają GPT "oczy" i "uszy" — zamiast ślepego montażu,
             //   system wie CO jest na assetach i CZEGO chce user.
             analyzeAssetsAndIntent(context);
@@ -97,7 +97,7 @@ public class VideoProductionOrchestrator {
             //   Jeśli UserIntentParser wykrył "w tle X, na środku Y" — generujemy X.
             //   Wynik zapisywany w SceneAsset.layerAssetIds (layerIndex → ProjectAsset UUID),
             //   a wygenerowane assety dopisywane do listy projektowej, by EdlGenerator
-            //   mógł je serwować po URL-u.
+            //   could serve them by URL.
             generateMultiLayerAssets(projectId, context, projectAssets);
 
             // 3. WARSTWA A: Analiza narracji (GPT — semantyczne segmenty + editing intent)
@@ -114,21 +114,21 @@ public class VideoProductionOrchestrator {
             EditDna editDna = editDnaGenerator.generate(context, audioAnalysis, narrationAnalysis);
 
             // 6. WARSTWA C+D: CutEngine — "mózg montażysty" (uzasadnione cięcia)
-            //    TERAZ z UserEditIntent jako źródło kandydatów na cięcia
+            //    NOW with UserEditIntent as the source of cut candidates
             List<JustifiedCut> justifiedCuts = generateJustifiedCuts(
                     context, narrationAnalysis, speechAnalysis, audioAnalysis, editDna, projectAssets);
             context.setJustifiedCuts(justifiedCuts);
 
             // 6.5 NOWE: Autonomous composition decisions
             //   Decider analizuje asset profiles + narration + cuts + DNA preset
-            //   i autonomicznie decyduje kiedy/jak nakładać warstwy (jak montażysta).
+            //   and autonomously decides when/how to layer (like an editor).
             //   Wynik: SceneAsset.layerAssetIds wypełnione → appendLayerSegments w EdlGenerator
             //   emituje multi-layer segmenty do Remotion.
             autonomousCompositionDecider.decide(context, projectAssets);
 
             // 6.6 NOWE: Overlay placement — user-provided overlay images
-            //   OverlayPlacementEngine opisuje każdy overlay (GPT Vision) i dopasowuje
-            //   go do momentu w narracji (semantyczne dopasowanie słów kluczowych).
+            //   OverlayPlacementEngine describes each overlay (GPT Vision) and matches
+            //   it to a moment in the narration (semantic keyword matching).
             //   Wynik: context.overlayPlacements → appendOverlaySegments w EdlGenerator
             //   emituje layer=2 segmenty z x/y/width/height/opacity/animationIn.
             overlayPlacementEngine.describeAndPlace(context);
@@ -185,20 +185,20 @@ public class VideoProductionOrchestrator {
     // ─── Private ──────────────────────────────────────────────────────
 
     /**
-     * NOWE: Analiza assetów + parsowanie intencji usera.
+     * NEW: Asset analysis + parsing the user's intent.
      *
      * Krok 1: AssetAnalyzer analizuje custom media → AssetProfile[]
      * Krok 2: UserIntentParser parsuje prompt → UserEditIntent
      *
-     * Oba wyniki zapisywane na GenerationContext i używane przez:
+     * Both results are stored on GenerationContext and used by:
      *   - ScriptStep (już wykonany — assety i intent są wstrzykiwane przez
      *     orchestrator PRZED production, ale ScriptStep czyta z context)
      *   - NarrationAnalyzer, EditDnaGenerator, CutEngine, EdlGenerator
      */
     private void analyzeAssetsAndIntent(GenerationContext context) {
-        // AssetAnalysisStep (pipeline krok 0) już to wykonał przed ScriptStep.
-        // Orchestrator re-analizuje tylko jeśli profile są puste (np. brak custom media
-        // w pipeline lub błąd w AssetAnalysisStep).
+        // AssetAnalysisStep (pipeline step 0) already did this before ScriptStep.
+        // The orchestrator re-analyzes only if the profiles are empty (e.g. no custom media
+        // in the pipeline or an error in AssetAnalysisStep).
         List<AssetProfile> profiles = context.getAssetProfiles() != null
                 ? context.getAssetProfiles() : List.of();
 
@@ -239,12 +239,12 @@ public class VideoProductionOrchestrator {
     /**
      * Generuje assety dla scen z multi-layer composition (layer>0).
      *
-     * UserIntentParser może wystawić SceneDirectives, jeśli user opisał warstwy
-     * (np. "w tle X, na środku Y"). Tutaj realizujemy te dyrektywy:
+     * UserIntentParser can emit SceneDirectives if the user described layers
+     * (e.g. "X in the background, Y in the center"). Here we fulfill those directives:
      *   1. LayerAssetGenerator generuje obrazy/video przez FalAI dla source=generate
      *   2. Mapujemy wygenerowane ProjectAsset na SceneAsset.layerAssetIds
-     *      (klucz = layerIndex, wartość = ProjectAsset UUID)
-     *   3. Dodajemy nowe assety do listy projektAssets in-place, żeby
+     *      (key = layerIndex, value = ProjectAsset UUID)
+     *   3. We add the new assets to the projectAssets list in-place, so
      *      EdlGenerator mógł je rozwiązać po assetId → URL
      *
      * NIE zmienia liczby scen ani głównych assetów — tylko dorzuca warstwy.
@@ -268,7 +268,7 @@ public class VideoProductionOrchestrator {
             // Dodaj wygenerowane assety do listy projektu (mutable list z DB).
             projectAssets.addAll(generated);
 
-            // Zmapuj wygenerowane assety na sceneIndex+layerIndex w kolejności
+            // Map the generated assets to sceneIndex+layerIndex in order
             // generowania (LayerAssetGenerator iteruje SceneDirectives w tej samej
             // kolejności co my — najpierw scena, potem layery z source=generate).
             int genIdx = 0;
@@ -332,7 +332,7 @@ public class VideoProductionOrchestrator {
     /**
      * WARSTWA A — Analiza narracji przez GPT.
      * Rozbija scenariusz na semantyczne segmenty z topic/energy/importance.
-     * Generuje EditingIntent (intencja montażowa).
+     * Generates the EditingIntent (editing intent).
      */
     private NarrationAnalysis analyzeNarration(GenerationContext context, AudioAnalysisResponse audioAnalysis) {
         try {
@@ -349,7 +349,7 @@ public class VideoProductionOrchestrator {
 
     /**
      * WARSTWA B — Analiza timingów mowy z WhisperX.
-     * Wykrywa pauzy, granice zdań, tempo mowy.
+     * Detects pauses, sentence boundaries, speech tempo.
      */
     private SpeechTimingAnalysis analyzeSpeechTiming(GenerationContext context) {
         if (context.getWordTimings() == null || context.getWordTimings().isEmpty()) {
@@ -371,8 +371,8 @@ public class VideoProductionOrchestrator {
 
     /**
      * WARSTWA C — CutEngine generuje uzasadnione cięcia.
-     * Łączy wszystkie warstwy (narracja + mowa + muzyka + intent)
-     * w listę cięć, z których każde ma powód.
+     * Combines all layers (narration + speech + music + intent)
+     * into a list of cuts, each with a reason.
      */
     private List<JustifiedCut> generateJustifiedCuts(
             GenerationContext context,
@@ -389,7 +389,7 @@ public class VideoProductionOrchestrator {
 
         try {
             // totalDurationMs = VOICE-OVER duration (master clock)
-            // Jeśli voice ma word timings, użyj ich jako prawdziwego czasu trwania.
+            // If the voice has word timings, use them as the true duration.
             // Scene durations (z GPT) to SZACUNEK — voice-over to PRAWDA.
             int sceneDurationMs = context.getScenes().stream()
                     .mapToInt(SceneAsset::getDurationMs)
@@ -420,7 +420,7 @@ public class VideoProductionOrchestrator {
                     ? editDna.getCutRhythm().getMaxCutMs() : 5000;
 
             // Policz unikalne assety wizualne (VIDEO + IMAGE) — CutEngine potrzebuje tego
-            // żeby nie generować więcej cięć niż assets * 2
+            // so we don't generate more cuts than assets * 2
             int availableAssetCount = 0;
             for (ProjectAsset asset : projectAssets) {
                 String typeName = asset.getType().name();

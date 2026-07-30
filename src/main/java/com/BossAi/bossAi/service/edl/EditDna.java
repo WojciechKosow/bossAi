@@ -11,7 +11,7 @@ import java.util.List;
  *
  * Generowana RAZ na projekt, PRZED generowaniem EDL.
  * Determinuje jak GPT wygeneruje EDL — jakie efekty, rytm cięć, kolor.
- * Ten sam seed = ten sam edit_dna = ten sam film (powtarzalność).
+ * The same seed = the same edit_dna = the same film (reproducibility).
  */
 @Data
 @Builder
@@ -21,7 +21,7 @@ import java.util.List;
 public class EditDna {
 
     /**
-     * Seed do reprodukowalności. Ten sam seed + te same dane = ten sam output.
+     * Seed for reproducibility. The same seed + the same data = the same output.
      */
     private long seed;
 
@@ -61,13 +61,13 @@ public class EditDna {
      * Generowana na podstawie analizy narracji + muzyki + nastroju.
      *
      * Nie jest losowa — GPT analizuje treść i wybiera konkretną strategię.
-     * Każda generacja ma inny intent = każdy film wygląda inaczej.
+     * Each generation has a different intent = each film looks different.
      */
     @JsonProperty("editing_intent")
     private EditingIntent editingIntent;
 
     /**
-     * Krótkie uzasadnienie decyzji LLM (do logów/debugowania).
+     * A short justification of the LLM's decision (for logs/debugging).
      */
     @JsonProperty("reasoning")
     private String reasoning;
@@ -82,17 +82,17 @@ public class EditDna {
     public static class CutRhythm {
 
         /**
-         * Tryb cięć:
-         * - sparse_with_bursts: długie ujęcia (2-4 beaty), potem seria szybkich na dropie
-         * - on_beat_strict: cięcie dokładnie na beat, małe humanize
-         * - off_beat_syncopated: cięcia między beatami, nieoczekiwane
-         * - breathing: cięcia na pauzy w muzyce, nie na beat
-         * - escalating: coraz szybsze cięcia w kierunku dropu
+         * Cut mode:
+         * - sparse_with_bursts: long shots (2-4 beats), then a burst of quick ones on the drop
+         * - on_beat_strict: cut exactly on the beat, little humanize
+         * - off_beat_syncopated: cuts between beats, unexpected
+         * - breathing: cuts on pauses in the music, not on the beat
+         * - escalating: progressively faster cuts toward the drop
          */
         private String mode;
 
         /**
-         * Co triggeruje burst szybkich cięć (np. "drop", "peak", "chorus").
+         * What triggers a burst of quick cuts (e.g. "drop", "peak", "chorus").
          */
         @JsonProperty("burst_trigger")
         private String burstTrigger;
@@ -104,13 +104,13 @@ public class EditDna {
         private int humanizeMs;
 
         /**
-         * Minimalny czas ujęcia w ms (nie krótsze od tego).
+         * Minimum shot duration in ms (nothing shorter than this).
          */
         @JsonProperty("min_cut_ms")
         private int minCutMs;
 
         /**
-         * Maksymalny czas ujęcia w ms (nie dłuższe od tego).
+         * Maximum shot duration in ms (nothing longer than this).
          */
         @JsonProperty("max_cut_ms")
         private int maxCutMs;
@@ -124,12 +124,12 @@ public class EditDna {
     public static class EffectPalette {
 
         /**
-         * Główny efekt projektu (używany najczęściej).
+         * The project's main effect (used most often).
          */
         private String primary;
 
         /**
-         * Drugi efekt (uzupełnienie primary).
+         * The secondary effect (complements the primary).
          */
         private String secondary;
 
@@ -140,12 +140,12 @@ public class EditDna {
         private String dropSignature;
 
         /**
-         * Efekty ZAKAZANE w tym projekcie (żeby każdy film był inny).
+         * Effects FORBIDDEN in this project (so every film is different).
          */
         private List<String> forbidden;
 
         /**
-         * Preferowana intensywność bazowa (0.0-1.0).
+         * Preferred base intensity (0.0-1.0).
          */
         @JsonProperty("base_intensity")
         private double baseIntensity;
@@ -154,10 +154,10 @@ public class EditDna {
     /**
      * Intent-Based Editing — GPT-driven editing philosophy.
      *
-     * Zamiast losowych cięć, GPT analizuje treść + muzykę i wybiera:
-     *   - intent: filozofia montażu (build_tension, contrast_shock, ...)
-     *   - pattern: rozkład cięć w czasie (slow_to_fast, wave, ...)
-     *   - arc: fazy filmu z gęstością cięć i nastrojem
+     * Instead of random cuts, GPT analyzes the content + music and picks:
+     *   - intent: the editing philosophy (build_tension, contrast_shock, ...)
+     *   - pattern: the distribution of cuts over time (slow_to_fast, wave, ...)
+     *   - arc: the film's phases with cut density and mood
      */
     @Data
     @Builder
@@ -167,14 +167,14 @@ public class EditDna {
     public static class EditingIntent {
 
         /**
-         * Główna intencja montażu:
+         * Main editing intent:
          *   build_tension | rhythmic_pulse | contrast_shock | flowing_narrative |
          *   staccato_energy | emotional_wave | reveal_punctuate
          */
         private String intent;
 
         /**
-         * Wzorzec tempa cięć:
+         * Cut tempo pattern:
          *   slow_to_fast | fast_to_slow | wave | constant_high |
          *   on_beat_consistent | long_hold_then_burst | breathing_with_pauses
          */
@@ -199,11 +199,11 @@ public class EditDna {
     public static class EditingArc {
         /** Faza: opening, buildup, middle, climax, resolution, outro */
         private String phase;
-        /** Gęstość cięć: very_low, low, medium, high, very_high */
+        /** Cut density: very_low, low, medium, high, very_high */
         private String density;
-        /** Nastrój: curious, building, intense, euphoric, reflective, urgent */
+        /** Mood: curious, building, intense, euphoric, reflective, urgent */
         private String mood;
-        /** Procent filmu, w którym zaczyna się faza (0.0-1.0) */
+        /** Percentage of the film at which the phase begins (0.0-1.0) */
         @JsonProperty("start_pct")
         private double startPct;
     }

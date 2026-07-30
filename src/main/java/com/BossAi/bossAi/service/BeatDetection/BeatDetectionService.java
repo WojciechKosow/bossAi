@@ -8,8 +8,8 @@ public interface BeatDetectionService {
     List<Integer> detectBeats(String audioPath);
 
     /**
-     * Wykrywa beaty i cachuje raw AudioAnalysisResponse w kontekscie,
-     * zeby MusicAnalysisService nie musial wolac Pythona ponownie.
+     * Detects beats and caches the raw AudioAnalysisResponse in the context,
+     * so MusicAnalysisService doesn't have to call Python again.
      */
     default List<Integer> detectBeats(String audioPath, GenerationContext context) {
         return detectBeats(audioPath);

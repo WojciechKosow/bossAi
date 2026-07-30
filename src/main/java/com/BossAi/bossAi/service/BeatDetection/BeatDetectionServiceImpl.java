@@ -15,10 +15,10 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * BeatDetectionService — wykrywa beaty w pliku audio.
+ * BeatDetectionService — detects beats in an audio file.
  *
- * Strategia: Python/librosa (AudioAnalysisClient) -> fallback FFmpeg astats.
- * Python daje prawdziwy beat map (128+ beatow), FFmpeg daje przyblizone energy peaks (czesto 0).
+ * Strategy: Python/librosa (AudioAnalysisClient) -> fallback FFmpeg astats.
+ * Python gives a real beat map (128+ beats), FFmpeg gives approximate energy peaks (often 0).
  */
 @Service
 @Slf4j
@@ -35,7 +35,7 @@ public class BeatDetectionServiceImpl implements BeatDetectionService {
     @Override
     public List<Integer> detectBeats(String audioPath, GenerationContext context) {
 
-        // 1. Proba Python/librosa (dokladny beat map)
+        // 1. Try Python/librosa (accurate beat map)
         try {
             List<Integer> pythonBeats = detectViaPython(audioPath, context);
             if (pythonBeats != null && !pythonBeats.isEmpty()) {
@@ -46,21 +46,21 @@ public class BeatDetectionServiceImpl implements BeatDetectionService {
             log.warn("[BeatDetection] Python failed — fallback to FFmpeg: {}", e.getMessage());
         }
 
-        // 2. Fallback: stary FFmpeg astats
+        // 2. Fallback: the old FFmpeg astats
         log.info("[BeatDetection] FFmpeg fallback");
         return detectViaFfmpeg(audioPath);
     }
 
     /**
-     * Wykrywa beaty przez Python/FastAPI microservice (librosa beat_track).
-     * Cachuje AudioAnalysisResponse w kontekscie (jesli dostepny),
-     * zeby MusicAnalysisService nie musial wolac Pythona ponownie.
+     * Detects beats via the Python/FastAPI microservice (librosa beat_track).
+     * Caches the AudioAnalysisResponse in the context (if available),
+     * so MusicAnalysisService doesn't have to call Python again.
      */
     private List<Integer> detectViaPython(String audioPath, GenerationContext context) throws Exception {
         Path path = Path.of(audioPath);
         if (!Files.exists(path)) return null;
 
-        // Sprawdz cache w kontekscie
+        // Check the cache in the context
         AudioAnalysisResponse response = (context != null) ? context.getCachedAudioAnalysis() : null;
 
         if (response == null) {
@@ -68,7 +68,7 @@ public class BeatDetectionServiceImpl implements BeatDetectionService {
             String filename = path.getFileName().toString();
             response = audioAnalysisClient.analyzeAudio(audioBytes, filename);
 
-            // Cachuj w kontekscie
+            // Cache it in the context
             if (context != null && response != null) {
                 context.setCachedAudioAnalysis(response);
             }
@@ -80,7 +80,7 @@ public class BeatDetectionServiceImpl implements BeatDetectionService {
             return null;
         }
 
-        // Konwertuj List<Double> (sekundy) -> List<Integer> (ms)
+        // Convert List<Double> (seconds) -> List<Integer> (ms)
         List<Integer> beats = new ArrayList<>();
         for (Double beatTimeSec : response.beats()) {
             beats.add((int) (beatTimeSec * 1000));
@@ -91,7 +91,7 @@ public class BeatDetectionServiceImpl implements BeatDetectionService {
     }
 
     /**
-     * Fallback: stary FFmpeg astats (czesto zwraca 0 beatow).
+     * Fallback: the old FFmpeg astats (often returns 0 beats).
      */
     private List<Integer> detectViaFfmpeg(String audioPath) {
         List<Integer> beats = new ArrayList<>();

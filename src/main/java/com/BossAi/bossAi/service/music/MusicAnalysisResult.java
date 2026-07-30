@@ -5,7 +5,7 @@ import java.util.List;
 /**
  * Wynik analizy struktury muzyki — energy profile, segmenty (drop, build, peak, quiet).
  *
- * Używany przez MusicAlignmentService do inteligentnego dopasowania momentu muzyki
+ * Used by MusicAlignmentService to intelligently align the music moment
  * do kontekstu wideo (hook → drop, narracja → quiet, CTA → peak).
  */
 public record MusicAnalysisResult(
@@ -22,10 +22,10 @@ public record MusicAnalysisResult(
         /** Wykryte segmenty muzyczne (drop, build-up, peak, quiet) */
         List<MusicSegment> segments,
 
-        /** Średnia energia całego utworu */
+        /** Average energy of the whole track */
         double averageEnergy,
 
-        /** Tempo w BPM (przybliżone z beat detection) */
+        /** Tempo in BPM (approximate, from beat detection) */
         int estimatedBpm
 
 ) {
@@ -37,7 +37,7 @@ public record MusicAnalysisResult(
             int startMs,
             int endMs,
             SegmentType type,
-            /** Średnia energia segmentu 0.0-1.0 */
+            /** Average segment energy 0.0-1.0 */
             double energy
     ) {}
 

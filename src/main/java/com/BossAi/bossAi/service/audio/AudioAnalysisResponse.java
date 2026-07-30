@@ -6,8 +6,8 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import java.util.List;
 
 /**
- * DTO mapujący response z mikroserwisu audio-analysis-service (Python/FastAPI).
- * Używany przez EdlGeneratorService do przekazania danych GPT.
+ * DTO mapping the response from the audio-analysis-service microservice (Python/FastAPI).
+ * Used by EdlGeneratorService to pass the data to GPT.
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public record AudioAnalysisResponse(

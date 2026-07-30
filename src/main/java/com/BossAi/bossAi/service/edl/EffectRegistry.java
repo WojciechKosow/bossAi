@@ -79,7 +79,7 @@ public class EffectRegistry {
 
     /**
      * Efekty aktualnie zaimplementowane w Remotion renderer.
-     * Aby dodać nowy efekt: zaimplementuj komponent w remotion-branch, dodaj tu.
+     * To add a new effect: implement the component in the remotion-branch, add it here.
      */
     private static final Set<String> REMOTION_EFFECTS = Set.of(
             ZOOM_IN, ZOOM_OUT, FAST_ZOOM,
@@ -92,7 +92,7 @@ public class EffectRegistry {
     );
 
     /**
-     * Fallback mapping dla efektów jeszcze nie zaimplementowanych w Remotion.
+     * Fallback mapping for effects not yet implemented in Remotion.
      * Aktualnie pusty — wszystkie efekty są obsługiwane.
      */
     private static final Map<String, String> REMOTION_FALLBACKS = Map.of();
@@ -154,7 +154,7 @@ public class EffectRegistry {
         return TRANSITION_DEFAULTS.containsKey(transitionType);
     }
 
-    /** True jeśli Remotion renderer aktualnie obsługuje ten efekt. */
+    /** True if the Remotion renderer currently supports this effect. */
     public boolean isRemotionSupportedEffect(String effectType) {
         return REMOTION_EFFECTS.contains(effectType);
     }

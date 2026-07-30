@@ -97,7 +97,7 @@ public class AssetBridgeService {
     public UUID bridgeToVideoProject(GenerationContext context, Generation generation, String email) {
         log.info("[AssetBridge] Bridging generation {} to VideoProject", context.getGenerationId());
 
-        // 1. Utwórz VideoProject
+        // 1. Create the VideoProject
         VideoProject project = videoProjectService.createProject(
                 email,
                 context.getPrompt() != null
@@ -203,7 +203,7 @@ public class AssetBridgeService {
             );
         }
 
-        // 5. Rejestruj muzykę
+        // 5. Register the music
         if (context.getMusicLocalPath() != null) {
             ProjectAsset musicAsset = projectAssetService.createAsset(
                     projectId,

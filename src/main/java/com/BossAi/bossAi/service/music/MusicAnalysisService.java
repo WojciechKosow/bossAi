@@ -18,7 +18,7 @@ import java.util.List;
  *
  * Strategia: najpierw Python/librosa (AudioAnalysisClient), fallback na FFmpeg astats.
  * Python daje: prawdziwe BPM, beat map, energy curve, mood, sekcje.
- * FFmpeg daje: przybliżony energy profile (często pusty).
+ * FFmpeg gives: an approximate energy profile (often empty).
  */
 @Slf4j
 @Service
@@ -31,7 +31,7 @@ public class MusicAnalysisService {
     private static final int WINDOW_MS = 500;
 
     /**
-     * Analizuje plik audio i zwraca pełny profil energii + segmenty.
+     * Analyzes the audio file and returns a full energy profile + segments.
      * Strategia: Python/librosa → fallback FFmpeg astats.
      */
     public MusicAnalysisResult analyze(String audioPath) {
@@ -43,9 +43,9 @@ public class MusicAnalysisService {
      * z kontekstu (ustawiony wczesniej przez BeatDetectionServiceImpl).
      */
     public MusicAnalysisResult analyze(String audioPath, AudioAnalysisResponse cachedResponse) {
-        log.info("[MusicAnalysis] Analizuję: {}", audioPath);
+        log.info("[MusicAnalysis] Analyzing: {}", audioPath);
 
-        // Próbuj Python/librosa (dokładne BPM, beat map, energy, sekcje)
+        // Try Python/librosa (accurate BPM, beat map, energy, sections)
         try {
             MusicAnalysisResult pythonResult = analyzeViaPython(audioPath, cachedResponse);
             if (pythonResult != null) {
@@ -158,7 +158,7 @@ public class MusicAnalysisService {
             return new MusicAnalysisResult(0, List.of(), List.of(), 0.0, 120);
         }
 
-        // Normalizuj energię do 0.0-1.0
+        // Normalize energy to 0.0-1.0
         List<Double> normalizedProfile = normalizeEnergy(rawEnergy);
 
         int totalDurationMs = rawEnergy.isEmpty() ? 0
@@ -170,7 +170,7 @@ public class MusicAnalysisService {
         // Wykryj segmenty
         List<MusicAnalysisResult.MusicSegment> segments = detectSegments(normalizedProfile);
 
-        // Przybliżony BPM z beat spacing
+        // Approximate BPM from beat spacing
         int bpm = estimateBpm(rawEnergy);
 
         log.info("[MusicAnalysis] DONE — duration={}ms, {} windows, {} segmentów, avgEnergy={}, bpm={}",
@@ -194,7 +194,7 @@ public class MusicAnalysisService {
 
     /**
      * Uruchamia FFmpeg astats i zbiera RMS energy per okno czasowe.
-     * astats=metadata=1:reset=1 raportuje statystyki co ramkę audio.
+     * astats=metadata=1:reset=1 reports statistics for every audio frame.
      * Grupujemy po WINDOW_MS.
      */
     private List<EnergyPoint> extractEnergyProfile(String audioPath) {
@@ -278,11 +278,11 @@ public class MusicAnalysisService {
      * Mapujemy: -60dB → 0.0, -5dB → 1.0
      */
     private List<Double> normalizeEnergy(List<EnergyPoint> raw) {
-        // Znajdź zakres
+        // Find the range
         double minDb = raw.stream().mapToDouble(p -> p.rmsDb).min().orElse(-60);
         double maxDb = raw.stream().mapToDouble(p -> p.rmsDb).max().orElse(0);
 
-        // Minimalna rozpiętość
+        // Minimum spread
         if (maxDb - minDb < 5) {
             minDb = maxDb - 30;
         }
@@ -304,9 +304,9 @@ public class MusicAnalysisService {
      * Wykrywa segmenty muzyczne na podstawie znormalizowanego profilu energii.
      *
      * Algorytm:
-     *   1. Oblicz percentyle (25%, 75%) dla progów quiet/peak
+     *   1. Compute percentiles (25%, 75%) for the quiet/peak thresholds
      *   2. Skanuj profil okno po oknie, klasyfikuj jako: DROP, BUILD_UP, PEAK, QUIET, NORMAL
-     *   3. Łącz sąsiednie okna tego samego typu w segmenty
+     *   3. Merge adjacent windows of the same type into segments
      */
     private List<MusicAnalysisResult.MusicSegment> detectSegments(List<Double> profile) {
         if (profile.size() < 3) return List.of();
@@ -317,7 +317,7 @@ public class MusicAnalysisService {
         double p25 = sorted.get(sorted.size() / 4);
         double p75 = sorted.get(sorted.size() * 3 / 4);
 
-        // Klasyfikuj każde okno
+        // Classify each window
         List<MusicAnalysisResult.SegmentType> windowTypes = new ArrayList<>();
 
         for (int i = 0; i < profile.size(); i++) {
@@ -326,10 +326,10 @@ public class MusicAnalysisService {
             double delta = energy - prev;
 
             if (delta > 0.25 && energy > p75) {
-                // Nagły skok + wysoka energia = DROP
+                // Sudden jump + high energy = DROP
                 windowTypes.add(MusicAnalysisResult.SegmentType.DROP);
             } else if (i >= 2 && isRising(profile, i, 3) && energy < p75) {
-                // Rosnąca energia przez 3+ okna, jeszcze nie peak = BUILD_UP
+                // Rising energy over 3+ windows, not yet peak = BUILD_UP
                 windowTypes.add(MusicAnalysisResult.SegmentType.BUILD_UP);
             } else if (energy >= p75) {
                 windowTypes.add(MusicAnalysisResult.SegmentType.PEAK);
@@ -340,12 +340,12 @@ public class MusicAnalysisService {
             }
         }
 
-        // Łącz sąsiednie okna tego samego typu w segmenty
+        // Merge adjacent windows of the same type into segments
         return mergeWindows(windowTypes, profile);
     }
 
     /**
-     * Sprawdza czy energia rośnie przez ostatnie N okien.
+     * Checks whether energy is rising over the last N windows.
      */
     private boolean isRising(List<Double> profile, int currentIdx, int lookback) {
         if (currentIdx < lookback) return false;
@@ -356,9 +356,9 @@ public class MusicAnalysisService {
     }
 
     /**
-     * Scala sąsiednie okna tego samego typu w segmenty.
+     * Merges adjacent windows of the same type into segments.
      * Segmenty krótsze niż 2 okna (1s) → NORMAL (za krótkie żeby być znaczące).
-     * Wyjątek: DROP może trwać 1 okno.
+     * Exception: a DROP may last 1 window.
      */
     private List<MusicAnalysisResult.MusicSegment> mergeWindows(
             List<MusicAnalysisResult.SegmentType> types,
@@ -380,7 +380,7 @@ public class MusicAnalysisService {
             int minWindows = (type == MusicAnalysisResult.SegmentType.DROP) ? 1 : 2;
 
             if (windowCount >= minWindows) {
-                // Oblicz średnią energię segmentu
+                // Compute the average segment energy
                 double avgEnergy = 0;
                 for (int i = start; i < end; i++) {
                     avgEnergy += profile.get(i);
@@ -406,10 +406,10 @@ public class MusicAnalysisService {
     // =========================================================================
 
     /**
-     * Przybliżony BPM z odstępów między punktami wysokiej energii.
+     * Approximate BPM from the intervals between high-energy points.
      */
     private int estimateBpm(List<EnergyPoint> raw) {
-        // Znajdź punkty > -15dB (wyraźne beaty)
+        // Find points > -15dB (clear beats)
         List<Integer> beatTimes = new ArrayList<>();
         for (EnergyPoint p : raw) {
             if (p.rmsDb > -15) {
@@ -421,7 +421,7 @@ public class MusicAnalysisService {
 
         if (beatTimes.size() < 4) return 120; // fallback
 
-        // Średni odstęp między beatami
+        // Average interval between beats
         List<Integer> intervals = new ArrayList<>();
         for (int i = 1; i < beatTimes.size(); i++) {
             int interval = beatTimes.get(i) - beatTimes.get(i - 1);
