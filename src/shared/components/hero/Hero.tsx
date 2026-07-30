@@ -86,8 +86,7 @@ const Hero = () => {
               className="text-lg md:text-xl text-muted-foreground max-w-[480px] leading-relaxed"
             >
               Drop your assets, describe your vision &mdash; Toucan handles the
-              script, voiceover, cuts and music. From prompt to final video in
-              seconds.
+              script, cuts and music. From prompt to final video in seconds.
             </motion.p>
 
             <motion.div
@@ -132,7 +131,7 @@ const Hero = () => {
               className="flex flex-wrap items-center gap-5 text-sm text-muted-foreground"
             >
               {[
-                { icon: Sparkles, label: "AI script & voiceover" },
+                { icon: Sparkles, label: "AI-written scripts" },
                 { icon: Zap, label: "Auto-cut engine" },
                 { icon: Music, label: "Beat-synced music" },
               ].map(({ icon: Icon, label }) => (

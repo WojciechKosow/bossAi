@@ -34,10 +34,10 @@ const PublicNavbar = () => {
             </a>
           )}
           <a
-            href={BETA_MODE ? "#waitlist" : "#testimonials"}
+            href={BETA_MODE ? "#waitlist" : "#workflow"}
             className="hover:text-foreground transition-colors duration-150 font-medium"
           >
-            {BETA_MODE ? "Join beta" : "Testimonials"}
+            {BETA_MODE ? "Join beta" : "How it works"}
           </a>
         </div>
 

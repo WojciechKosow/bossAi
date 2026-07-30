@@ -24,8 +24,8 @@ const Footer = () => {
                 { label: "Features", href: "#features" },
                 ...(!BETA_MODE ? [{ label: "Pricing", href: "#pricing" }] : []),
                 {
-                  label: BETA_MODE ? "Join Beta" : "Testimonials",
-                  href: BETA_MODE ? "#waitlist" : "#testimonials",
+                  label: BETA_MODE ? "Join Beta" : "How it works",
+                  href: BETA_MODE ? "#waitlist" : "#workflow",
                 },
               ]}
             />
@@ -48,7 +48,7 @@ const Footer = () => {
 
         <div className="mt-12 pt-6 border-t border-border/50 flex flex-col sm:flex-row justify-between gap-4 text-[12px] text-muted-foreground">
           <p>© {new Date().getFullYear()} Toucan Motion. All rights reserved.</p>
-          <p>Made in Poland 🇵🇱</p>
+          <p>v0.1 · Early access</p>
         </div>
       </div>
     </footer>
