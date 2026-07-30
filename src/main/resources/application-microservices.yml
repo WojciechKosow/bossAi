@@ -13,7 +13,7 @@ dna:
 
 gif:
   enabled: true
-  # Giphy SDK API key (bezpłatny): https://developers.giphy.com/dashboard/ → Create App
+  # Giphy SDK API key (free): https://developers.giphy.com/dashboard/ → Create App
   api-key: ${GIPHY_API_KEY:}
   search-limit: 5
   rating: g

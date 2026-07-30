@@ -1,44 +1,44 @@
 package com.BossAi.bossAi.service.generation;
 
 /**
- * Nazwy kroków pipeline — używane w GenerationContext.currentStep
- * oraz przez ProgressService do SSE stream dla frontendu.
+ * Pipeline step names — used in GenerationContext.currentStep
+ * and by ProgressService for the SSE stream to the frontend.
  *
- * Kolejność odzwierciedla faktyczną sekwencję wykonania:
+ * The order reflects the actual execution sequence:
  *
- *   SCRIPT → IMAGE → [VOICE + VIDEO równolegle] → MUSIC → RENDER → DONE
+ *   SCRIPT → IMAGE → [VOICE + VIDEO in parallel] → MUSIC → RENDER → DONE
  */
 public enum GenerationStepName {
 
-    /** Inicjalizacja — walidacja requestu, rezerwacja kredytów */
-    INITIALIZING("Przygotowuję generację...", 5),
+    /** Initialization — request validation, credit reservation */
+    INITIALIZING("Preparing generation...", 5),
 
-    /** GPT-4o generuje scenariusz JSON */
-    SCRIPT("Generuję scenariusz reklamy...", 15),
+    /** GPT-4o generates the script JSON */
+    SCRIPT("Generating ad script...", 15),
 
-    /** fal.ai generuje obrazy per scena */
-    IMAGE("Generuję obrazy scen...", 30),
+    /** fal.ai generates images per scene */
+    IMAGE("Generating scene images...", 30),
 
-    /** OpenAI TTS generuje voice-over z narracji */
-    VOICE("Generuję voice-over...", 50),
+    /** OpenAI TTS generates the voice-over from the narration */
+    VOICE("Generating voice-over...", 50),
 
-    /** fal.ai animuje obrazy (Kling O1) */
-    VIDEO("Generuję wideo scen...", 70),
+    /** fal.ai animates the images (Kling O1) */
+    VIDEO("Generating scene videos...", 70),
 
-    /** Pobieranie/kopiowanie pliku muzycznego usera */
-    MUSIC("Przygotowuję muzykę...", 80),
+    /** Downloading/copying the user's music file */
+    MUSIC("Preparing music...", 80),
 
-    /** FFmpeg scala wszystkie assety w finalny MP4 */
-    RENDER("Montuję finalny film...", 90),
+    /** FFmpeg assembles all assets into the final MP4 */
+    RENDER("Editing the final video...", 90),
 
-    /** Zapis do storage, zapis assetów do bazy */
-    SAVING("Zapisuję wyniki...", 97),
+    /** Save to storage, save assets to the database */
+    SAVING("Saving results...", 97),
 
-    /** Pipeline zakończony sukcesem */
-    DONE("Gotowe! Twoja reklama jest gotowa.", 100),
+    /** Pipeline finished successfully */
+    DONE("Done! Your ad is ready.", 100),
 
-    /** Pipeline zakończony błędem */
-    FAILED("Generacja nieudana.", 0);
+    /** Pipeline finished with an error */
+    FAILED("Generation failed.", 0);
 
     private final String displayMessage;
     private final int progressPercent;

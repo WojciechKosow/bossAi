@@ -10,12 +10,12 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * Wynik POST /api/generations/analyze-prompt — propozycja scen po dry-run
- * UserIntentParser + ScriptStep. Klient (lub frontend) może na tej podstawie
- * pokazać userowi scenariusz i poprosić o przypisanie assetów do scen
- * (Phase 2 z CLAUDE.md).
+ * Result of POST /api/generations/analyze-prompt — a scene proposal after a
+ * dry-run of UserIntentParser + ScriptStep. The client (or frontend) can use it
+ * to show the user the script and ask them to assign assets to scenes
+ * (Phase 2 from CLAUDE.md).
  *
- * NIE tworzy Generation ani VideoProject — żaden stan nie jest persystowany.
+ * Does NOT create a Generation or VideoProject — no state is persisted.
  */
 @Data
 @Builder
@@ -43,15 +43,15 @@ public class PromptAnalysisResponse {
         private String subtitleText;
         private int durationMs;
 
-        /** Z UserEditIntent.placement (jeśli user opisał tę scenę). */
+        /** From UserEditIntent.placement (if the user described this scene). */
         private String suggestedRole;
         private String suggestedMood;
         private String sceneDirection;
 
-        /** Pre-suggested asset (asset, którego user zaproponował dla tej sceny w prompcie). */
+        /** Pre-suggested asset (the asset the user proposed for this scene in the prompt). */
         private UUID suggestedAssetId;
 
-        /** Multi-layer composition (Phase 1) — jeśli user opisał warstwy. */
+        /** Multi-layer composition (Phase 1) — if the user described layers. */
         private List<LayerPreview> layers;
     }
 

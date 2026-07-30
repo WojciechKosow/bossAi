@@ -36,13 +36,13 @@ public class ProjectAsset {
     private AssetStatus status;
 
     /**
-     * URL do pliku w storage (S3, Cloudflare, local).
+     * URL of the file in storage (S3, Cloudflare, local).
      */
     private String storageUrl;
 
     /**
-     * URL do miniatury (thumbnail).
-     * Generowany przy tworzeniu assetu — FFmpeg (1st frame dla wideo) lub resize (obrazy).
+     * URL of the thumbnail.
+     * Generated when the asset is created — FFmpeg (1st frame for video) or resize (images).
      */
     private String thumbnailUrl;
 
@@ -50,7 +50,7 @@ public class ProjectAsset {
 
     private String mimeType;
 
-    // --- Metadane ---
+    // --- Metadata ---
 
     private Double durationSeconds;
 
@@ -61,15 +61,15 @@ public class ProjectAsset {
     private Long fileSizeBytes;
 
     /**
-     * Prompt użyty do wygenerowania assetu (FalAI image/video).
-     * Null dla assetów uploadowanych przez usera.
+     * Prompt used to generate the asset (FalAI image/video).
+     * Null for assets uploaded by the user.
      */
     @Column(columnDefinition = "TEXT")
     private String prompt;
 
     /**
-     * Dodatkowe metadane w formacie JSON.
-     * Przykłady:
+     * Additional metadata in JSON format.
+     * Examples:
      * - Audio asset: audio analysis JSON (beats, energy, mood, sections)
      * - Voice asset: Whisper word-level timestamps JSON
      * - Video asset: codec info, fps

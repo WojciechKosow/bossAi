@@ -13,10 +13,10 @@ import java.util.UUID;
 /**
  * Body POST /api/generations/analyze-prompt.
  *
- * Dry-run analizy prompta: backend uruchamia UserIntentParser + ScriptStep
- * bez tworzenia Generation/VideoProject i zwraca proponowany breakdown scen,
- * żeby user mógł jeszcze przed generacją zobaczyć/zaakceptować scenariusz
- * i przypisać assety do konkretnych scen (Phase 2 z CLAUDE.md).
+ * Dry-run prompt analysis: the backend runs UserIntentParser + ScriptStep
+ * without creating a Generation/VideoProject and returns the proposed scene
+ * breakdown, so the user can view/approve the script before generation
+ * and assign assets to specific scenes (Phase 2 from CLAUDE.md).
  */
 @Data
 @NoArgsConstructor
@@ -30,16 +30,16 @@ public class PromptAnalysisRequest {
     private VideoStyle style;
 
     /**
-     * Custom media assets (images/videos) — używane do określenia liczby scen
-     * (CLAUDE.md: scene count == media.size()) oraz wzbogacenia promptu o
-     * AssetProfiles. Opcjonalne — bez nich preview używa AI-generated scen.
+     * Custom media assets (images/videos) — used to determine the scene count
+     * (CLAUDE.md: scene count == media.size()) and to enrich the prompt with
+     * AssetProfiles. Optional — without them the preview uses AI-generated scenes.
      */
     private List<UUID> customMediaAssetIds;
 
     /**
-     * Czy uruchomić AssetAnalyzer (vision/text profile per asset). Wolniejsze
-     * (dodatkowe GPT calle), ale daje bogatszy preview. Domyślnie false dla
-     * szybkości — frontend może przełączyć w trybie "advanced preview".
+     * Whether to run the AssetAnalyzer (vision/text profile per asset). Slower
+     * (extra GPT calls), but gives a richer preview. Defaults to false for
+     * speed — the frontend can toggle it on in "advanced preview" mode.
      */
     private boolean analyzeAssets = false;
 }

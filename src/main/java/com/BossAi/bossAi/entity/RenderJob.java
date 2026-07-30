@@ -24,7 +24,7 @@ public class RenderJob {
     private VideoProject project;
 
     /**
-     * Wersja EDL użyta do tego renderingu.
+     * EDL version used for this rendering.
      */
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "edl_version_id", nullable = false)
@@ -35,17 +35,17 @@ public class RenderJob {
     private RenderStatus status;
 
     /**
-     * Postęp renderingu 0.0 - 1.0.
+     * Rendering progress 0.0 - 1.0.
      */
     private Double progress;
 
     /**
-     * URL do wyrenderowanego pliku MP4 (po zakończeniu).
+     * URL of the rendered MP4 file (once finished).
      */
     private String outputUrl;
 
     /**
-     * Jakość renderingu (np. "draft", "high", "4k").
+     * Rendering quality (e.g. "draft", "high", "4k").
      */
     private String quality;
 

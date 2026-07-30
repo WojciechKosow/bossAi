@@ -5,7 +5,7 @@ import lombok.Setter;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 /**
- * Konfiguracja połączenia z mikroserwisem audio-analysis-service (Python/FastAPI).
+ * Configuration for the connection to the audio-analysis-service microservice (Python/FastAPI).
  * Prefix: audio-analysis
  */
 @Getter

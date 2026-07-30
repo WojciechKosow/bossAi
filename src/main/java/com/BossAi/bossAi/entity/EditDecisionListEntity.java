@@ -24,16 +24,16 @@ public class EditDecisionListEntity {
     private VideoProject project;
 
     /**
-     * Numer wersji EDL w ramach projektu.
-     * Każda generacja/modyfikacja = nowa wersja (immutable per wersja).
+     * EDL version number within the project.
+     * Each generation/modification = a new version (immutable per version).
      */
     @Column(nullable = false)
     private Integer version;
 
     /**
-     * Pełny EDL JSON — ten sam schemat co w Fazie 2.
-     * Zawiera timeline segments, text overlays, subtitle config, global effects.
-     * Segmenty referencują assety przez ProjectAsset.id (asset_id).
+     * Full EDL JSON — the same schema as in Phase 2.
+     * Contains timeline segments, text overlays, subtitle config, global effects.
+     * Segments reference assets via ProjectAsset.id (asset_id).
      */
     @Column(columnDefinition = "TEXT", nullable = false)
     private String edlJson;

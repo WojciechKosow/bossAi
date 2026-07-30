@@ -10,8 +10,8 @@ import lombok.NoArgsConstructor;
 import java.util.List;
 
 /**
- * Segment na timeline — pojedynczy klip wideo/obraz.
- * Referencjonuje asset po UUID (nie po sciezce pliku).
+ * Segment on the timeline — a single video/image clip.
+ * References the asset by UUID (not by file path).
  */
 @Data
 @Builder
@@ -26,7 +26,7 @@ public class EdlSegment {
     @JsonProperty("asset_id")
     private String assetId;
 
-    /** URL do pliku media — Remotion pobiera asset z tego URL */
+    /** URL of the media file — Remotion fetches the asset from this URL */
     @JsonProperty("asset_url")
     private String assetUrl;
 

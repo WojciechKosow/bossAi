@@ -36,16 +36,16 @@ public class VideoProject {
     private VideoStyle style;
 
     /**
-     * Referencja do aktualnej (najnowszej) wersji EDL.
-     * Null jeśli EDL jeszcze nie został wygenerowany.
+     * Reference to the current (latest) EDL version.
+     * Null if the EDL has not been generated yet.
      */
     @OneToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "current_edl_id")
     private EditDecisionListEntity currentEdl;
 
     /**
-     * Powiązanie z istniejącą encją Generation (dla kompatybilności wstecznej).
-     * Null jeśli projekt nie został jeszcze uruchomiony w pipeline.
+     * Link to the existing Generation entity (for backwards compatibility).
+     * Null if the project has not been run through the pipeline yet.
      */
     @OneToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "generation_id")

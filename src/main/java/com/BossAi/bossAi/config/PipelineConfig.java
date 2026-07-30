@@ -24,16 +24,16 @@ import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
 
 /**
- * PipelineConfig — definicja pipeline TikTok Ad.
+ * PipelineConfig — definition of the TikTok Ad pipeline.
  *
- * Stub mode: pipeline.stub=true w application.properties
- *   → zero wywołań OpenAI/fal.ai
- *   → fake ScriptResult z 2 scenami
- *   → kopiuje stub_video.mp4 + stub_voice.mp3 z resources
- *   → prawdziwy FFmpeg RenderStep (testujemy montaż end-to-end)
+ * Stub mode: pipeline.stub=true in application.properties
+ *   → zero OpenAI/fal.ai calls
+ *   → fake ScriptResult with 2 scenes
+ *   → copies stub_video.mp4 + stub_voice.mp3 from resources
+ *   → real FFmpeg RenderStep (tests the end-to-end editing)
  *
- * Produkcja: pipeline.stub=false (domyślnie)
- *   → pełny pipeline: Script → Image → Voice+Video → Music → Render
+ * Production: pipeline.stub=false (default)
+ *   → full pipeline: Script → Image → Voice+Video → Music → Render
  */
 @Slf4j
 @Configuration
@@ -78,7 +78,7 @@ public class PipelineConfig {
     }
 
     // =========================================================================
-    // ABSTRAKCJA — wspólny interfejs pipeline
+    // ABSTRACTION — shared pipeline interface
     // =========================================================================
 
     public abstract static class TikTokAdPipeline {
@@ -120,7 +120,7 @@ public class PipelineConfig {
         @Override
         public void execute(GenerationContext context, StepCallback callback) throws Exception {
 
-            // 0 — ASSET ANALYSIS (przed ScriptStep — daje GPT "oczy" na assety)
+            // 0 — ASSET ANALYSIS (before ScriptStep — gives GPT "eyes" on the assets)
             log.info("[Pipeline {}] → ASSET ANALYSIS", context.getGenerationId());
             callback.onStep(GenerationStepName.SCRIPT);
             assetAnalysisStep.execute(context);
@@ -135,7 +135,7 @@ public class PipelineConfig {
             callback.onStep(GenerationStepName.SCRIPT);
             directorStep.execute(context);
 
-            // 1.6 — ASSET REUSE (po ScriptStep — potrzebuje scen z imagePrompt)
+            // 1.6 — ASSET REUSE (after ScriptStep — needs scenes with imagePrompt)
             log.info("[Pipeline {}] → ASSET REUSE", context.getGenerationId());
             assetReuseStep.execute(context);
 
@@ -144,8 +144,8 @@ public class PipelineConfig {
             callback.onStep(GenerationStepName.IMAGE);
             imageStep.execute(context);
 
-            // 3 — VOICE + VIDEO równolegle
-            log.info("[Pipeline {}] → VOICE + VIDEO (równolegle)", context.getGenerationId());
+            // 3 — VOICE + VIDEO in parallel
+            log.info("[Pipeline {}] → VOICE + VIDEO (in parallel)", context.getGenerationId());
             callback.onStep(GenerationStepName.VOICE);
 
             CompletableFuture<Void> voiceFuture = CompletableFuture.runAsync(() -> {
@@ -208,20 +208,20 @@ public class PipelineConfig {
             Thread.sleep(300);
 
 //            ScriptResult fakeScript = new ScriptResult(
-//                    "Zmęczony szukaniem idealnych sneakersów? Nike Air Max to Twój wybór. Kup teraz!",
+//                    "Tired of searching for the perfect sneakers? Nike Air Max is your pick. Buy now!",
 //                    List.of(
 //                            new ScriptResult.SceneScript(0,
 //                                    "Nike Air Max sneakers on white background, 9:16 vertical",
 //                                    "slow zoom in", 5000,
-//                                    "Zmęczony szukaniem?"),
+//                                    "Tired of searching?"),
 //                            new ScriptResult.SceneScript(1,
 //                                    "Young person wearing Nike sneakers, city, energy, 9:16 vertical",
 //                                    "dynamic pan right", 5000,
-//                                    "Nike Air Max — Twój wybór!")
+//                                    "Nike Air Max — your pick!")
 //                    ),
 //                    "energetic", "young adults 18-30",
-//                    "Zmęczony szukaniem idealnych sneakersów?",
-//                    "Kup teraz!", 10000
+//                    "Tired of searching for the perfect sneakers?",
+//                    "Buy now!", 10000
 //            );
 
 //            context.setScript(fakeScript);
@@ -229,16 +229,16 @@ public class PipelineConfig {
 //                    SceneAsset.builder().index(0)
 //                            .imagePrompt(fakeScript.scenes().get(0).imagePrompt())
 //                            .motionPrompt(fakeScript.scenes().get(0).motionPrompt())
-//                            .durationMs(5000).subtitleText("Zmęczony szukaniem?").build(),
+//                            .durationMs(5000).subtitleText("Tired of searching?").build(),
 //                    SceneAsset.builder().index(1)
 //                             .imagePrompt(fakeScript.scenes().get(1).imagePrompt())
 //                            .motionPrompt(fakeScript.scenes().get(1).motionPrompt())
-//                            .durationMs(5000).subtitleText("Nike Air Max — Twój wybór!").build()
+//                            .durationMs(5000).subtitleText("Nike Air Max — your pick!").build()
 //            ));
 
-            // --- IMAGE (pomiń — stub video nie potrzebuje obrazów) ---
+            // --- IMAGE (skip — stub video doesn't need images) ---
             callback.onStep(GenerationStepName.IMAGE);
-            log.info("[StubPipeline] → IMAGE (pominięty w stub)");
+            log.info("[StubPipeline] → IMAGE (skipped in stub)");
             Thread.sleep(200);
 
             // --- VOICE (stub MP3) ---
@@ -248,7 +248,7 @@ public class PipelineConfig {
             copyStubResource("stub/stub_voice.mp3", voicePath);
             context.setVoiceLocalPath(voicePath.toString());
 
-            // --- VIDEO (stub MP4 per scena) ---
+            // --- VIDEO (stub MP4 per scene) ---
             callback.onStep(GenerationStepName.VIDEO);
             log.info("[StubPipeline] → VIDEO (stub)");
             for (SceneAsset scene : context.getScenes()) {
@@ -260,12 +260,12 @@ public class PipelineConfig {
 
             // --- MUSIC ---
             callback.onStep(GenerationStepName.MUSIC);
-            log.info("[StubPipeline] → MUSIC (brak w stub)");
+            log.info("[StubPipeline] → MUSIC (none in stub)");
             context.setMusicLocalPath(null);
 
-            // --- RENDER (prawdziwy FFmpeg!) ---
+            // --- RENDER (real FFmpeg!) ---
             callback.onStep(GenerationStepName.RENDER);
-            log.info("[StubPipeline] → RENDER (prawdziwy FFmpeg)");
+            log.info("[StubPipeline] → RENDER (real FFmpeg)");
             renderStep.execute(context);
 
             log.warn("[StubPipeline] DONE — finalUrl: {}", context.getFinalVideoUrl());
@@ -275,20 +275,20 @@ public class PipelineConfig {
             try (InputStream is = getClass().getClassLoader().getResourceAsStream(resourcePath)) {
                 if (is == null) {
                     throw new IllegalStateException(
-                            "Brak pliku: src/main/resources/" + resourcePath + "\n" +
-                                    "Wygeneruj:\n" +
+                            "Missing file: src/main/resources/" + resourcePath + "\n" +
+                                    "Generate it with:\n" +
                                     "  ffmpeg -f lavfi -i color=black:s=1080x1920:r=30 -t 5 -c:v libx264 stub_video.mp4\n" +
                                     "  ffmpeg -f lavfi -i anullsrc=r=44100:cl=mono -t 10 -q:a 9 stub_voice.mp3"
                     );
                 }
                 Files.copy(is, target, StandardCopyOption.REPLACE_EXISTING);
-                log.debug("[StubPipeline] Skopiowano {} → {}", resourcePath, target);
+                log.debug("[StubPipeline] Copied {} → {}", resourcePath, target);
             }
         }
     }
 
     // =========================================================================
-    // WYJĄTEK
+    // EXCEPTION
     // =========================================================================
 
     public static class PipelineStepException extends RuntimeException {

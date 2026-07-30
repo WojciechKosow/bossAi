@@ -8,9 +8,9 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 /**
- * Pojedyncze slowo z Whisper transcription — dokladny timing per word.
- * Remotion uzywa tego w SubtitleTrack → KaraokeHighlight
- * do podswietlania aktywnego slowa w czasie rzeczywistym.
+ * A single word from the Whisper transcription — exact per-word timing.
+ * Remotion uses this in SubtitleTrack → KaraokeHighlight
+ * to highlight the active word in real time.
  */
 @Data
 @Builder
@@ -29,8 +29,8 @@ public class EdlWhisperWord {
     private int endMs;
 
     /**
-     * Index zdania do ktorego nalezy to slowo.
-     * Remotion SubtitleTrack wyswietla tylko slowa z aktywnego zdania.
+     * Index of the sentence this word belongs to.
+     * Remotion SubtitleTrack displays only the words from the active sentence.
      */
     @JsonProperty("sentence_index")
     @Builder.Default

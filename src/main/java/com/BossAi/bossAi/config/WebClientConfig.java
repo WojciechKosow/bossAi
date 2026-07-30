@@ -21,17 +21,17 @@ import java.time.Duration;
 import java.util.concurrent.TimeUnit;
 
 /**
- * Konfiguracja WebClient dla zewnętrznych API.
+ * WebClient configuration for external APIs.
  *
- * Dwa oddzielne beany:
+ * Two separate beans:
  *   - openAiWebClient  → https://api.openai.com/v1
  *   - falAiWebClient   → https://queue.fal.run
  *
- * Każdy ma ustawione:
- *   - baseUrl z properties
- *   - Authorization header z kluczem API
- *   - timeouty connect + read
- *   - error logging filter (loguje 4xx/5xx bez rzucania wyjątku — Step decyduje co robić)
+ * Each one has:
+ *   - baseUrl from properties
+ *   - Authorization header with the API key
+ *   - connect + read timeouts
+ *   - error logging filter (logs 4xx/5xx without throwing — the Step decides what to do)
  */
 @Configuration
 @RequiredArgsConstructor
@@ -102,9 +102,9 @@ public class WebClientConfig {
     }
 
     /**
-     * Generyczny WebClient.Builder dla mikroserwisów wewnętrznych
+     * Generic WebClient.Builder for internal microservices
      * (audio-analysis, remotion-renderer).
-     * Każdy serwis ustawia własny baseUrl w konstruktorze.
+     * Each service sets its own baseUrl in the constructor.
      */
     @Bean
     public WebClient.Builder webClientBuilder() {
@@ -130,16 +130,16 @@ public class WebClientConfig {
     }
 
     /**
-     * Filter logujący błędy HTTP bez ich pochłaniania.
-     * Step widzi pełny wyjątek WebClientResponseException z body odpowiedzi.
+     * Filter that logs HTTP errors without swallowing them.
+     * The Step sees the full WebClientResponseException with the response body.
      */
     private ExchangeFilterFunction logErrorResponse(String clientName) {
         return ExchangeFilterFunction.ofResponseProcessor(response -> {
             if (response.statusCode().isError()) {
                 return response.bodyToMono(String.class)
-                        .defaultIfEmpty("[brak body]")
+                        .defaultIfEmpty("[no body]")
                         .flatMap(body -> {
-                            // Logujemy tutaj — Resilience4j retry zadziała po rzuceniu wyjątku w Step
+                            // We log here — Resilience4j retry kicks in after the exception is thrown in the Step
                             System.err.printf("[%s] HTTP %d — %s%n",
                                     clientName, response.statusCode().value(), body);
                             return Mono.just(response);

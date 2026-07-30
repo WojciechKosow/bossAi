@@ -9,14 +9,14 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import java.util.concurrent.Executor;
 
 /**
- * Konfiguracja puli wątków dla asynchronicznego pipeline generacji.
+ * Thread-pool configuration for the asynchronous generation pipeline.
  *
- * aiExecutor — dedykowana pula dla @Async("aiExecutor").
- * Używana przez GenerationService do uruchomienia pipeline w tle,
- * żeby endpoint /api/generations zwrócił odpowiedź natychmiast
- * (bez czekania 2-5 minut na zakończenie generacji).
+ * aiExecutor — a dedicated pool for @Async("aiExecutor").
+ * Used by GenerationService to run the pipeline in the background,
+ * so the /api/generations endpoint returns a response immediately
+ * (without waiting 2-5 minutes for the generation to finish).
  *
- * Wartości konfigurowane przez application.properties:
+ * Values configured via application.properties:
  *   async.ai-executor.core-pool-size=4
  *   async.ai-executor.max-pool-size=8
  *   async.ai-executor.queue-capacity=50
@@ -44,8 +44,8 @@ public class AsyncConfig {
         executor.setMaxPoolSize(maxPoolSize);
         executor.setQueueCapacity(queueCapacity);
         executor.setThreadNamePrefix(threadNamePrefix);
-        // Przy przepełnieniu kolejki — wywołujący wątek wykonuje zadanie sam
-        // (zamiast odrzucać). Zapobiega utracie generacji przy spike'ach.
+        // On queue overflow — the calling thread runs the task itself
+        // (instead of rejecting it). Prevents losing generations during spikes.
         executor.setRejectedExecutionHandler(new java.util.concurrent.ThreadPoolExecutor.CallerRunsPolicy());
         executor.initialize();
         return executor;

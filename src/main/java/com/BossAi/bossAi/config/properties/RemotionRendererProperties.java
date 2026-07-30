@@ -5,7 +5,7 @@ import lombok.Setter;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 /**
- * Konfiguracja połączenia z mikroserwisem remotion-renderer (Node.js/Remotion).
+ * Configuration for the connection to the remotion-renderer microservice (Node.js/Remotion).
  * Prefix: remotion-renderer
  */
 @Getter
