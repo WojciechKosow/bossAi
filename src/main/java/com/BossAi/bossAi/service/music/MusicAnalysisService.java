@@ -154,7 +154,7 @@ public class MusicAnalysisService {
         List<EnergyPoint> rawEnergy = extractEnergyProfile(audioPath);
 
         if (rawEnergy.isEmpty()) {
-            log.warn("[MusicAnalysis] Brak danych energii — zwracam pusty wynik");
+            log.warn("[MusicAnalysis] No energy data — returning an empty result");
             return new MusicAnalysisResult(0, List.of(), List.of(), 0.0, 120);
         }
 

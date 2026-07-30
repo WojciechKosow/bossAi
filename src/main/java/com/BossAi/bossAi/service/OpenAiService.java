@@ -677,7 +677,7 @@ public class OpenAiService {
 
     private void validateScriptResult(ScriptResult result, boolean hasCustomTts) {
         if (!hasCustomTts && (result.narration() == null || result.narration().isBlank())) {
-            throw new RuntimeException("ScriptResult: brak narracji");
+            throw new RuntimeException("ScriptResult: no narration");
         }
         if (result.scenes() == null || result.scenes().isEmpty()) {
             throw new RuntimeException("ScriptResult: no scenes");
@@ -709,7 +709,7 @@ public class OpenAiService {
 
     /**
      * Normalizuje ScriptResult po walidacji:
-     *   - VIDEO sceny: durationMs < 5000 → 5000 (Kling API minimum)
+     *   - VIDEO scenes: durationMs < 5000 → 5000 (Kling API minimum)
      *   - IMAGE scenes: durationMs < 3000 → 3000 (too short for Ken Burns)
      *   - Przelicza totalDurationMs
      *

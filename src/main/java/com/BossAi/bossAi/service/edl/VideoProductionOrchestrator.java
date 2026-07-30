@@ -36,7 +36,7 @@ import java.util.UUID;
  *      a) Analyzes the music (Python/FastAPI)
  *      b) Generates the EDL (GPT-4o + audio analysis)
  *      c) Validates and saves the EDL
- *      d) Zleca renderowanie (Node.js/Remotion)
+ *      d) Requests rendering (Node.js/Remotion)
  *      e) Polluje status i aktualizuje RenderJob
  *
  * Integrates the new microservices with the existing pipeline without modifying the old code.
@@ -90,7 +90,7 @@ public class VideoProductionOrchestrator {
 
             // 2.5 NEW: Asset analysis + parsing the user's intent
             //   These two steps give GPT "eyes" and "ears" — instead of blind editing,
-            //   system wie CO jest na assetach i CZEGO chce user.
+            //   the system knows WHAT is in the assets and WHAT the user wants.
             analyzeAssetsAndIntent(context);
 
             // 2.6 NEW: Generating layers for scenes with multi-layer composition.
@@ -163,7 +163,7 @@ public class VideoProductionOrchestrator {
     }
 
     /**
-     * Renderuje istniejacy EDL (np. po edycji usera).
+     * Renders an existing EDL (e.g. after the user's edits).
      * Wywolywany z VideoProjectController POST /{id}/render.
      */
     public void renderCurrentEdl(UUID projectId) {
@@ -269,7 +269,7 @@ public class VideoProductionOrchestrator {
             projectAssets.addAll(generated);
 
             // Map the generated assets to sceneIndex+layerIndex in order
-            // generowania (LayerAssetGenerator iteruje SceneDirectives w tej samej
+            // generation (LayerAssetGenerator iterates SceneDirectives in the same
             // order as us — first the scene, then the layers with source=generate).
             int genIdx = 0;
             List<SceneAsset> scenes = context.getScenes();

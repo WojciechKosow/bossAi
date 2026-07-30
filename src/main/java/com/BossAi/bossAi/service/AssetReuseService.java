@@ -191,7 +191,7 @@ public class AssetReuseService {
         }
 
         try {
-            // GPT matching — obrazy
+            // GPT matching — images
             Map<String, Asset> imageMatches = matchViaGpt(
                     context.getPrompt(), scenes, reusableImages, "IMAGE");
             context.setReusedImageAssets(imageMatches);
@@ -208,7 +208,7 @@ public class AssetReuseService {
             }
 
         } catch (Exception e) {
-            log.warn("[AssetReuseService] GPT matching failed — pipeline kontynuuje bez reuse: {}",
+            log.warn("[AssetReuseService] GPT matching failed — pipeline continues without reuse: {}",
                     e.getMessage());
             context.setReusedImageAssets(new HashMap<>());
             context.setReusedVideoAssets(new HashMap<>());

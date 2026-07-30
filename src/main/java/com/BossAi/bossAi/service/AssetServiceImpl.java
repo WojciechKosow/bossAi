@@ -166,7 +166,7 @@ public class AssetServiceImpl implements AssetService {
 
         assetRepository.save(asset);
 
-        log.debug("[AssetService] Asset (URL) zapisany — type: {}, url: {}, prompt: {}",
+        log.debug("[AssetService] Asset (URL) saved — type: {}, url: {}, prompt: {}",
                 type, externalUrl, prompt != null ? prompt.substring(0, Math.min(50, prompt.length())) : "null");
 
         return mapToDto(asset);

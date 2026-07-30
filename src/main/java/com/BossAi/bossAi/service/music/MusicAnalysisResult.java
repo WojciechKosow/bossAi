@@ -3,14 +3,14 @@ package com.BossAi.bossAi.service.music;
 import java.util.List;
 
 /**
- * Wynik analizy struktury muzyki — energy profile, segmenty (drop, build, peak, quiet).
+ * Result of the music structure analysis — energy profile, segments (drop, build, peak, quiet).
  *
  * Used by MusicAlignmentService to intelligently align the music moment
- * do kontekstu wideo (hook → drop, narracja → quiet, CTA → peak).
+ * to the video context (hook → drop, narration → quiet, CTA → peak).
  */
 public record MusicAnalysisResult(
 
-        /** Czas trwania muzyki w ms */
+        /** Music duration in ms */
         int totalDurationMs,
 
         /**

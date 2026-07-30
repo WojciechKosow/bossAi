@@ -22,7 +22,7 @@ public class GifProperties {
     /** Giphy API key. Required to fetch GIFs. */
     private String apiKey = "";
 
-    /** Czy system GIF overlays jest aktywny. */
+    /** Whether the GIF overlays system is active. */
     private boolean enabled = true;
 
     /** Max number of results from Giphy (we take the first one) */

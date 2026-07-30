@@ -136,7 +136,7 @@ public class RenderStep implements GenerationStep {
                     .filter(d -> d.getSceneIndex() == scene.getIndex())
                     .findFirst()
                     .orElseThrow(() -> new IllegalStateException(
-                            "[RenderStep] Brak SceneDirection dla sceny " + scene.getIndex()));
+                            "[RenderStep] No SceneDirection for scene " + scene.getIndex()));
 
             List<Path> cutClips = splitScene(scene, direction, workDir);
             if (cutClips.isEmpty()) {
@@ -1016,7 +1016,7 @@ public class RenderStep implements GenerationStep {
             case BRIGHTNESS_BURST -> String.format(Locale.US,
                     "zoompan=z='1.02':d=%d:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=1080x1920:fps=30,eq=brightness=0.15:saturation=1.1",
                     totalFrames);
-            // WHIP_PAN: szybki pan prawo + silny poziomy motion blur
+            // WHIP_PAN: quick pan right + strong horizontal motion blur
             case WHIP_PAN -> String.format(Locale.US,
                     "zoompan=z='1.15':d=%d:x='(iw-iw/zoom)*on/%d':y='(ih-ih/zoom)/2':s=1080x1920:fps=30,avgblur=sizeX=20:sizeY=1",
                     totalFrames, totalFrames);
@@ -1069,16 +1069,16 @@ public class RenderStep implements GenerationStep {
             if (scene.getVideoLocalPath() == null || scene.getVideoLocalPath().isBlank())
                 throw new IllegalStateException("[RenderStep] Scene " + scene.getIndex() + " without videoLocalPath");
             if (!Files.exists(Paths.get(scene.getVideoLocalPath())))
-                throw new IllegalStateException("[RenderStep] Plik nie istnieje: " + scene.getVideoLocalPath());
+                throw new IllegalStateException("[RenderStep] File does not exist: " + scene.getVideoLocalPath());
         }
 
         if (context.getVoiceLocalPath() == null || context.getVoiceLocalPath().isBlank())
-            throw new IllegalStateException("[RenderStep] Brak voiceLocalPath");
+            throw new IllegalStateException("[RenderStep] No voiceLocalPath");
         if (!Files.exists(Paths.get(context.getVoiceLocalPath())))
-            throw new IllegalStateException("[RenderStep] Plik voice nie istnieje: " + context.getVoiceLocalPath());
+            throw new IllegalStateException("[RenderStep] Voice file does not exist: " + context.getVoiceLocalPath());
 
         if (context.getDirectorPlan() == null)
-            throw new IllegalStateException("[RenderStep] Brak DirectorPlan");
+            throw new IllegalStateException("[RenderStep] No DirectorPlan");
     }
 
     private Path getWorkingDir(GenerationContext context) {
@@ -1097,10 +1097,10 @@ public class RenderStep implements GenerationStep {
 
     /**
      * Escapes the word text for FFmpeg drawtext.
-     * \  → \\   backslash (pierwszy!)
+     * \  → \\   backslash (first!)
      * '  → \'   apostrof
-     * :  → \:   separator opcji drawtext
-     * %  → %%   znak formatowania drawtext
+     * :  → \:   drawtext option separator
+     * %  → %%   drawtext formatting character
      */
     private String escapeDrawtext(String text) {
         if (text == null) return "";
@@ -1113,7 +1113,7 @@ public class RenderStep implements GenerationStep {
     }
 
     /**
-     * JEDYNA metoda konwersji double → String dla FFmpeg.
+     * The ONLY method for converting double → String for FFmpeg.
      * Locale.US guarantees a decimal point regardless of system settings.
      */
     private String f(double value) {

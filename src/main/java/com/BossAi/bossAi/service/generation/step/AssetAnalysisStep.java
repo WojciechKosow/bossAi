@@ -26,7 +26,7 @@ import java.util.List;
  *      (placement hints, scene descriptions, pacing preference)
  *
  * Both are optional — on error it logs a warning and continues.
- * ScriptStep radzi sobie bez profili, ale wynik jest gorszy.
+ * ScriptStep can manage without profiles, but the result is worse.
  *
  * Skipped gdy:
  *   - Brak custom media (context.hasCustomMedia() == false)
@@ -79,7 +79,7 @@ public class AssetAnalysisStep implements GenerationStep {
                                 : "null");
             }
         } catch (Exception e) {
-            log.warn("[AssetAnalysisStep] Vision analysis FAILED — ScriptStep nadal ruszy bez profili: {}",
+            log.warn("[AssetAnalysisStep] Vision analysis FAILED — ScriptStep will still run without profiles: {}",
                     e.getMessage());
         }
 
@@ -116,7 +116,7 @@ public class AssetAnalysisStep implements GenerationStep {
      *            close-up of serum bottle with glowing effect (product demo),
      *            woman smiling with glowing skin (result/transformation)"
      *
-     * To daje GPT kontekst bez prompt usera.
+     * This gives GPT context without the user's prompt.
      */
     private void enrichSyntheticPromptIfNeeded(GenerationContext context, List<AssetProfile> profiles) {
         String currentPrompt = context.getPrompt();

@@ -49,7 +49,7 @@ public class AssetAnalyzer {
      *
      * Strategia:
      *   1. Try GPT-4o Vision (frame extraction + visual analysis)
-     *   2. Fallback na GPT text-only (metadata + kontekst)
+     *   2. Fallback to GPT text-only (metadata + context)
      *   3. Fallback na heurystyki z metadanych
      *
      * @param assets    custom media assets (IMAGE/VIDEO) sorted by orderIndex
@@ -74,7 +74,7 @@ public class AssetAnalyzer {
             log.warn("[AssetAnalyzer] Vision analysis failed, falling back to text GPT: {}", e.getMessage());
         }
 
-        // Strategia 2: GPT text-only (metadata + kontekst)
+        // Strategy 2: GPT text-only (metadata + context)
         try {
             return analyzeViaGpt(assets, userPrompt);
         } catch (Exception e) {
@@ -180,8 +180,8 @@ public class AssetAnalyzer {
      *
      * Strategy: extract N frames evenly distributed over time.
      *   - Video <= 3s → 1 frame (middle)
-     *   - Video 3-10s → 2 klatki (1/3 i 2/3)
-     *   - Video > 10s → 3 klatki (1/4, 1/2, 3/4)
+     *   - Video 3-10s → 2 frames (1/3 and 2/3)
+     *   - Video > 10s → 3 frames (1/4, 1/2, 3/4)
      */
     private List<byte[]> extractVideoKeyframes(Asset asset) throws IOException, InterruptedException {
         Path videoPath = storageService.resolvePath(asset.getStorageKey());

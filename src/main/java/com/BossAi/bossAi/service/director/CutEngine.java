@@ -212,7 +212,7 @@ public class CutEngine {
      *   1. Timeline continuity (endMs[i] == startMs[i+1]) — fixes gaps and overlaps
      *   2. Range correctness (start >= 0, end <= totalDurationMs, start < end)
      *   3. Coverage of the whole timeline (from 0 to totalDurationMs)
-     *   4. Minimalny czas trwania segmentu (>= ABSOLUTE_MIN_CUT_MS)
+     *   4. Minimum segment duration (>= ABSOLUTE_MIN_CUT_MS)
      */
     private List<JustifiedCut> sanitizeCuts(List<JustifiedCut> cuts, int totalDurationMs, int minCutMs) {
         if (cuts == null || cuts.isEmpty()) return cuts;
@@ -272,7 +272,7 @@ public class CutEngine {
     }
 
     /**
-     * Backwards compat — bez availableAssetCount i sceneCount.
+     * Backwards compat — without availableAssetCount and sceneCount.
      */
     public List<JustifiedCut> generateCuts(
             NarrationAnalysis narrationAnalysis,
@@ -287,7 +287,7 @@ public class CutEngine {
     }
 
     /**
-     * Backwards compat — bez sceneCount.
+     * Backwards compat — without sceneCount.
      */
     public List<JustifiedCut> generateCuts(
             NarrationAnalysis narrationAnalysis,
@@ -492,7 +492,7 @@ public class CutEngine {
 
         // Beats can reinforce existing candidates (we don't add a beat as a standalone cut,
         // unless it's in a high-energy section)
-        // Beat scoring jest w scoreCandidates()
+        // Beat scoring is in scoreCandidates()
     }
 
     // =========================================================================
@@ -633,7 +633,7 @@ public class CutEngine {
      *   - Segment 1 (after a user_intent cut) → asset 1 (from user_intent)
      *   - Segment 2 (in between, untagged) → inherits asset 1
      *   - Segment 3 (after a user_intent cut) → asset 2 (from user_intent)
-     *   - itd.
+     *   - etc.
      */
     private void propagateAssetAssignments(List<JustifiedCut> cuts, UserEditIntent userEditIntent) {
         if (cuts.isEmpty()) return;
@@ -768,7 +768,7 @@ public class CutEngine {
             }
         }
 
-        // === LEVEL 3: Szukaj pary: ostatnie prevSeg + pierwsze currSeg ===
+        // === LEVEL 3: Look for the pair: last prevSeg + first currSeg ===
         if (prevNorm.size() >= 1 && currNorm.size() >= 1) {
             String lastPrev = prevNorm.get(prevNorm.size() - 1);
             String firstCurr = currNorm.get(0);

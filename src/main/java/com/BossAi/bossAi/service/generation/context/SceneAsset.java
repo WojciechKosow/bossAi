@@ -22,12 +22,12 @@ import java.util.UUID;
 public class SceneAsset {
 
     /**
-     * Indeks sceny — odpowiada ScriptResult.SceneScript.index.
+     * Scene index — corresponds to ScriptResult.SceneScript.index.
      */
     private int index;
 
     /**
-     * Prompt obrazu z ScriptResult (kopia — dla wygody w logach i retry).
+     * Image prompt from ScriptResult (a copy — for convenience in logs and retries).
      */
     private String imagePrompt;
 
@@ -48,7 +48,7 @@ public class SceneAsset {
     private String imageUrl;
 
     /**
-     * URL wygenerowanego klipu wideo (fal.ai CDN).
+     * URL of the generated video clip (fal.ai CDN).
      * Set by VideoStep before downloading the file.
      */
     private String videoUrl;
@@ -61,7 +61,7 @@ public class SceneAsset {
     private String videoLocalPath;
 
     /**
-     * Fragment narracji dla tej sceny — trafi do SRT.
+     * Narration fragment for this scene — goes into the SRT.
      */
     private String subtitleText;
 

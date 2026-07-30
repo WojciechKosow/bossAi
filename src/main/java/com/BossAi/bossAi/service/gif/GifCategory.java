@@ -8,7 +8,7 @@ import lombok.RequiredArgsConstructor;
  *
  * Each category has:
  *   - key:         an identifier (used in configuration and logs)
- *   - searchQuery: zapytanie do Giphy Stickers API
+ *   - searchQuery: the query to the Giphy Stickers API
  *   - defaultPosition: the default on-screen position
  *   - defaultScale:    the default scale (0.0-1.0)
  */

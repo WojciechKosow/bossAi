@@ -27,7 +27,7 @@ import java.util.stream.Collectors;
  *   - AssetProfile (what is in each asset)
  *   - NarrationAnalysis (what the narrator is saying at a given moment)
  *   - JustifiedCuts (when and why a cut happens)
- *   - DNA preset (jaki styl/szablon jest aktywny)
+ *   - DNA preset (which style/template is active)
  *
  * The system autonomously decides when and how to layer assets.
  * It does NOT require any instructions from the user.

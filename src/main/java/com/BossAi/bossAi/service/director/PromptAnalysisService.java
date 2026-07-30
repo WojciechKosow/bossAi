@@ -26,8 +26,8 @@ import java.util.UUID;
  * Dry-run analizy prompta (Phase 2.1 z CLAUDE.md).
  *
  * Takes the prompt + custom media assets and, without creating a Generation/VideoProject,
- * uruchamia:
- *   1. AssetAnalyzer (opcjonalnie)
+ * runs:
+ *   1. AssetAnalyzer (optional)
  *   2. UserIntentParser
  *   3. ScriptStep (na transient GenerationContext)
  *

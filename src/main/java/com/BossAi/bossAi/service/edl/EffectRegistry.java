@@ -39,7 +39,7 @@ public class EffectRegistry {
     public static final String DRIFT = "drift";
     public static final String ZOOM_IN_OFFSET = "zoom_in_offset";
 
-    // ─── Efekty TikTok-native (nowe) ─────────────────────────────────
+    // ─── TikTok-native effects (new) ─────────────────────────────────
 
     /** Extreme snap zoom — stop-scroll in <100ms, used exclusively on the hook */
     public static final String SMASH_ZOOM = "smash_zoom";

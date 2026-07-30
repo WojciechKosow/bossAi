@@ -23,7 +23,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * VoiceStep — dostarcza plik MP3 z voice-over do RenderStep.
+ * VoiceStep — provides the MP3 voice-over file to RenderStep.
  *
  * Two modes:
  *   1. User upload  → copies the file from Storage to the FFmpeg working directory
@@ -255,7 +255,7 @@ public class VoiceStep implements GenerationStep {
                 context.getGenerationId()
         );
 
-        log.info("[VoiceStep] AI TTS zapisany — {} bytes → {}", audioBytes.length, outputPath);
+        log.info("[VoiceStep] AI TTS saved — {} bytes → {}", audioBytes.length, outputPath);
         return outputPath.toString();
     }
 

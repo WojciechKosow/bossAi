@@ -40,10 +40,10 @@ public record ScriptResult(
 
         /**
          * Per-scene music dynamics directions.
-         * GPT-4o decyduje o glosnosci muzyki w zaleznosci od tresci:
+         * GPT-4o decides the music volume depending on the content:
          *   - narrator speaking -> music quieter (0.10-0.20)
          *   - pause/transition -> music louder (0.35-0.50)
-         *   - hook/CTA -> muzyka najglosniej (0.40-0.60)
+         *   - hook/CTA -> music loudest (0.40-0.60)
          * If null -> RenderStep uses a constant volume=0.25 (as before).
          */
         @JsonProperty("musicDirections")
@@ -117,7 +117,7 @@ public record ScriptResult(
     }
 
     /**
-     * Instrukcja dynamiki muzyki dla jednej sceny.
+     * Music dynamics direction for a single scene.
      *
      * GPT-4o generates these directions based on the scene's content:
      *   - volume: the target music volume (0.0-1.0) during the scene

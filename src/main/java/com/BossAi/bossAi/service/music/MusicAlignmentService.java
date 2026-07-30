@@ -29,12 +29,12 @@ public class MusicAlignmentService {
     /**
      * Computes the optimal alignment of the music to the video.
      *
-     * @param analysis    wynik analizy muzyki
+     * @param analysis    the music analysis result
      * @param script      the script (scenes, narration, hook, CTA)
      * @return the alignment result (offset + musicDirections)
      */
     public MusicAlignment align(MusicAnalysisResult analysis, ScriptResult script) {
-        log.info("[MusicAlignment] START — muzyka: {}ms, wideo: {}ms, segmenty: {}",
+        log.info("[MusicAlignment] START — music: {}ms, video: {}ms, segments: {}",
                 analysis.totalDurationMs(), script.totalDurationMs(), analysis.segments().size());
 
         // 1. Identify the important moments in the video
@@ -59,7 +59,7 @@ public class MusicAlignmentService {
     public record VideoMoment(int timeMs, MomentType type, int sceneIndex) {}
 
     public enum MomentType {
-        /** Hook — pierwszy moment, potrzebuje energii */
+        /** Hook — the first moment, needs energy */
         HOOK,
         /** CTA — call to action, kulminacja */
         CTA,
@@ -70,7 +70,7 @@ public class MusicAlignmentService {
     }
 
     /**
-     * Identyfikuje kluczowe momenty w wideo na podstawie scenariusza.
+     * Identifies the key moments in the video based on the script.
      */
     private List<VideoMoment> identifyVideoMoments(ScriptResult script) {
         List<VideoMoment> moments = new ArrayList<>();
@@ -326,7 +326,7 @@ public class MusicAlignmentService {
                     // Narracja + drop → kompromis
                     volume = 0.25 + musicEnergy * 0.10;
                 } else {
-                    // Brak narracji + drop → muzyka na front
+                    // No narration + drop → music to the front
                     volume = 0.35 + musicEnergy * 0.20;
                 }
             } else if (dominantSegment == MusicAnalysisResult.SegmentType.BUILD_UP) {
@@ -334,7 +334,7 @@ public class MusicAlignmentService {
                 volume = hasNarration ? 0.15 : 0.25;
                 fadeInMs = Math.min(scene.durationMs() / 2, 2000);
             } else if (dominantSegment == MusicAnalysisResult.SegmentType.QUIET) {
-                // Cichy fragment muzyki
+                // Quiet music fragment
                 volume = hasNarration ? 0.10 : 0.18;
             } else {
                 // Normalny fragment

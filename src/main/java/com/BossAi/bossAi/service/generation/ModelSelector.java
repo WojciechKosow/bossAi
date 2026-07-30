@@ -14,7 +14,7 @@ import org.springframework.stereotype.Component;
  *   The earlier code used text-to-video endpoints, which meant the image
  *   was ignored and the generator produced random clips.
  *
- *   Poprawne endpointy fal.ai dla Kling image-to-video:
+ *   Correct fal.ai endpoints for Kling image-to-video:
  *     Standard: fal-ai/kling-video/v1/standard/image-to-video
  *     Pro:      fal-ai/kling-video/v1.6/pro/image-to-video
  *
@@ -33,7 +33,7 @@ import org.springframework.stereotype.Component;
  * UWAGA: Endpointy video hardkodowane tutaj (nie w FalAiProperties) bo
  * zmiana image-to-video → text-to-video to zmiana semantyki, nie konfiguracji.
  * If you want to move this to properties — use separate keys:
- *   fal-ai.model.video.free-image-to-video, .standard-image-to-video itd.
+ *   fal-ai.model.video.free-image-to-video, .standard-image-to-video, etc.
  */
 @Component
 @RequiredArgsConstructor
@@ -62,7 +62,7 @@ public class ModelSelector {
      *
      * IMPORTANT: The returned endpoints must be image-to-video, not text-to-video.
      * FalAiService.buildVideoRequestBody() picks the body structure based on
-     * rozpoznanego modelu (isKlingModel, isLtxModel itd.).
+     * the recognized model (isKlingModel, isLtxModel, etc.).
      */
     public String videoModel(PlanType planType) {
         return switch (planType) {

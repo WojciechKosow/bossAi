@@ -151,6 +151,7 @@ public class DirectorValidator {
         }
     }
 
+    /**
      * Checks whether the sum of cuts is within tolerance.
      * Throws an exception only when the difference is large — the fallback in DirectorStep
      * will handle it and generate a simple plan.

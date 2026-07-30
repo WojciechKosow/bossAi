@@ -128,7 +128,7 @@ public class GenerationServiceImpl implements GenerationService {
             Files.createDirectories(musicPath.getParent());
             Files.write(musicPath, request.getMusicFile().getBytes());
             context.setMusicLocalPath(musicPath.toString());
-            log.info("[GenerationService] Muzyka usera z requestu zapisana → {}", musicPath);
+            log.info("[GenerationService] User's music from the request saved → {}", musicPath);
         }
 
 

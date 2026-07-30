@@ -58,7 +58,7 @@ public class EditDna {
 
     /**
      * Editing intent — defines the CHARACTER of the cuts.
-     * Generowana na podstawie analizy narracji + muzyki + nastroju.
+     * Generated based on the narration + music + mood analysis.
      *
      * It is not random — GPT analyzes the content and picks a specific strategy.
      * Each generation has a different intent = each film looks different.

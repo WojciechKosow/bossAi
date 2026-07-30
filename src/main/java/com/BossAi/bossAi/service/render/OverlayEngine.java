@@ -32,7 +32,7 @@ import java.util.List;
  * alpha like FADE (slide is done via an x expression — separate).
  * <p>
  * POP:
- * Szybki fade in 0.15s, bez fade out.
+ * Quick fade in 0.15s, no fade out.
  * <p>
  * NONE:
  * No animation — the text appears instantly.
@@ -62,7 +62,7 @@ public class OverlayEngine {
      * @param overlays    lista TextOverlay z ScriptResult
      * @param inputLabel  the input label (e.g. "[0:v]" or "[worded]")
      * @param outputLabel the output label (e.g. "[vout]")
-     * @return filter_complex string gotowy do pliku filter_complex_script,
+     * @return a filter_complex string ready for the filter_complex_script file,
      * or null if overlays is empty/invalid
      */
     public String buildOverlayFilter(
@@ -71,7 +71,7 @@ public class OverlayEngine {
             String outputLabel
     ) {
         if (overlays == null || overlays.isEmpty()) {
-            log.debug("[OverlayEngine] Brak overlays — pomijam");
+            log.debug("[OverlayEngine] No overlays — skipping");
             return null;
         }
 
@@ -240,7 +240,7 @@ public class OverlayEngine {
      * nie do argumentu cmdline.
      * <p>
      * FADE / SLIDE_IN : fade in over FADE_DURATION + fade out over FADE_DURATION
-     * POP             : szybki fade in POP_DURATION, bez fade out
+     * POP             : quick fade in POP_DURATION, no fade out
      * NONE / default  : constant alpha=1
      */
     private String buildAlphaExpression(String animation, double startSec, double endSec) {
@@ -282,15 +282,15 @@ public class OverlayEngine {
     // =========================================================================
 
     /**
-     * Escapuje tekst dla FFmpeg drawtext.
+     * Escapes the text for FFmpeg drawtext.
      * <p>
      * The escaping order matters — backslashes first,
      * so we don't double-escape characters added in later steps.
      * <p>
      * \  → \\   backslash (must be first)
      * '  → \'   apostrophe — would close the text='...' string prematurely
-     * :  → \:   dwukropek — separator opcji drawtext
-     * %  → %%   procent — znak formatowania drawtext
+     * :  → \:   colon — a drawtext option separator
+     * %  → %%   percent — drawtext formatting character
      */
     private String escapeText(String text) {
         if (text == null) return "";
@@ -302,7 +302,7 @@ public class OverlayEngine {
     }
 
     /**
-     * Formatuje double do 3 miejsc po przecinku dla FFmpeg expressions.
+     * Formats a double to 3 decimal places for FFmpeg expressions.
      * Locale.US guarantees a decimal point (not a comma) regardless
      * of system settings — CRUCIAL on Windows with a Polish locale.
      */

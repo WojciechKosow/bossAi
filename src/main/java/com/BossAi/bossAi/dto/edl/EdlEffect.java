@@ -11,7 +11,7 @@ import java.util.Map;
 
 /**
  * Efekt aplikowany na segment — zoom, shake, speed ramp, pan, etc.
- * Parametry w mapie params pozwalaja na rozszerzalnosc bez zmiany schematu.
+ * Parameters in the params map allow extensibility without changing the schema.
  */
 @Data
 @Builder

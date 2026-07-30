@@ -70,12 +70,12 @@ public class MusicStep implements GenerationStep {
         }
 
         if (context.getMusicLocalPath() == null) {
-            log.info("[MusicStep] Brak muzyki — film bez muzyki. generationId: {}",
+            log.info("[MusicStep] No music — video without music. generationId: {}",
                     context.getGenerationId());
             return;
         }
 
-        // --- Krok 2: Analiza struktury muzyki ---
+        // --- Step 2: Music structure analysis ---
         analyzeAndAlign(context);
     }
 
@@ -111,7 +111,7 @@ public class MusicStep implements GenerationStep {
                 // Override the musicDirections from GPT — we now base them on the music analysis
                 List<ScriptResult.MusicDirection> newDirections = alignment.directions();
                 if (!newDirections.isEmpty()) {
-                    // Budujemy nowy ScriptResult z zaktualizowanymi directions
+                    // We build a new ScriptResult with the updated directions
                     ScriptResult oldScript = context.getScript();
                     ScriptResult updatedScript = new ScriptResult(
                             oldScript.narration(),

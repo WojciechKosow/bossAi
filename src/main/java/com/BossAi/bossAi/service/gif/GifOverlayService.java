@@ -16,11 +16,11 @@ import java.util.UUID;
 /**
  * Decides when and which GIF overlays to add to the EDL.
  *
- * Logika (v1 — prosta, rozbudowywana iteracyjnie):
+ * Logic (v1 — simple, expanded iteratively):
  *   - Subscribe/Follow GIF → always on the last scene (layer=0, the last segment)
  *
- * Rozbudowa w kolejnych iteracjach:
- *   - Fire/Like GIF przy kulminacji narracji (energy > 0.85)
+ * Expansion in future iterations:
+ *   - Fire/Like GIF at the narration climax (energy > 0.85)
  *   - Swipe-up przy CTA
  *   - Per-DNA-preset configuration of when to add them
  */

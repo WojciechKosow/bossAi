@@ -45,7 +45,7 @@ public class GifLibraryService {
      * Order:
      *   1. Cache (if it exists)
      *   2. Giphy API (if a key is configured)
-     *   3. Optional.empty() (brak GIF-a)
+     *   3. Optional.empty() (no GIF)
      */
     public Optional<String> getGifUrl(GifCategory category) {
         if (!gifProperties.isConfigured()) {

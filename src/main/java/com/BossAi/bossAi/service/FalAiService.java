@@ -95,7 +95,7 @@ public class FalAiService {
 
         String imageUrl = result.path("images").get(0).path("url").asText();
         if (imageUrl.isBlank()) {
-            throw new RuntimeException("[FalAiService] Brak URL obrazu w odpowiedzi");
+            throw new RuntimeException("[FalAiService] No image URL in the response");
         }
 
         log.info("[FalAiService] Image gotowy — {}", imageUrl);
@@ -118,7 +118,7 @@ public class FalAiService {
      * @param imageUrl     the image URL from ImageStep — must be a public URL
      * @param motionPrompt opis ruchu z ScriptResult.SceneScript
      * @param durationMs   duration (Kling: 5 or 10s)
-     * @param modelId      model z ModelSelector (np. "fal-ai/kling-video/v1.6/pro/image-to-video")
+     * @param modelId      the model from ModelSelector (e.g. "fal-ai/kling-video/v1.6/pro/image-to-video")
      */
     @Retry(name = "falAi")
     public byte[] generateVideo(String imageUrl, String motionPrompt,
@@ -140,7 +140,7 @@ public class FalAiService {
 
         String videoUrl = extractVideoUrl(result, modelId);
         if (videoUrl.isBlank()) {
-            throw new RuntimeException("[FalAiService] Brak URL wideo w odpowiedzi. Response: " + result);
+            throw new RuntimeException("[FalAiService] No video URL in the response. Response: " + result);
         }
 
         log.info("[FalAiService] Video gotowy — {}", videoUrl);
@@ -221,7 +221,7 @@ public class FalAiService {
         String url = result.path("video").path("url").asText("");
         if (!url.isBlank()) return url;
 
-        // Fallback dla MiniMax i innych flat-structure models
+        // Fallback for MiniMax and other flat-structure models
         url = result.path("video_url").asText("");
         if (!url.isBlank()) return url;
 
@@ -319,10 +319,10 @@ public class FalAiService {
 
         try (Response response = okHttpClient.newCall(request).execute()) {
             if (!response.isSuccessful()) {
-                throw new IOException("[FalAiService] HTTP " + response.code() + " przy pobieraniu: " + url);
+                throw new IOException("[FalAiService] HTTP " + response.code() + " while downloading: " + url);
             }
             if (response.body() == null) {
-                throw new IOException("[FalAiService] Puste body przy pobieraniu: " + url);
+                throw new IOException("[FalAiService] Empty body while downloading: " + url);
             }
             byte[] bytes = response.body().bytes();
             log.info("[FalAiService] Pobrano {} bytes z {}", bytes.length, url);

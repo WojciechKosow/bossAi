@@ -181,14 +181,14 @@ public class DirectorStep implements GenerationStep {
 
     /**
      * Maps beats to cuts within a scene.
-     * Beaty to pozycje absolutne na timeline muzyki.
+     * Beats are absolute positions on the music timeline.
      * sceneOffsetMs = the scene's start on the video timeline.
      * Cuts have startMs/endMs RELATIVE to the scene (0 = scene start).
      */
     private List<Cut> mapBeatsToScene(List<Integer> beats, int durationMs, int sceneOffsetMs) {
         List<Cut> cuts = new ArrayList<>();
         int sceneEndMs = sceneOffsetMs + durationMs;
-        int current = 0; // relatywny do sceny
+        int current = 0; // relative to the scene
 
         for (int beat : beats) {
             // Skip beats from before this scene

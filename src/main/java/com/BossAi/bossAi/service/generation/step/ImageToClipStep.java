@@ -69,7 +69,7 @@ public class ImageToClipStep {
      * Converts a single image into an MP4 clip.
      *
      * @param scene     a SceneAsset with imageUrl filled in (from ImageStep)
-     * @param workDir   katalog roboczy FFmpeg dla tej generacji
+     * @param workDir   the FFmpeg working directory for this generation
      * @return path to the generated MP4
      */
     public String convertImageToClip(SceneAsset scene, Path workDir) throws Exception {
@@ -103,9 +103,9 @@ public class ImageToClipStep {
      * Used for user-uploaded custom image assets (they have no imageUrl, they're in storage).
      *
      * @param localImagePath path to the image file on disk
-     * @param durationMs     czas trwania klipu
+     * @param durationMs     the clip duration
      * @param sceneIndex     the scene index (for the output file name)
-     * @param workDir        katalog roboczy FFmpeg
+     * @param workDir        the FFmpeg working directory
      * @return path to the generated MP4
      */
     public String convertLocalImageToClip(Path localImagePath, int durationMs,
@@ -158,7 +158,7 @@ public class ImageToClipStep {
      *
      * FFmpeg zoompan filter:
      *   z='min(zoom+0.0003,1.2)' — zoom from 1.0 to 1.2 over the whole scene
-     *   d=[frames]               — liczba klatek = durationSec * fps (30fps)
+     *   d=[frames]               — number of frames = durationSec * fps (30fps)
      *   x='iw/2-(iw/zoom/2)'    — centruj w osi X
      *   y='ih/2-(ih/zoom/2)'    — centruj w osi Y
      *   s=1080x1920              — output size
@@ -199,7 +199,7 @@ public class ImageToClipStep {
         cmd.addAll(List.of("-crf", "23"));
         cmd.addAll(List.of("-pix_fmt", "yuv420p")); // required by some players
         cmd.addAll(List.of("-r", "30"));             // constant framerate
-        cmd.addAll(List.of("-an"));                  // brak audio — dodane w RenderStep mix
+        cmd.addAll(List.of("-an"));                  // no audio — added in the RenderStep mix
         cmd.addAll(List.of("-movflags", "+faststart")); // moov atom at the start — required by Remotion (Chromium seek)
         cmd.add(output.toString());
         return cmd;
@@ -223,7 +223,7 @@ public class ImageToClipStep {
             return imagePath;
         }
 
-        log.debug("[ImageToClipStep] Pobieranie obrazu z: {}", imageUrl);
+        log.debug("[ImageToClipStep] Downloading image from: {}", imageUrl);
 
         var client   = java.net.http.HttpClient.newHttpClient();
         var request  = java.net.http.HttpRequest.newBuilder()

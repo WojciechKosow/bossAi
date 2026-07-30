@@ -42,7 +42,7 @@ public class RemotionRenderClient {
     }
 
     /**
-     * Zleca renderowanie wideo na podstawie EDL.
+     * Requests video rendering based on the EDL.
      *
      * @param request a RemotionRenderRequest with the EDL and output configuration
      * @return a RemotionRenderResponse with the render_id and initial status
@@ -89,7 +89,7 @@ public class RemotionRenderClient {
      *
      * @param outputPath the path returned by Remotion (e.g. "/output/{renderId}.mp4"),
      *                   relative to the renderer's baseUrl
-     * @return bajty pliku MP4
+     * @return the MP4 file bytes
      */
     public byte[] downloadOutput(String outputPath) {
         log.info("[RemotionRenderClient] Downloading rendered output — path: {}", outputPath);

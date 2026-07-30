@@ -155,7 +155,7 @@ public class PipelineAsyncRunner {
             // timeout, exception). Idempotent per job id — refunds at most once.
             creditService.refundJob(generationId, "pipeline_failed: " + e.getMessage());
             progressService.broadcast(generationId, GenerationStepName.FAILED,
-                    0, "Generacja nieudana: " + e.getMessage());
+                    0, "Generation failed: " + e.getMessage());
 
         } finally {
             generationRepository.save(generation);

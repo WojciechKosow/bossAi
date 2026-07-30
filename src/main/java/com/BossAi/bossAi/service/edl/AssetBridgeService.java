@@ -44,9 +44,9 @@ import java.util.stream.Collectors;
  * while saving the EDL/RenderJob does not roll back the project creation.
  *
  * This way every generation ends with a project that is visible and editable
- * na timeline, niezaleznie od tego czy nowy pipeline (Remotion) jest aktywny.
+ * on the timeline, regardless of whether the new pipeline (Remotion) is active.
  * When useNewPipeline=true, the orchestrator can still swap the EDL for a more
- * zaawansowany i przerobic render — zapisujac nowa wersje EDL i RenderJob.
+ * advanced one and redo the render — saving a new version of the EDL and RenderJob.
  */
 @Slf4j
 @Service
@@ -283,7 +283,7 @@ public class AssetBridgeService {
      *   - audio tracks for voiceover + music (if any)
      *   - text overlays from the scene's subtitleText (if filled in)
      *
-     * Bez efektow ani transitions — uzytkownik moze je dodac w edytorze.
+     * Without effects or transitions — the user can add them in the editor.
      */
     private EdlDto synthesizeBasicEdl(GenerationContext context, List<ProjectAsset> projectAssets) {
         List<ProjectAsset> sceneAssets = projectAssets.stream()

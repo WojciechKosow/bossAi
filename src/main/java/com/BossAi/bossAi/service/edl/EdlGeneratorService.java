@@ -38,7 +38,7 @@ import java.util.stream.Collectors;
 
 /**
  * Generates an EDL (Edit Decision List) from:
- *   - GenerationContext (sceny, script, voice timings)
+ *   - GenerationContext (scenes, script, voice timings)
  *   - AudioAnalysisResponse (beat map, energy curve, sections, BPM)
  *   - A list of ProjectAsset (assets from the DB — by UUID)
  *
@@ -1370,7 +1370,7 @@ public class EdlGeneratorService {
     /**
      * GPT often omits style/position on text overlays and effects on segments.
      * Remotion Zod schema wymaga obiektow (nie null) — uzupelniamy defaultami.
-     * Sanityzuje tez transition/effect types — GPT moze wygenerowac typy spoza Zod enum.
+     * Also sanitizes transition/effect types — GPT may generate types outside the Zod enum.
      */
     private void ensureNestedDefaults(EdlDto edl) {
         if (edl.getSegments() != null) {
@@ -1816,9 +1816,9 @@ public class EdlGeneratorService {
      *
      * Sentence grouping (word-by-word karaoke):
      *   1. Max 5 words per group (so each word has room on screen)
-     *   2. Interpunkcja koncowa (. ! ? ;) → nowa grupa
-     *   3. Przecinek/srednik + pauza > 200ms → nowa grupa (wyliczenia: "essays, captions, etc.")
-     *   4. Pauza > 400ms → nowa grupa (natural speech break)
+     *   2. Ending punctuation (. ! ? ;) → a new group
+     *   3. Comma/semicolon + pause > 200ms → a new group (enumerations: "essays, captions, etc.")
+     *   4. Pause > 400ms → a new group (natural speech break)
      *
      * Groups are deliberately SMALL (max 5 words), because the Remotion SubtitleTrack
      * displays the whole group and highlights the currently spoken word.

@@ -201,7 +201,7 @@ public class VideoStep implements GenerationStep {
         // Determine which scenes are VIDEO (animated) and which are IMAGE (static)
         Set<Integer> videoSceneIndices = resolveVideoSceneIndices(context);
 
-        log.info("[VideoStep] Mixed media plan: VIDEO sceny={}, IMAGE sceny={}, customMedia={}",
+        log.info("[VideoStep] Mixed media plan: VIDEO scenes={}, IMAGE scenes={}, customMedia={}",
                 videoSceneIndices,
                 scenes.stream()
                         .map(SceneAsset::getIndex)
@@ -297,7 +297,7 @@ public class VideoStep implements GenerationStep {
 
                 if (context.isReuseAssets()) {
                     throw new IllegalStateException(
-                            "[VideoStep] Brak reusable assetu VIDEO dla sceny "
+                            "[VideoStep] No reusable VIDEO asset for scene "
                                     + scene.getIndex()
                                     + " (reuse-only mode enabled)"
                     );
@@ -403,7 +403,7 @@ public class VideoStep implements GenerationStep {
 
         // Set.of(0, 0) crashes — handle single scene case
         Set<Integer> fallback = lastIndex == 0 ? Set.of(0) : Set.of(0, lastIndex);
-        log.info("[VideoStep] Brak mediaAssignments — fallback VIDEO sceny = {}", fallback);
+        log.info("[VideoStep] No mediaAssignments — fallback VIDEO scenes = {}", fallback);
         return fallback;
     }
 
