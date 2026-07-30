@@ -20,18 +20,18 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * Generuje assety dla warstw SceneDirective z source=generate.
+ * Generates assets for SceneDirective layers with source=generate.
  *
- * Gdy user mówi "wygeneruj film giełdy jako tło" lub "generate stock video as background",
- * UserIntentParser parsuje to do LayerDirective z source=generate i generation_prompt.
- * Ten serwis realizuje te żądania:
- *   1. Generuje image przez FalAiService
- *   2. Pobiera wygenerowany obraz
- *   3. Zapisuje jako ProjectAsset
- *   4. Zwraca listę nowo utworzonych ProjectAsset
+ * When the user says "generate a stock market video as background" or "generate stock video as background",
+ * UserIntentParser parses it into a LayerDirective with source=generate and generation_prompt.
+ * This service fulfills those requests:
+ *   1. Generates an image via FalAiService
+ *   2. Downloads the generated image
+ *   3. Saves it as a ProjectAsset
+ *   4. Returns the list of newly created ProjectAssets
  *
- * Wywoływany przez VideoProductionOrchestrator po parsowaniu intencji,
- * przed generowaniem EDL.
+ * Called by VideoProductionOrchestrator after intent parsing,
+ * before EDL generation.
  */
 @Slf4j
 @Service
@@ -45,11 +45,11 @@ public class LayerAssetGenerator {
     private static final String DEFAULT_IMAGE_MODEL = "fal-ai/flux/schnell";
 
     /**
-     * Generuje assety dla wszystkich warstw SceneDirective z source=generate.
+     * Generates assets for all SceneDirective layers with source=generate.
      *
-     * @param projectId   ID projektu
-     * @param editIntent  sparsowana intencja z scene directives
-     * @return lista nowo utworzonych ProjectAsset (gotowych do użycia w EDL)
+     * @param projectId   the project ID
+     * @param editIntent  the parsed intent with scene directives
+     * @return the list of newly created ProjectAssets (ready to use in the EDL)
      */
     public List<ProjectAsset> generateLayerAssets(UUID projectId, UserEditIntent editIntent) {
         List<ProjectAsset> generated = new ArrayList<>();

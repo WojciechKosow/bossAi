@@ -24,8 +24,8 @@ import java.util.List;
  * system wie: "Asset 0: logo animation, role=intro, mood=professional".
  *
  * Trzy tryby:
- *   1. VISION-BASED (priorytet): ekstrakcja keyframe'ów + GPT-4o Vision
- *   2. GPT-ENRICHED (fallback): GPT wnioskuje rolę z metadanych + kontekstu
+ *   1. VISION-BASED (priority): keyframe extraction + GPT-4o Vision
+ *   2. GPT-ENRICHED (fallback): GPT infers the role from metadata + context
  *   3. METADATA-BASED (fallback): analiza filename, type, duration
  */
 @Slf4j
@@ -45,16 +45,16 @@ public class AssetAnalyzer {
     private static final int VISION_MAX_DIM = 512;
 
     /**
-     * Analizuje listę custom media assetów i tworzy profile.
+     * Analyzes the list of custom media assets and builds profiles.
      *
      * Strategia:
-     *   1. Próbuj GPT-4o Vision (ekstrakcja klatek + analiza wizualna)
+     *   1. Try GPT-4o Vision (frame extraction + visual analysis)
      *   2. Fallback na GPT text-only (metadata + kontekst)
      *   3. Fallback na heurystyki z metadanych
      *
      * @param assets    custom media assety (IMAGE/VIDEO) posortowane wg orderIndex
      * @param userPrompt  prompt usera — kontekst do wnioskowania ról
-     * @return lista AssetProfile, 1 per asset, w tej samej kolejności
+     * @return a list of AssetProfile, 1 per asset, in the same order
      */
     public List<AssetProfile> analyzeAssets(List<Asset> assets, String userPrompt) {
         if (assets == null || assets.isEmpty()) {
@@ -90,10 +90,10 @@ public class AssetAnalyzer {
     /**
      * Analizuje assety przez GPT-4o Vision.
      *
-     * Dla VIDEO: wyciąga keyframe'y FFmpegiem (1-3 klatki) i wysyła jako obrazy.
-     * Dla IMAGE: wysyła obraz bezpośrednio.
+     * For VIDEO: extracts keyframes with FFmpeg (1-3 frames) and sends them as images.
+     * For IMAGE: sends the image directly.
      *
-     * Fast-fail: jeśli pierwszy asset nie ma extractable frames,
+     * Fast-fail: if the first asset has no extractable frames,
      * prawdopodobnie żaden nie będzie — skip cały vision pipeline.
      */
     private List<AssetProfile> analyzeViaVision(List<Asset> assets, String userPrompt) {
@@ -149,7 +149,7 @@ public class AssetAnalyzer {
     }
 
     /**
-     * Wyciąga klatki z assetu do analizy Vision.
+     * Extracts frames from an asset for Vision analysis.
      *
      * VIDEO → FFmpeg ekstrakcja keyframe'ów (1-3 klatek w zależności od duration)
      * IMAGE → ładuje obraz bezpośrednio ze storage
@@ -176,9 +176,9 @@ public class AssetAnalyzer {
     }
 
     /**
-     * Wyciąga keyframe'y z video przez FFmpeg.
+     * Extracts keyframes from a video via FFmpeg.
      *
-     * Strategia: wyciągnij N klatek równomiernie rozłożonych w czasie.
+     * Strategy: extract N frames evenly distributed over time.
      *   - Video <= 3s → 1 klatka (środek)
      *   - Video 3-10s → 2 klatki (1/3 i 2/3)
      *   - Video > 10s → 3 klatki (1/4, 1/2, 3/4)
@@ -380,8 +380,8 @@ public class AssetAnalyzer {
     // =========================================================================
 
     /**
-     * GPT analizuje assety w kontekście prompta usera.
-     * Jeden GPT call na całą listę (efektywniejsze niż per-asset).
+     * GPT analyzes the assets in the context of the user's prompt.
+     * One GPT call for the whole list (more efficient than per-asset).
      */
     private List<AssetProfile> analyzeViaGpt(List<Asset> assets, String userPrompt) {
         String prompt = buildAnalysisPrompt(assets, userPrompt);

@@ -8,20 +8,20 @@ import org.springframework.stereotype.Service;
 import java.util.*;
 
 /**
- * Warstwa C — ENGINE CUTÓW — "mózg montażysty".
+ * Layer C — CUT ENGINE — "the editor's brain".
  *
- * Łączy trzy warstwy danych:
- *   A) NarrationAnalysis — CO i DLACZEGO (semantyka treści)
+ * Combines three layers of data:
+ *   A) NarrationAnalysis — WHAT and WHY (content semantics)
  *   B) SpeechTimingAnalysis — GDZIE (pauzy, zdania, tempo mowy)
  *   C) AudioAnalysisResponse — KIEDY (beaty, energia muzyki, sekcje)
  *
- * Plus: EditingIntent — JAK (intencja montażowa, pattern, łuk)
+ * Plus: EditingIntent — HOW (editing intent, pattern, arc)
  *
- * Każde cięcie ma POWÓD. Film grammar:
- *   NIE rób: cutów w połowie słowa, w środku myśli
- *   RÓB: cut na końcu zdania, na słowie kluczowym, na zmianie kontekstu
+ * Every cut has a REASON. Film grammar:
+ *   DON'T: cut in the middle of a word, in the middle of a thought
+ *   DO: cut at the end of a sentence, on a keyword, on a context change
  *
- * Typy cięć:
+ * Cut types:
  *   HARD — zmiana kadru: zmiana topic, importance > 0.75, hook start
  *   SOFT — lekka zmiana: koniec zdania + pauza, spadek energii
  *   MICRO — dynamiczna przebitka: wysoka energia, szybkie tempo, drop
@@ -33,31 +33,31 @@ public class CutEngine {
     /** Tolerancja trafiania na beat (ms) */
     private static final int BEAT_SNAP_TOLERANCE_MS = 80;
 
-    /** Minimalne ujęcie — poniżej tego NIE tniemy. Jedno słowo + cut = złe. */
+    /** Minimum shot — below this we DON'T cut. One word + cut = bad. */
     private static final int ABSOLUTE_MIN_CUT_MS = 1500;
 
-    /** Domyślne min/max cut jeśli EditDna nie podaje */
+    /** Default min/max cut if EditDna doesn't provide one */
     private static final int DEFAULT_MIN_CUT_MS = 2000;
     private static final int DEFAULT_MAX_CUT_MS = 6000;
 
     /**
-     * Minimalna liczba słów w segmencie.
-     * Segment z 1-2 słowami wygląda źle po cut — wymuszamy min 3 słowa.
+     * Minimum number of words in a segment.
+     * A segment with 1-2 words looks bad after a cut — we enforce a minimum of 3 words.
      */
     private static final int MIN_WORDS_PER_SEGMENT = 3;
 
-    /** Preferowana max liczba użyć jednego assetu. Soft limit — przekraczany gdy trzeba. */
+    /** Preferred max number of uses of a single asset. Soft limit — exceeded when necessary. */
     private static final int PREFERRED_MAX_ASSET_USES = 2;
 
-    /** Absolutny max użyć jednego assetu — powyżej wygląda jak zapętlone. */
+    /** Absolute max uses of a single asset — above this it looks looped. */
     private static final int ABSOLUTE_MAX_ASSET_USES = 4;
 
     /**
-     * Generuje listę uzasadnionych cięć z uwzględnieniem intencji usera.
+     * Generates a list of justified cuts, taking the user's intent into account.
      *
      * Nowa sygnatura z UserEditIntent — warstwa D.
-     * Jeśli user podał wskazówki montażowe (np. "asset 0 = intro"),
-     * CutEngine generuje HARD CUT-y wymuszające te role.
+     * If the user provided editing hints (e.g. "asset 0 = intro"),
+     * CutEngine generates HARD CUTs that enforce those roles.
      */
     public List<JustifiedCut> generateCuts(
             NarrationAnalysis narrationAnalysis,
@@ -77,17 +77,17 @@ public class CutEngine {
     }
 
     /**
-     * Generuje listę uzasadnionych cięć.
+     * Generates a list of justified cuts.
      *
      * @param narrationAnalysis analiza semantyczna narracji (warstwa A)
-     * @param speechAnalysis    analiza timingów mowy (warstwa B)
+     * @param speechAnalysis    speech timing analysis (layer B)
      * @param audioAnalysis     analiza muzyki (warstwa C / opcjonalna)
      * @param wordTimings       per-word timestampy z WhisperX
-     * @param totalDurationMs   łączny czas filmu
-     * @param minCutMs          minimalny czas ujęcia (z EditDna)
-     * @param maxCutMs          maksymalny czas ujęcia (z EditDna)
-     * @param availableAssetCount  ile unikalnych assetów jest dostępnych
-     * @param sceneCount        ile scen (tematycznych segmentów) ma film
+     * @param totalDurationMs   total film duration
+     * @param minCutMs          minimum shot duration (from EditDna)
+     * @param maxCutMs          maximum shot duration (from EditDna)
+     * @param availableAssetCount  how many unique assets are available
+     * @param sceneCount        how many scenes (thematic segments) the film has
      */
     public List<JustifiedCut> generateCuts(
             NarrationAnalysis narrationAnalysis,
@@ -117,37 +117,37 @@ public class CutEngine {
             int sceneCount,
             UserEditIntent userEditIntent) {
 
-        // Enforce sane minimums — nigdy poniżej 1500ms
+        // Enforce sane minimums — never below 1500ms
         if (minCutMs < ABSOLUTE_MIN_CUT_MS) minCutMs = ABSOLUTE_MIN_CUT_MS;
         if (minCutMs <= 0) minCutMs = DEFAULT_MIN_CUT_MS;
         if (maxCutMs <= 0) maxCutMs = DEFAULT_MAX_CUT_MS;
         if (maxCutMs < minCutMs * 2) maxCutMs = minCutMs * 3;
 
-        // === INTELIGENTNY LIMIT SEGMENTÓW ===
-        // Filozofia: sceneCount definiuje ILE TEMATÓW jest w filmie.
-        // Każdy temat = 1 główny segment. Dodatkowe cuty wewnątrz tematu
-        // są dozwolone TYLKO jeśli segment jest wystarczająco długi.
+        // === INTELLIGENT SEGMENT LIMIT ===
+        // Philosophy: sceneCount defines HOW MANY TOPICS are in the film.
+        // Each topic = 1 main segment. Additional cuts within a topic
+        // are allowed ONLY if the segment is long enough.
         //
-        // Przykład "Top 3 places" (3 sceny, 30s):
+        // Example "Top 3 places" (3 scenes, 30s):
         //   - Minimalne cuty: 3 (po jednym per temat)
-        //   - Sensowne cuty: 5-6 (3 tematy + parę cutów wewnątrz dłuższych scen)
-        //   - NIE: 15+ cutów które mieszają assety
+        //   - Reasonable cuts: 5-6 (3 topics + a few cuts within the longer scenes)
+        //   - NOT: 15+ cuts that mix assets
 
         int effectiveSceneCount = sceneCount > 0 ? sceneCount : availableAssetCount;
         int avgSceneDuration = effectiveSceneCount > 0 ? totalDurationMs / effectiveSceneCount : totalDurationMs;
 
-        // Ile dodatkowych cutów wewnątrz scen? Zależy od długości sceny
-        // Scena 3s → 0 dodatkowych, scena 6s → 1 dodatkowy, scena 10s → 2 dodatkowe
+        // How many additional cuts within scenes? Depends on scene length
+        // Scene 3s → 0 extra, scene 6s → 1 extra, scene 10s → 2 extra
         int intraCutsPerScene = Math.max(0, (avgSceneDuration - 4000) / 4000);
         int maxSegments = effectiveSceneCount + (effectiveSceneCount * intraCutsPerScene);
 
-        // Dodatkowy limit od assetów (jeśli mniej assetów niż scen)
+        // Additional limit from the assets (if fewer assets than scenes)
         if (availableAssetCount > 0) {
             int maxByAssets = availableAssetCount * ABSOLUTE_MAX_ASSET_USES;
             maxSegments = Math.min(maxSegments, maxByAssets);
         }
 
-        // Minimum: tyle segmentów ile scen (każdy temat musi mieć co najmniej 1)
+        // Minimum: as many segments as scenes (each topic must have at least 1)
         maxSegments = Math.max(maxSegments, effectiveSceneCount);
 
         log.info("[CutEngine] Generating cuts — duration: {}ms, scenes: {}, assets: {}, " +
@@ -157,13 +157,13 @@ public class CutEngine {
 
         NarrationAnalysis.EditingIntent intent = narrationAnalysis.getEditingIntent();
 
-        // === KROK 1: Zbierz wszystkie potencjalne punkty cięcia ===
+        // === STEP 1: Collect all potential cut points ===
         List<CutCandidate> candidates = collectCutCandidates(
                 narrationAnalysis, speechAnalysis, audioAnalysis, wordTimings, totalDurationMs);
 
         log.info("[CutEngine] Collected {} raw cut candidates", candidates.size());
 
-        // === KROK 1.5: Dodaj kandydatów z intencji usera (warstwa D) ===
+        // === STEP 1.5: Add candidates from the user's intent (layer D) ===
         if (userEditIntent != null && userEditIntent.hasExplicitInstructions()) {
             addUserIntentCandidates(candidates, userEditIntent, narrationAnalysis,
                     wordTimings, totalDurationMs, sceneCount);
@@ -173,27 +173,27 @@ public class CutEngine {
             log.info("[CutEngine] After user intent injection: {} candidates", candidates.size());
         }
 
-        // === KROK 2: Odsiej kandydatów łamiących film grammar ===
+        // === STEP 2: Filter out candidates that break film grammar ===
         candidates = applyFilmGrammar(candidates, wordTimings);
 
         log.info("[CutEngine] After film grammar filter: {} candidates", candidates.size());
 
-        // === KROK 3: Scoruj kandydatów na podstawie editing intent ===
+        // === STEP 3: Score candidates based on the editing intent ===
         scoreCandidates(candidates, intent, totalDurationMs);
 
-        // === KROK 4: Wybierz finalne cięcia z uwzględnieniem min/max I limitu assetów ===
+        // === STEP 4: Select the final cuts, taking min/max AND the asset limit into account ===
         List<JustifiedCut> cuts = selectFinalCuts(candidates, totalDurationMs, minCutMs, maxCutMs,
                 intent, maxSegments);
 
-        // === KROK 5: Waliduj minimalne pokrycie słów per segment ===
+        // === STEP 5: Validate the minimum word coverage per segment ===
         cuts = enforceMinWordsPerSegment(cuts, wordTimings, minCutMs);
 
-        // === KROK 6: Propaguj assignedAssetIndex na segmenty między user-intent cuts ===
+        // === STEP 6: Propagate assignedAssetIndex to segments between user-intent cuts ===
         if (userEditIntent != null && userEditIntent.hasExplicitInstructions()) {
             propagateAssetAssignments(cuts, userEditIntent);
         }
 
-        // === KROK 7: Sanity check — napraw oczywiste błędy bez GPT ===
+        // === STEP 7: Sanity check — fix obvious errors without GPT ===
         cuts = sanitizeCuts(cuts, totalDurationMs, minCutMs);
 
         log.info("[CutEngine] Final result: {} justified cuts (asset limit: {})", cuts.size(), maxSegments);
@@ -206,12 +206,12 @@ public class CutEngine {
     // =========================================================================
 
     /**
-     * Naprawia oczywiste błędy w wygenerowanych cięciach bez dodatkowych GPT calls.
+     * Fixes obvious errors in the generated cuts without extra GPT calls.
      *
      * Sprawdza:
-     *   1. Ciągłość timeline (endMs[i] == startMs[i+1]) — naprawia luki i nakładki
-     *   2. Poprawność zakresu (start >= 0, end <= totalDurationMs, start < end)
-     *   3. Pokrycie całego timeline (od 0 do totalDurationMs)
+     *   1. Timeline continuity (endMs[i] == startMs[i+1]) — fixes gaps and overlaps
+     *   2. Range correctness (start >= 0, end <= totalDurationMs, start < end)
+     *   3. Coverage of the whole timeline (from 0 to totalDurationMs)
      *   4. Minimalny czas trwania segmentu (>= ABSOLUTE_MIN_CUT_MS)
      */
     private List<JustifiedCut> sanitizeCuts(List<JustifiedCut> cuts, int totalDurationMs, int minCutMs) {
@@ -229,7 +229,7 @@ public class CutEngine {
             if (cut.getStartMs() != originalStart || cut.getEndMs() != originalEnd) issues++;
         }
 
-        // 2. Usuń segmenty gdzie start >= end lub za krótkie
+        // 2. Remove segments where start >= end or that are too short
         int effectiveMin = Math.max(ABSOLUTE_MIN_CUT_MS / 2, minCutMs / 2);
         fixed.removeIf(cut -> {
             int dur = cut.getEndMs() - cut.getStartMs();
@@ -239,7 +239,7 @@ public class CutEngine {
         // 3. Sortuj po startMs
         fixed.sort(Comparator.comparingInt(JustifiedCut::getStartMs));
 
-        // 4. Napraw ciągłość — eliminuj luki i nakładki
+        // 4. Fix continuity — eliminate gaps and overlaps
         for (int i = 1; i < fixed.size(); i++) {
             JustifiedCut prev = fixed.get(i - 1);
             JustifiedCut curr = fixed.get(i);
@@ -249,13 +249,13 @@ public class CutEngine {
             }
         }
 
-        // 5. Upewnij się że pierwszy zaczyna od 0
+        // 5. Make sure the first one starts at 0
         if (!fixed.isEmpty() && fixed.get(0).getStartMs() != 0) {
             fixed.get(0).setStartMs(0);
             issues++;
         }
 
-        // 6. Upewnij się że ostatni kończy na totalDurationMs
+        // 6. Make sure the last one ends at totalDurationMs
         if (!fixed.isEmpty()) {
             JustifiedCut last = fixed.get(fixed.size() - 1);
             if (last.getEndMs() != totalDurationMs) {
@@ -303,7 +303,7 @@ public class CutEngine {
     }
 
     // =========================================================================
-    // KROK 1 — ZBIERANIE KANDYDATÓW
+    // STEP 1 — COLLECTING CANDIDATES
     // =========================================================================
 
     private List<CutCandidate> collectCutCandidates(
@@ -333,12 +333,12 @@ public class CutEngine {
         // Sortuj po timestamp
         candidates.sort(Comparator.comparingInt(c -> c.timeMs));
 
-        // Deduplikacja — merguj kandydatów blisko siebie (<100ms)
+        // Deduplication — merge candidates close to each other (<100ms)
         return deduplicateCandidates(candidates);
     }
 
     /**
-     * Kandydaci z analizy narracji — cięcia na granicach segmentów semantycznych.
+     * Candidates from narration analysis — cuts at the boundaries of semantic segments.
      */
     private void addNarrationCandidates(
             List<CutCandidate> candidates,
@@ -351,7 +351,7 @@ public class CutEngine {
             var prevSeg = segments.get(i - 1);
             var currSeg = segments.get(i);
 
-            // Znajdź timestamp granicy między segmentami
+            // Find the timestamp of the boundary between segments
             int boundaryMs = findSegmentBoundaryMs(prevSeg, currSeg, wordTimings);
             if (boundaryMs <= 0) continue;
 
@@ -361,7 +361,7 @@ public class CutEngine {
             boolean isCta = "cta".equals(currSeg.getType());
             boolean isClimax = "climax".equals(currSeg.getType());
 
-            // Klasyfikacja cięcia
+            // Cut classification
             JustifiedCut.CutClassification classification;
             JustifiedCut.CutReason primaryReason;
             double score;
@@ -396,7 +396,7 @@ public class CutEngine {
     }
 
     /**
-     * Kandydaci z analizy mowy — cięcia na pauzach i granicach zdań.
+     * Candidates from speech analysis — cuts at pauses and sentence boundaries.
      */
     private void addSpeechCandidates(
             List<CutCandidate> candidates,
@@ -406,7 +406,7 @@ public class CutEngine {
         if (speechAnalysis.getPauses() == null) return;
 
         for (var pause : speechAnalysis.getPauses()) {
-            // Punkt cięcia = środek pauzy (naturalne miejsce na cut)
+            // Cut point = the middle of the pause (a natural place to cut)
             int cutMs = (pause.getStartMs() + pause.getEndMs()) / 2;
 
             JustifiedCut.CutClassification classification;
@@ -441,7 +441,7 @@ public class CutEngine {
                     score, -1, "speech"));
         }
 
-        // Dodaj kandydatów na zmianach tempa
+        // Add candidates at tempo changes
         if (speechAnalysis.getTempoWindows() != null && speechAnalysis.getTempoWindows().size() > 1) {
             var windows = speechAnalysis.getTempoWindows();
             for (int i = 1; i < windows.size(); i++) {
@@ -464,14 +464,14 @@ public class CutEngine {
     }
 
     /**
-     * Kandydaci z analizy muzyki — cięcia na beatach, dropach, zmianach sekcji.
+     * Candidates from music analysis — cuts on beats, drops, section changes.
      */
     private void addMusicCandidates(
             List<CutCandidate> candidates,
             AudioAnalysisResponse audioAnalysis,
             int totalDurationMs) {
 
-        // Cięcia na granicach sekcji muzycznych (drop → build, build → peak, etc.)
+        // Cuts at music section boundaries (drop → build, build → peak, etc.)
         if (audioAnalysis.sections() != null) {
             for (int i = 1; i < audioAnalysis.sections().size(); i++) {
                 var section = audioAnalysis.sections().get(i);
@@ -490,8 +490,8 @@ public class CutEngine {
             }
         }
 
-        // Beaty mogą wzmocnić istniejących kandydatów (nie dodajemy beata jako samodzielnego cuta,
-        // chyba że jest w sekcji high-energy)
+        // Beats can reinforce existing candidates (we don't add a beat as a standalone cut,
+        // unless it's in a high-energy section)
         // Beat scoring jest w scoreCandidates()
     }
 
@@ -500,21 +500,21 @@ public class CutEngine {
     // =========================================================================
 
     /**
-     * Kandydaci z intencji usera — cięcia wymuszane przez role assetów.
+     * Candidates from the user's intent — cuts forced by asset roles.
      *
-     * Jeśli user powiedział "asset 0 = intro, asset 1 = content, asset 2 = outro",
-     * to CutEngine MUSI wygenerować HARD CUT-y na granicach tych ról.
+     * If the user said "asset 0 = intro, asset 1 = content, asset 2 = outro",
+     * then CutEngine MUST generate HARD CUTs at the boundaries of those roles.
      *
-     * Scoring: user-intent cuty mają NAJWYŻSZY score (1.0) bo to jawna intencja.
-     * Nie mogą być odrzucone przez film grammar (chyba że wypadają w środku słowa —
-     * wtedy snap do najbliższego word boundary).
+     * Scoring: user-intent cuts get the HIGHEST score (1.0) because it's explicit intent.
+     * They can't be rejected by film grammar (unless they fall in the middle of a word —
+     * then snap to the nearest word boundary).
      *
      * Logika:
      *   - Dzielimy timeline na segmenty proporcjonalnie do scen
-     *   - Dla każdego placement z inną rolą niż "auto" → HARD CUT na granicy
-     *   - intro → HARD CUT po jego zakończeniu
-     *   - outro → HARD CUT przed jego rozpoczęciem
-     *   - content → SOFT CUT na przejściu do następnego content
+     *   - For each placement with a role other than "auto" → HARD CUT at the boundary
+     *   - intro → HARD CUT after it ends
+     *   - outro → HARD CUT before it starts
+     *   - content → SOFT CUT at the transition to the next content
      */
     private void addUserIntentCandidates(
             List<CutCandidate> candidates,
@@ -625,14 +625,14 @@ public class CutEngine {
     }
 
     /**
-     * Propaguje assignedAssetIndex z user-intent cuts na sąsiednie segmenty.
+     * Propagates assignedAssetIndex from user-intent cuts to adjacent segments.
      *
-     * Logika: segmenty między dwoma user-intent punktami cięcia powinny używać
-     * tego samego assetu. Np. jeśli user chce "asset 0 jako intro, asset 1-3 jako content":
-     *   - Segment 0 (start) → asset 0 (z user_intent)
-     *   - Segment 1 (po user_intent cut) → asset 1 (z user_intent)
-     *   - Segment 2 (pomiędzy, bez tagu) → dziedziczy asset 1
-     *   - Segment 3 (po user_intent cut) → asset 2 (z user_intent)
+     * Logic: segments between two user-intent cut points should use
+     * the same asset. E.g. if the user wants "asset 0 as intro, asset 1-3 as content":
+     *   - Segment 0 (start) → asset 0 (from user_intent)
+     *   - Segment 1 (after a user_intent cut) → asset 1 (from user_intent)
+     *   - Segment 2 (in between, untagged) → inherits asset 1
+     *   - Segment 3 (after a user_intent cut) → asset 2 (from user_intent)
      *   - itd.
      */
     private void propagateAssetAssignments(List<JustifiedCut> cuts, UserEditIntent userEditIntent) {
@@ -681,7 +681,7 @@ public class CutEngine {
     }
 
     /**
-     * Oblicza start ms dla danego placement na podstawie duration_hint_ms poprzedników.
+     * Computes the start ms for a given placement based on the duration_hint_ms of the preceding ones.
      */
     private int calculatePlacementStartMs(List<UserEditIntent.AssetPlacement> placements, int index) {
         int startMs = 0;
@@ -700,15 +700,15 @@ public class CutEngine {
     }
 
     /**
-     * Szuka timestampa granicy między dwoma segmentami narracji.
+     * Searches for the timestamp of the boundary between two narration segments.
      *
      * Strategia wielopoziomowa:
-     *   1. Szukaj pełnej sekwencji 3 ostatnich słów prevSeg + 2 pierwszych currSeg (5-gram)
+     *   1. Look for the full sequence of the last 3 words of prevSeg + first 2 of currSeg (5-gram)
      *   2. Szukaj sekwencji 2 ostatnich prevSeg + 1 pierwszego currSeg (3-gram)
-     *   3. Szukaj pary: ostatnie słowo prevSeg + pierwsze currSeg (2-gram)
-     *   4. Fallback: samo ostatnie słowo prevSeg (szukaj OD POCZĄTKU, nie od tyłu)
+     *   3. Look for the pair: last word of prevSeg + first of currSeg (2-gram)
+     *   4. Fallback: just the last word of prevSeg (search FROM THE START, not from the end)
      *
-     * To eliminuje false matches na częstych słowach ("to", "jest", "i").
+     * This eliminates false matches on common words ("to", "jest", "i").
      */
     private int findSegmentBoundaryMs(
             NarrationAnalysis.NarrationSegment prevSeg,
@@ -723,7 +723,7 @@ public class CutEngine {
                 ? currSeg.getText().trim().split("\\s+")
                 : new String[0];
 
-        // Znormalizowane słowa do porównań
+        // Normalized words for comparison
         List<String> prevNorm = new ArrayList<>();
         for (String w : prevWords) {
             prevNorm.add(normalizeWord(w));
@@ -733,7 +733,7 @@ public class CutEngine {
             currNorm.add(normalizeWord(w));
         }
 
-        // Pre-normalizuj word timings (raz, nie w każdej iteracji)
+        // Pre-normalize the word timings (once, not on every iteration)
         List<String> wtNorm = new ArrayList<>(wordTimings.size());
         for (SubtitleService.WordTiming wt : wordTimings) {
             wtNorm.add(normalizeWord(wt.word()));
@@ -749,7 +749,7 @@ public class CutEngine {
                     currNorm.get(1));
             int idx = findSequenceInTimings(wtNorm, seq, 0);
             if (idx >= 0) {
-                // Granica = po 3. elemencie sekwencji (ostatnie słowo prevSeg)
+                // Boundary = after the 3rd element of the sequence (last word of prevSeg)
                 int boundaryIdx = idx + 2;
                 return wordTimings.get(boundaryIdx).endMs();
             }
@@ -779,17 +779,17 @@ public class CutEngine {
             }
         }
 
-        // === LEVEL 4: Fallback — samo ostatnie słowo prevSeg (szukaj OD POCZĄTKU) ===
+        // === LEVEL 4: Fallback — just the last word of prevSeg (search FROM THE START) ===
         String lastWord = prevNorm.get(prevNorm.size() - 1);
         if (lastWord.length() >= 4) {
-            // Dla słów >= 4 znaków szukaj od początku (unikalne wystarczająco)
+            // For words >= 4 chars, search from the start (unique enough)
             for (int i = 0; i < wtNorm.size(); i++) {
                 if (wtNorm.get(i).equals(lastWord)) {
                     return wordTimings.get(i).endMs();
                 }
             }
         } else {
-            // Krótkie słowo — szukaj z kontekstem poprzedniego słowa
+            // Short word — search with the context of the previous word
             if (prevNorm.size() >= 2) {
                 String penultimate = prevNorm.get(prevNorm.size() - 2);
                 for (int i = 1; i < wtNorm.size(); i++) {
@@ -798,7 +798,7 @@ public class CutEngine {
                     }
                 }
             }
-            // Absolutny fallback — pierwsze wystąpienie
+            // Absolute fallback — the first occurrence
             for (int i = 0; i < wtNorm.size(); i++) {
                 if (wtNorm.get(i).equals(lastWord)) {
                     return wordTimings.get(i).endMs();
@@ -810,8 +810,8 @@ public class CutEngine {
     }
 
     /**
-     * Szuka sekwencji słów w znormalizowanej liście word timings.
-     * Zwraca indeks PIERWSZEGO słowa sekwencji, lub -1.
+     * Searches for a sequence of words in the normalized list of word timings.
+     * Returns the index of the FIRST word of the sequence, or -1.
      */
     private int findSequenceInTimings(List<String> wtNorm, List<String> sequence, int startFrom) {
         if (sequence.isEmpty()) return -1;
@@ -838,12 +838,12 @@ public class CutEngine {
     // =========================================================================
 
     /**
-     * Odsiew kandydatów łamiących zasady "film grammar":
-     *   - NIE tnij w połowie słowa
-     *   - NIE tnij w środku myśli — preferuj końce zdań i pauzy
-     *   - Bonus za cięcie na interpunkcji kończącej zdanie (. ! ?)
-     *   - Bonus za cięcie w pauzie między słowami
-     *   - Kara za cięcie w środku płynnej mowy
+     * Filters out candidates that break the "film grammar" rules:
+     *   - DON'T cut in the middle of a word
+     *   - DON'T cut in the middle of a thought — prefer sentence ends and pauses
+     *   - Bonus for cutting on sentence-ending punctuation (. ! ?)
+     *   - Bonus for cutting in a pause between words
+     *   - Penalty for cutting in the middle of fluent speech
      */
     private List<CutCandidate> applyFilmGrammar(
             List<CutCandidate> candidates,
@@ -854,7 +854,7 @@ public class CutEngine {
         List<CutCandidate> filtered = new ArrayList<>();
 
         for (CutCandidate c : candidates) {
-            // Sprawdź czy cięcie nie jest w środku słowa
+            // Check whether the cut isn't in the middle of a word
             boolean midWord = false;
             for (SubtitleService.WordTiming wt : wordTimings) {
                 if (c.timeMs > wt.startMs() + 50 && c.timeMs < wt.endMs() - 50) {
@@ -864,27 +864,27 @@ public class CutEngine {
             }
 
             if (midWord) {
-                // Przesuń na koniec najbliższego słowa z interpunkcją kończącą zdanie
+                // Move to the end of the nearest word with sentence-ending punctuation
                 int snappedSentence = snapToSentenceEnd(c.timeMs, wordTimings);
                 if (snappedSentence > 0 && Math.abs(snappedSentence - c.timeMs) < 2000) {
                     c.timeMs = snappedSentence;
-                    c.score *= 1.1; // BONUS za snap do końca zdania
+                    c.score *= 1.1; // BONUS for snapping to the end of a sentence
                     filtered.add(c);
                 } else {
-                    // Fallback na koniec najbliższego słowa
+                    // Fallback to the end of the nearest word
                     int snapped = snapToWordBoundary(c.timeMs, wordTimings);
                     if (snapped > 0) {
                         c.timeMs = snapped;
-                        c.score *= 0.7; // kara — nie jest na końcu zdania
+                        c.score *= 0.7; // penalty — not at the end of a sentence
                         filtered.add(c);
                     }
                 }
             } else {
-                // Cięcie nie jest w środku słowa — sprawdź czy jest na granicy zdania
+                // The cut isn't in the middle of a word — check if it's at a sentence boundary
                 if (isAtSentenceEnd(c.timeMs, wordTimings)) {
-                    c.score *= 1.15; // bonus za naturalną granicę zdania
+                    c.score *= 1.15; // bonus for a natural sentence boundary
                 } else if (isInPause(c.timeMs, wordTimings)) {
-                    c.score *= 1.05; // mały bonus za pauzę
+                    c.score *= 1.05; // small bonus for a pause
                 }
                 filtered.add(c);
             }
@@ -894,7 +894,7 @@ public class CutEngine {
     }
 
     /**
-     * Sprawdza czy timestamp jest tuż po interpunkcji kończącej zdanie.
+     * Checks whether the timestamp is right after sentence-ending punctuation.
      */
     private boolean isAtSentenceEnd(int timeMs, List<SubtitleService.WordTiming> wordTimings) {
         for (SubtitleService.WordTiming wt : wordTimings) {
@@ -912,7 +912,7 @@ public class CutEngine {
     }
 
     /**
-     * Sprawdza czy timestamp jest w pauzie między słowami (>300ms gap).
+     * Checks whether the timestamp is in a pause between words (>300ms gap).
      */
     private boolean isInPause(int timeMs, List<SubtitleService.WordTiming> wordTimings) {
         for (int i = 0; i < wordTimings.size() - 1; i++) {
@@ -926,16 +926,16 @@ public class CutEngine {
     }
 
     /**
-     * Przesuwa timestamp na koniec najbliższego słowa kończącego zdanie (. ! ? ;).
+     * Moves the timestamp to the end of the nearest sentence-ending word (. ! ? ;).
      *
-     * KIERUNKOWY snap: szukamy TYLKO do przodu lub z małym cofnięciem (max 200ms).
-     * Stary kod szukał globalnie, co mogło przesunąć cięcie wstecz o sekundy
-     * i zniszczyć timeline.
+     * DIRECTIONAL snap: we search ONLY forward or with a small step back (max 200ms).
+     * The old code searched globally, which could move the cut back by seconds
+     * and destroy the timeline.
      *
      * Priorytet:
-     *   1. Najbliższy koniec zdania DO PRZODU (w limicie 2000ms)
-     *   2. Koniec zdania tuż ZA nami (max 200ms wstecz — "dopiero co było")
-     *   3. -1 jeśli brak w zasięgu
+     *   1. The nearest sentence end FORWARD (within a 2000ms limit)
+     *   2. A sentence end just BEHIND us (max 200ms back — "just happened")
+     *   3. -1 if none in range
      */
     private int snapToSentenceEnd(int timeMs, List<SubtitleService.WordTiming> wordTimings) {
         int maxForwardMs = 2000;
@@ -975,10 +975,10 @@ public class CutEngine {
     }
 
     /**
-     * Przesuwa timestamp na najbliższy koniec słowa.
+     * Moves the timestamp to the nearest word end.
      *
-     * KIERUNKOWY: preferuje do przodu (max 1000ms), fallback mały krok wstecz (max 300ms).
-     * Nigdy nie przesuwa daleko wstecz — to niszczyło timeline.
+     * DIRECTIONAL: prefers forward (max 1000ms), fallback a small step back (max 300ms).
+     * Never moves far back — that used to destroy the timeline.
      */
     private int snapToWordBoundary(int timeMs, List<SubtitleService.WordTiming> wordTimings) {
         int maxForwardMs = 1000;
@@ -1016,7 +1016,7 @@ public class CutEngine {
     // =========================================================================
 
     /**
-     * Oceniaj kandydatów w kontekście editing intent i łuku montażowego.
+     * Score candidates in the context of the editing intent and the editing arc.
      */
     private void scoreCandidates(
             List<CutCandidate> candidates,
@@ -1026,14 +1026,14 @@ public class CutEngine {
         if (intent == null) return;
 
         for (CutCandidate c : candidates) {
-            // Oblicz pozycję w filmie (0.0-1.0)
+            // Compute the position in the film (0.0-1.0)
             double position = totalDurationMs > 0 ? (double) c.timeMs / totalDurationMs : 0.5;
 
-            // Znajdź fazę łuku montażowego
+            // Find the editing-arc phase
             String density = getArcDensity(intent, position);
             c.editingPhase = getArcPhase(intent, position);
 
-            // Modyfikuj score na podstawie gęstości w danej fazie
+            // Modify the score based on the density in the given phase
             double densityMultiplier = switch (density) {
                 case "very_low" -> 0.5;
                 case "low" -> 0.7;
@@ -1077,34 +1077,34 @@ public class CutEngine {
     }
 
     /**
-     * Modyfikator score na podstawie patternu montażu.
-     * Np. slow_to_fast → niższe score na początku, wyższe na końcu.
+     * Score modifier based on the editing pattern.
+     * E.g. slow_to_fast → lower score at the start, higher at the end.
      */
     private double getPatternMultiplier(String pattern, double position) {
         return switch (pattern) {
-            case "slow_to_fast" -> 0.5 + position; // 0.5 na początku → 1.5 na końcu
-            case "fast_to_slow" -> 1.5 - position; // 1.5 na początku → 0.5 na końcu
+            case "slow_to_fast" -> 0.5 + position; // 0.5 at the start → 1.5 at the end
+            case "fast_to_slow" -> 1.5 - position; // 1.5 at the start → 0.5 at the end
             case "wave" -> 0.7 + 0.6 * Math.sin(position * Math.PI * 2); // fala sinusoidalna
             case "constant_high" -> 1.3; // zawsze wysoko
-            case "long_hold_then_burst" -> position < 0.7 ? 0.5 : 1.8; // długo trzymaj → burst
+            case "long_hold_then_burst" -> position < 0.7 ? 0.5 : 1.8; // hold long → burst
             case "breathing_with_pauses" -> 0.8 + 0.4 * Math.sin(position * Math.PI * 3); // oddychanie
-            case "on_beat_consistent" -> 1.0; // bez modyfikacji — cięcia na beatach
+            case "on_beat_consistent" -> 1.0; // no modification — cuts on beats
             default -> 1.0;
         };
     }
 
     // =========================================================================
-    // KROK 4 — SELEKCJA FINALNYCH CIĘĆ
+    // STEP 4 — SELECTING THE FINAL CUTS
     // =========================================================================
 
     /**
-     * Wybiera finalne cięcia z listy kandydatów.
+     * Selects the final cuts from the candidate list.
      * Zapewnia:
-     *   - Brak ujęć krótszych niż minCutMs (domyślnie 1500ms+)
-     *   - Brak ujęć dłuższych niż maxCutMs (wymusza cut)
-     *   - Ciągłość timeline (end[i] = start[i+1])
-     *   - Łączna liczba segmentów ≤ maxSegments (asset limit)
-     *   - HARD CUTy mają priorytet, SOFT i MICRO filtrowane przez score
+     *   - No shots shorter than minCutMs (default 1500ms+)
+     *   - No shots longer than maxCutMs (forces a cut)
+     *   - Timeline continuity (end[i] = start[i+1])
+     *   - Total number of segments ≤ maxSegments (asset limit)
+     *   - HARD CUTs take priority, SOFT and MICRO are filtered by score
      */
     private List<JustifiedCut> selectFinalCuts(
             List<CutCandidate> candidates,
@@ -1114,27 +1114,27 @@ public class CutEngine {
             NarrationAnalysis.EditingIntent intent,
             int maxSegments) {
 
-        // Sortuj po score malejąco, potem po czasie rosnąco
+        // Sort by score descending, then by time ascending
         candidates.sort((a, b) -> {
             int cmp = Double.compare(b.score, a.score);
             return cmp != 0 ? cmp : Integer.compare(a.timeMs, b.timeMs);
         });
 
-        // Greedy selection — wybieraj najlepszych kandydatów z zachowaniem min/max
+        // Greedy selection — pick the best candidates while respecting min/max
         List<Integer> selectedTimes = new ArrayList<>();
         selectedTimes.add(0); // zawsze zaczynaj od 0
 
         for (CutCandidate c : candidates) {
             if (c.timeMs <= 0 || c.timeMs >= totalDurationMs) continue;
 
-            // Sprawdź limit segmentów (selectedTimes.size() cut points = size() segments)
-            // +1 bo jeszcze dodamy totalDurationMs na końcu
+            // Check the segment limit (selectedTimes.size() cut points = size() segments)
+            // +1 because we'll still add totalDurationMs at the end
             if (selectedTimes.size() >= maxSegments) {
                 log.info("[CutEngine] Segment limit reached — {} segments max", maxSegments);
                 break;
             }
 
-            // Sprawdź czy nie jest za blisko istniejącego cuta
+            // Check that it's not too close to an existing cut
             boolean tooClose = false;
             for (int existing : selectedTimes) {
                 if (Math.abs(c.timeMs - existing) < minCutMs) {
@@ -1148,17 +1148,17 @@ public class CutEngine {
             }
         }
 
-        selectedTimes.add(totalDurationMs); // zawsze kończ na total duration
+        selectedTimes.add(totalDurationMs); // always end at the total duration
         Collections.sort(selectedTimes);
 
-        // Sprawdź max cut constraint — wymusz cięcia jeśli ujęcie za długie
+        // Check the max cut constraint — force cuts if a shot is too long
         selectedTimes = enforceMaxCut(selectedTimes, candidates, maxCutMs, minCutMs);
 
-        // Buduj finalne JustifiedCut z wybranych punktów
+        // Build the final JustifiedCut from the selected points
         List<JustifiedCut> result = new ArrayList<>();
         Map<Integer, CutCandidate> candidateMap = new HashMap<>();
         for (CutCandidate c : candidates) {
-            // Mapuj na najbliższy wybrany czas
+            // Map to the nearest selected time
             for (int time : selectedTimes) {
                 if (Math.abs(c.timeMs - time) < 100) {
                     candidateMap.putIfAbsent(time, c);
@@ -1210,8 +1210,8 @@ public class CutEngine {
     }
 
     /**
-     * Wymusza cięcia tam, gdzie ujęcie jest dłuższe niż maxCutMs.
-     * Szuka najlepszego kandydata w tym przedziale albo wstawia cięcie w połowie.
+     * Forces cuts where a shot is longer than maxCutMs.
+     * Looks for the best candidate in that interval or inserts a cut in the middle.
      */
     private List<Integer> enforceMaxCut(
             List<Integer> times,
@@ -1244,7 +1244,7 @@ public class CutEngine {
                     if (best != null) {
                         insertMs = best.timeMs;
                     } else {
-                        // Brak kandydata — tnij w połowie
+                        // No candidate — cut in the middle
                         insertMs = start + duration / 2;
                     }
 
@@ -1259,17 +1259,17 @@ public class CutEngine {
     }
 
     // =========================================================================
-    // KROK 5 — MINIMALNE POKRYCIE SŁÓW PER SEGMENT
+    // STEP 5 — MINIMUM WORD COVERAGE PER SEGMENT
     // =========================================================================
 
     /**
-     * Merguje segmenty, które pokrywają za mało słów (< MIN_WORDS_PER_SEGMENT).
+     * Merges segments that cover too few words (< MIN_WORDS_PER_SEGMENT).
      *
-     * Problem: "jedno słowo i cut" — wygląda źle i nie ma sensu wizualnego.
-     * Rozwiązanie: jeśli segment pokrywa < 3 słowa, połącz go z sąsiednim.
+     * Problem: "one word and a cut" — looks bad and makes no visual sense.
+     * Solution: if a segment covers < 3 words, merge it with a neighbor.
      *
-     * Mergujemy z NASTĘPNYM segmentem (nie z poprzednim), żeby zachować
-     * naturalną kontynuację myśli.
+     * We merge with the NEXT segment (not the previous one) to preserve
+     * the natural continuation of the thought.
      */
     private List<JustifiedCut> enforceMinWordsPerSegment(
             List<JustifiedCut> cuts,
@@ -1284,15 +1284,15 @@ public class CutEngine {
         while (i < cuts.size()) {
             JustifiedCut current = cuts.get(i);
 
-            // Policz słowa w tym segmencie
+            // Count the words in this segment
             int wordCount = countWordsInRange(wordTimings, current.getStartMs(), current.getEndMs());
 
-            // Czy segment jest za krótki (za mało słów LUB za krótki czas)?
+            // Is the segment too short (too few words OR too short in time)?
             boolean tooFewWords = wordCount < MIN_WORDS_PER_SEGMENT;
             boolean tooShortDuration = (current.getEndMs() - current.getStartMs()) < minCutMs;
 
             if ((tooFewWords || tooShortDuration) && i + 1 < cuts.size()) {
-                // Merguj z następnym segmentem
+                // Merge with the next segment
                 JustifiedCut next = cuts.get(i + 1);
                 JustifiedCut merged = JustifiedCut.builder()
                         .startMs(current.getStartMs())
@@ -1311,11 +1311,11 @@ public class CutEngine {
                         .suggestedTransition(next.getSuggestedTransition())
                         .build();
 
-                // Zamień next w liście (aby kolejna iteracja mogła sprawdzić merged)
+                // Replace next in the list (so the next iteration can check the merged one)
                 if (i + 1 < cuts.size()) {
                     cuts.set(i + 1, merged);
                 }
-                i++; // pomiń current, merged jest na pozycji i+1
+                i++; // skip current, the merged one is at position i+1
 
                 log.debug("[CutEngine] Merged segment {}ms-{}ms ({} words) with next → {}ms-{}ms",
                         current.getStartMs(), current.getEndMs(), wordCount,
@@ -1335,7 +1335,7 @@ public class CutEngine {
     }
 
     /**
-     * Liczy ile słów z WhisperX mieści się w przedziale [startMs, endMs].
+     * Counts how many WhisperX words fall within the interval [startMs, endMs].
      */
     private int countWordsInRange(List<SubtitleService.WordTiming> words, int startMs, int endMs) {
         int count = 0;
@@ -1363,13 +1363,13 @@ public class CutEngine {
             CutCandidate curr = sorted.get(i);
 
             if (Math.abs(curr.timeMs - prev.timeMs) < 100) {
-                // Merguj — zachowaj tego z wyższym score
+                // Merge — keep the one with the higher score
                 if (curr.score > prev.score) {
-                    // Przenieś secondary reasons z prev do curr
+                    // Move the secondary reasons from prev to curr
                     List<JustifiedCut.CutReason> merged = new ArrayList<>(curr.secondaryReasons);
                     merged.add(prev.primaryReason);
                     curr.secondaryReasons = merged;
-                    curr.score = Math.max(curr.score, prev.score) * 1.1; // bonus za nakładanie się
+                    curr.score = Math.max(curr.score, prev.score) * 1.1; // bonus for overlapping
                     result.set(result.size() - 1, curr);
                 } else {
                     List<JustifiedCut.CutReason> merged = new ArrayList<>(prev.secondaryReasons);
@@ -1386,7 +1386,7 @@ public class CutEngine {
     }
 
     // =========================================================================
-    // SUGGESTIONS — co wizualnie zrobić na danym cięciu
+    // SUGGESTIONS — what to do visually at a given cut
     // =========================================================================
 
     /**
@@ -1404,7 +1404,7 @@ public class CutEngine {
     private String suggestEffect(CutCandidate c) {
         if (c.narrationSegmentType != null) {
             return switch (c.narrationSegmentType.toLowerCase()) {
-                // smash_zoom na hooku — stop-scroll zanim padnie pierwsze słowo
+                // smash_zoom on the hook — stop-scroll before the first word lands
                 case "hook"                   -> "smash_zoom";
                 case "setup"                  -> "zoom_in";
                 case "point"                  -> c.narrationSegmentIndex % 2 == 0
@@ -1412,7 +1412,7 @@ public class CutEngine {
                 case "emphasis"               -> "zoom_in_offset";
                 // brightness_burst na climax — punch w kulminacyjnym momencie
                 case "climax"                 -> "brightness_burst";
-                // blur_transition na przejściach — TikTok-native flow
+                // blur_transition on transitions — TikTok-native flow
                 case "transition", "cooldown" -> "blur_transition";
                 case "cta"                    -> "ken_burns";
                 default                       -> suggestEffectFromClassification(c);
@@ -1444,15 +1444,15 @@ public class CutEngine {
      * Selects the transition TYPE between the outgoing and incoming segment.
      * Story/Hook arc:
      *   hook/setup/point/emphasis — hard CUT: no breathing room, urgency maintained
-     *   climax                    — fade_white: bright punch do następnej sceny
-     *   transition/cooldown       — fade: łagodne przejście, emotional exhale
+     *   climax                    — fade_white: bright punch into the next scene
+     *   transition/cooldown       — fade: a gentle transition, emotional exhale
      *   cta                       — fade: clean professional close
      */
     private String suggestTransition(CutCandidate c) {
         if (c.narrationSegmentType != null) {
             return switch (c.narrationSegmentType.toLowerCase()) {
                 case "hook", "setup", "point", "emphasis" -> "cut";
-                // fade_white na climax — jasne uderzenie zamiast twardego cięcia
+                // fade_white on the climax — a bright hit instead of a hard cut
                 case "climax"                             -> "fade_white";
                 case "transition", "cooldown", "cta"     -> "fade";
                 default                                  -> suggestTransitionFromClassification(c);
@@ -1474,7 +1474,7 @@ public class CutEngine {
     // =========================================================================
 
     /**
-     * Wewnętrzna reprezentacja kandydata na cięcie — przed finalną selekcją.
+     * Internal representation of a cut candidate — before the final selection.
      */
     private static class CutCandidate {
         int timeMs;

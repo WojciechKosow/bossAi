@@ -32,11 +32,11 @@ import java.util.UUID;
  *   3. ScriptStep (na transient GenerationContext)
  *
  * Wynik: PromptAnalysisResponse — proponowane sceny + intencja + dostępne assety.
- * Frontend / Postman używa tego jako preview, by user mógł przed generacją zobaczyć
- * scenariusz i zdecydować jak rozpisać assety na sceny.
+ * The frontend / Postman uses this as a preview, so the user can see the
+ * script before generation and decide how to lay assets out across scenes.
  *
  * Uwaga: 2 GPT calle (UserIntentParser + ScriptStep) — rozważ caching jeśli
- * frontend będzie często odpytywał ten sam prompt.
+ * the frontend will often query the same prompt repeatedly.
  */
 @Slf4j
 @Service
