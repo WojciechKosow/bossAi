@@ -41,6 +41,7 @@ public class PipelineAsyncRunner {
     private final UserRepository userRepository;
     private final ProgressService progressService;
     private final CreditService creditService;
+    private final AssetService assetService;
     private final RenderJobService renderJobService;
     private final PipelineConfig.TikTokAdPipeline tikTokAdPipeline;
     private final com.BossAi.bossAi.service.edl.AssetBridgeService assetBridgeService;
@@ -144,6 +145,23 @@ public class PipelineAsyncRunner {
                 }
             }
 
+            // Retention: everyone can SEND assets, but only storage plans (PRO)
+            // STORE them. For non-storage plans the sent uploads are ephemeral —
+            // now that the generation succeeded, remove them from the DB and R2.
+            // Done AFTER the bridge/render so nothing downstream still needs the
+            // source files. No-op for storage plans and in beta mode.
+            try {
+                java.util.Set<UUID> uploadedAssetIds = new java.util.LinkedHashSet<>();
+                collectAssetIds(uploadedAssetIds, context.getUserInputAssets());
+                collectAssetIds(uploadedAssetIds, context.getCustomMediaAssets());
+                collectAssetIds(uploadedAssetIds, context.getCustomTtsAssets());
+                collectAssetIds(uploadedAssetIds, context.getOverlayAssets());
+                assetService.purgeUploadsAfterGeneration(generationId, uploadedAssetIds);
+            } catch (Exception ex) {
+                log.warn("[PipelineAsyncRunner] Ephemeral upload purge failed (non-blocking) — {}",
+                        ex.getMessage());
+            }
+
         } catch (Exception e) {
             log.error("[PipelineAsyncRunner] Pipeline FAILED — generationId: {}, error: {}",
                     generationId, e.getMessage(), e);
@@ -159,6 +177,18 @@ public class PipelineAsyncRunner {
 
         } finally {
             generationRepository.save(generation);
+        }
+    }
+
+    private static void collectAssetIds(java.util.Set<UUID> ids,
+                                        java.util.List<com.BossAi.bossAi.entity.Asset> assets) {
+        if (assets == null) {
+            return;
+        }
+        for (com.BossAi.bossAi.entity.Asset asset : assets) {
+            if (asset != null && asset.getId() != null) {
+                ids.add(asset.getId());
+            }
         }
     }
 

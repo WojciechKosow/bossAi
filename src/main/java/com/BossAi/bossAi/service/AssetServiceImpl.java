@@ -96,14 +96,19 @@ public class AssetServiceImpl implements AssetService {
 
         User user = userRepository.findByEmail(email).orElseThrow();
 
-        UserPlan userPlan = planSelectionService.selectHighestPlan(user);
-
-        // During closed beta v0.1 everyone can upload custom assets — the frontend
-        // already treats beta as PRO. Outside beta the PRO+ paywall still applies.
-        if (!betaConfig.isBetaMode()
-                && userPlan.getPlanType().ordinal() < PlanType.PRO.ordinal()) {
-            throw new RuntimeException("Custom asset uploads require PRO plan or higher. Please upgrade your plan.");
-        }
+        // Everyone can SEND (upload) assets now — the old PRO+ paywall is gone.
+        // What differs by plan is whether the upload is STORED:
+        //   - storage plans (PRO): retained + reusable (expiry null).
+        //   - all other plans: ephemeral — reusable=false and removed right after
+        //     a successful generation (see AssetService#purgeUploadsAfterGeneration).
+        //     The expiry set here is only a safety net for uploads that never make
+        //     it into a successful generation.
+        // Beta mode treats every user as a storage plan (frontend already does).
+        UserPlan userPlan = planSelectionService.selectActivePlan(user);
+        PlanDefinition planDefinition = planDefinitionRepository
+                .findById(userPlan.getPlanType()).orElse(null);
+        boolean storage = betaConfig.isBetaMode()
+                || (planDefinition != null && planDefinition.isStorage());
 
         Asset asset = new Asset();
         asset.setUser(user);
@@ -112,7 +117,8 @@ public class AssetServiceImpl implements AssetService {
         asset.setOrderIndex(orderIndex);
 
         asset.setSizeBytes(file.getSize());
-        asset.setReusable(true);
+        asset.setReusable(storage);
+        asset.setExpiresAt(betaConfig.isBetaMode() ? null : resolveExpiration(planDefinition));
         asset.setSource(AssetSource.USER_UPLOAD);
 
 
@@ -203,6 +209,56 @@ public class AssetServiceImpl implements AssetService {
 
         storageService.delete(asset.getStorageKey());
         assetRepository.delete(asset);
+    }
+
+    @Override
+    @Transactional
+    public void purgeUploadsAfterGeneration(UUID generationId, java.util.Collection<UUID> uploadedAssetIds) {
+        if (uploadedAssetIds == null || uploadedAssetIds.isEmpty()) {
+            return;
+        }
+
+        // Beta mode treats everyone as a storage plan — keep uploads.
+        if (betaConfig.isBetaMode()) {
+            return;
+        }
+
+        // Retention follows the plan that OWNS this generation (the plan selected
+        // when it started), mirroring createAsset — not the user's current plan.
+        Generation generation = generationRepository.findById(generationId).orElse(null);
+        UserPlan owningPlan = generation != null ? generation.getUserPlan() : null;
+        PlanDefinition planDefinition = owningPlan == null
+                ? null
+                : planDefinitionRepository.findById(owningPlan.getPlanType()).orElse(null);
+
+        // Storage plans (PRO) keep the assets the user sent — they paid for storage.
+        // Everyone else: the sent assets are ephemeral, removed now that the
+        // generation succeeded.
+        if (planDefinition != null && planDefinition.isStorage()) {
+            return;
+        }
+
+        List<Asset> uploads = assetRepository.findAllById(uploadedAssetIds).stream()
+                .filter(a -> a.getSource() == AssetSource.USER_UPLOAD)
+                .toList();
+        if (uploads.isEmpty()) {
+            return;
+        }
+
+        for (Asset asset : uploads) {
+            if (asset.getStorageKey() != null) {
+                try {
+                    storageService.delete(asset.getStorageKey());
+                } catch (Exception e) {
+                    log.warn("[AssetService] Failed to delete R2 object {} for ephemeral upload {}: {}",
+                            asset.getStorageKey(), asset.getId(), e.getMessage());
+                }
+            }
+        }
+
+        assetRepository.deleteAll(uploads);
+        log.info("[AssetService] Purged {} ephemeral upload(s) after generation {} (non-storage plan)",
+                uploads.size(), generationId);
     }
 
     private AssetDTO mapToDto(Asset asset) {
