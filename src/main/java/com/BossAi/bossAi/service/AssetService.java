@@ -74,4 +74,19 @@ public interface AssetService {
     List<AssetDTO> getUserAssets();
 
     void deleteAsset(UUID assetId);
+
+    /**
+     * Removes the ephemeral (non-storage-plan) assets a user SENT for a
+     * generation, from both the DB and object storage (R2), once that
+     * generation has finished successfully.
+     *
+     * Storage plans (PRO) keep their sent assets, so this is a no-op for them
+     * (and in beta mode, where everyone is treated as a storage plan). Only
+     * assets with {@link AssetSource#USER_UPLOAD} are removed — generated
+     * outputs (including the final video) are never touched here.
+     *
+     * @param generationId     the finished generation whose owning plan decides retention
+     * @param uploadedAssetIds ids of the assets the user sent as input for this generation
+     */
+    void purgeUploadsAfterGeneration(UUID generationId, java.util.Collection<UUID> uploadedAssetIds);
 }
