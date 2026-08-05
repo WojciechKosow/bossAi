@@ -19,14 +19,28 @@ imported from outside the repo.
 4. **What you get** — AI script, Auto-cut engine, Ready to post.
 5. **CTA** — "Ready to start creating?" on the brand gradient.
 
+## Brand icon
+
+The toucan mark is the repo's own **`public/favicon.png`**. `genmask.cjs` turns
+it into an alpha silhouette (bird = opaque, white background = transparent,
+internal white lines kept as gaps), auto-crops the padding, and inlines it into
+`render.html` as the `MASK` data URI. The animation then fills that silhouette
+with the brand gradient (dark scenes) or solid white (the CTA), so the single
+icon recolors itself for every background. A data URI is required — Chromium
+will not load a `file://` image as a CSS mask.
+
+If the favicon ever changes, re-run `node genmask.cjs` and then `node capture.cjs`.
+
 ## Source
 
 - **`render.html`** — a single, self-contained page that draws the whole
   animation on a deterministic, seekable clock. `window.seek(t)` renders the
   exact state at time `t` (seconds), so every frame is reproducible.
+- **`genmask.cjs`** — regenerates the icon mask from `public/favicon.png` and
+  patches it into `render.html`.
 - **`fonts-embed.css`** — Inter (weights 400–900) embedded as data URIs so the
   render needs no network and the type is pixel-identical every run.
-- **`capture.js`** — drives `render.html` with Playwright/Chromium, seeks frame
+- **`capture.cjs`** — drives `render.html` with Playwright/Chromium, seeks frame
   by frame, and pipes JPEG frames straight into ffmpeg (no temp files).
 
 ## Regenerate
@@ -34,11 +48,11 @@ imported from outside the repo.
 ```bash
 cd marketing/landing-tiktok
 npm install playwright ffmpeg-static
-node capture.js          # writes toucan-tiktok.mp4
+node capture.cjs          # writes toucan-tiktok.mp4
 ```
 
 Set `CHROMIUM_PATH` to use a specific Chromium build; otherwise Playwright's
-bundled one is used. Tunables live at the top of `capture.js` (`FPS`, `TOTAL`,
+bundled one is used. Tunables live at the top of `capture.cjs` (`FPS`, `TOTAL`,
 `HOLD`) and in the `scenes` / `captions` arrays inside `render.html`.
 
 To preview a single frame, open `render.html` in a browser and run
