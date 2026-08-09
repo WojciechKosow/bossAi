@@ -6,6 +6,7 @@ import {
   Settings,
   LogOut,
   Film,
+  Mic,
   X,
 } from "lucide-react";
 import { useAuth } from "../../../features/auth/context/AuthContext";
@@ -14,6 +15,7 @@ import { cn } from "@/lib/utils";
 
 const navItems = [
   { name: "Overview", path: "/dashboard", icon: LayoutDashboard },
+  { name: "Podcast clips", path: "/dashboard/podcast", icon: Mic },
   { name: "Create video", path: "/dashboard/create", icon: Sparkles },
   { name: "Library", path: "/dashboard/library", icon: Film },
   { name: "Billing", path: "/dashboard/billing", icon: CreditCard },
