@@ -53,3 +53,27 @@ class AlignResponse(BaseModel):
     language: str
     duration_ms: int
     model: str = Field(description="WhisperX model used")
+
+
+# --- Transcription + diarization schemas (podcast → clips) ---
+
+
+class DiarizedWord(BaseModel):
+    """A transcribed word with its timing and diarized speaker label."""
+    word: str
+    start_ms: int
+    end_ms: int
+    speaker: str | None = Field(
+        default=None,
+        description="Diarized speaker label (e.g. 'SPEAKER_00'); null when "
+                    "diarization is unavailable.",
+    )
+
+
+class TranscribeResponse(BaseModel):
+    words: list[DiarizedWord]
+    language: str
+    duration_ms: int
+    num_speakers: int = Field(
+        default=0, description="Distinct non-null speaker labels detected."
+    )

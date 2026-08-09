@@ -12,6 +12,8 @@ from app.config import settings
 from app.models.schemas import (
     AlignResponse,
     AudioAnalysisResponse,
+    DiarizedWord,
+    TranscribeResponse,
     WordTimestamp,
 )
 
@@ -75,6 +77,69 @@ async def analyze_audio(file: UploadFile = File(...)):
         genre_estimate=mood_data["genre_estimate"],
         danceability=mood_data["danceability"],
     )
+
+
+@app.post("/api/v1/transcribe", response_model=TranscribeResponse)
+async def transcribe_audio(
+    file: UploadFile = File(..., description="Episode audio (wav/mp3/m4a)"),
+    language: str | None = Form(
+        default=None,
+        description="Language code (e.g. 'en'). Auto-detect if omitted.",
+    ),
+):
+    """
+    Full open transcription + speaker diarization — the entry point for the
+    podcast → clips pipeline.
+
+    Returns every word with a precise timestamp and a diarized speaker label
+    (WhisperX transcription + wav2vec2 alignment + pyannote diarization). When no
+    Hugging Face token is configured, words come back with speaker=null.
+    """
+    extension = Path(file.filename or "").suffix.lstrip(".").lower()
+    if extension not in settings.allowed_extensions:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Unsupported format '{extension}'. Allowed: {settings.allowed_extensions}",
+        )
+
+    content = await file.read()
+    if len(content) > settings.max_file_size_mb * 1024 * 1024:
+        raise HTTPException(status_code=422, detail="File too large")
+
+    tmp_path = None
+    try:
+        tmp_fd = tempfile.NamedTemporaryFile(suffix=f".{extension}", delete=False)
+        tmp_path = tmp_fd.name
+        tmp_fd.write(content)
+        tmp_fd.close()
+
+        logger.info(
+            "[transcribe] Processing %s (%d bytes), lang=%s",
+            file.filename, len(content), language or "auto",
+        )
+
+        from app.analyzers.whisperx_aligner import transcribe_and_diarize
+
+        result = transcribe_and_diarize(audio_path=tmp_path, language=language)
+
+        return TranscribeResponse(
+            words=[DiarizedWord(**w) for w in result["words"]],
+            language=result["language"],
+            duration_ms=result["duration_ms"],
+            num_speakers=result["num_speakers"],
+        )
+
+    except HTTPException:
+        raise
+    except RuntimeError as e:
+        logger.exception("[transcribe] WhisperX runtime dependency check failed")
+        raise HTTPException(status_code=503, detail=f"WhisperX runtime dependency error: {e}")
+    except Exception as e:
+        logger.exception("[transcribe] Transcription failed")
+        raise HTTPException(status_code=500, detail=f"Transcription failed: {e}")
+    finally:
+        if tmp_path:
+            Path(tmp_path).unlink(missing_ok=True)
 
 
 @app.post("/api/v1/align", response_model=AlignResponse)

@@ -83,6 +83,7 @@ logger = logging.getLogger(__name__)
 # Lazy-loaded model cache (loaded once, reused across requests)
 _whisper_model = None
 _align_models: dict[str, tuple] = {}
+_diarize_model = None
 
 
 def _get_device() -> str:
@@ -138,23 +139,28 @@ def _load_align_model(language_code: str):
     return _align_models[language_code]
 
 
-def _preprocess_audio(audio_path: str) -> tuple[np.ndarray, int]:
+def _preprocess_audio(audio_path: str, noise_reduce: bool | None = None) -> tuple[np.ndarray, int]:
     """
     Load and preprocess audio for WhisperX:
       - Resample to 16kHz mono
-      - Apply noise reduction (noisereduce)
+      - Apply noise reduction (noisereduce) — optional
       - Normalize amplitude
 
     Returns (audio_array, sample_rate=16000).
+
+    noise_reduce overrides the global setting. The podcast /transcribe path
+    passes False: noisereduce on a multi-hour episode is very slow and podcast
+    audio is already clean enough for WhisperX.
     """
     target_sr = 16000
+    do_noise_reduce = settings.whisperx_noise_reduce if noise_reduce is None else noise_reduce
 
     # Load with librosa for robust format handling + resampling
     import librosa
     y, sr = librosa.load(audio_path, sr=target_sr, mono=True)
 
     # Noise reduction — gentle settings to preserve speech clarity
-    if settings.whisperx_noise_reduce:
+    if do_noise_reduce:
         logger.info("[WhisperX] Applying noise reduction")
         y = nr.reduce_noise(
             y=y,
@@ -301,6 +307,143 @@ def align_words(
 
     finally:
         Path(preprocessed_path.name).unlink(missing_ok=True)
+
+
+def _load_diarize_model():
+    """
+    Load the pyannote diarization pipeline (cached). Requires a Hugging Face
+    token that has accepted the pyannote/speaker-diarization gated conditions.
+    Returns None when no token is configured, so callers can degrade gracefully.
+    """
+    global _diarize_model
+    if _diarize_model is not None:
+        return _diarize_model
+    if not settings.hf_token:
+        logger.warning("[WhisperX] No AUDIO_HF_TOKEN set — diarization disabled")
+        return None
+
+    device = _get_device()
+    # DiarizationPipeline moved between top-level and whisperx.diarize across
+    # versions — try both so we don't break on a minor bump.
+    try:
+        from whisperx import DiarizationPipeline  # type: ignore
+    except Exception:  # noqa: BLE001
+        from whisperx.diarize import DiarizationPipeline  # type: ignore
+
+    logger.info("[WhisperX] Loading diarization pipeline on device=%s", device)
+    _diarize_model = DiarizationPipeline(use_auth_token=settings.hf_token, device=device)
+    logger.info("[WhisperX] Diarization pipeline loaded")
+    return _diarize_model
+
+
+def transcribe_and_diarize(
+    audio_path: str,
+    language: str | None = None,
+) -> dict:
+    """
+    Full open transcription + forced alignment + speaker diarization.
+
+    This is the entry point for the podcast → clips pipeline. Unlike
+    align_words (forced alignment of a known TTS transcript), this transcribes
+    the whole episode and attaches a diarized speaker label to every word.
+
+    Returns:
+        {
+          "words": [{"word","start_ms","end_ms","speaker"}...],
+          "language": "en",
+          "duration_ms": 2400000,
+          "num_speakers": 2,
+        }
+    """
+    device = _get_device()
+
+    # Preprocess WITHOUT noise reduction — too slow on long episodes, and podcast
+    # audio is clean enough.
+    logger.info("[WhisperX] Preprocessing (transcribe): %s", audio_path)
+    audio_np, sr = _preprocess_audio(audio_path, noise_reduce=False)
+    duration_ms = int(round(len(audio_np) / sr * 1000))
+
+    preprocessed = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+    sf.write(preprocessed.name, audio_np, sr)
+    preprocessed.close()
+
+    try:
+        audio = whisperx.load_audio(preprocessed.name)
+
+        # Transcribe (VAD + Whisper)
+        model = _load_whisper_model()
+        transcribe_kwargs = {"batch_size": settings.whisperx_batch_size}
+        if language:
+            transcribe_kwargs["language"] = language
+        whisper_result = model.transcribe(audio, **transcribe_kwargs)
+        segments = whisper_result.get("segments", [])
+        detected_language = whisper_result.get("language", language or "en")
+        logger.info("[WhisperX] Transcribed %d segments, lang=%s",
+                    len(segments), detected_language)
+
+        # Forced alignment for precise word timings
+        align_model, align_metadata = _load_align_model(detected_language)
+        aligned = whisperx.align(
+            segments, align_model, align_metadata, audio, device=device,
+            return_char_alignments=False,
+        )
+
+        # Diarization (best-effort). On any failure or missing token, words come
+        # back with speaker=None and the caller degrades to a single speaker.
+        num_speakers = 0
+        try:
+            diarize_model = _load_diarize_model()
+            if diarize_model is not None:
+                diarize_kwargs = {}
+                if settings.diarize_min_speakers is not None:
+                    diarize_kwargs["min_speakers"] = settings.diarize_min_speakers
+                if settings.diarize_max_speakers is not None:
+                    diarize_kwargs["max_speakers"] = settings.diarize_max_speakers
+                diarize_segments = diarize_model(audio, **diarize_kwargs)
+                aligned = whisperx.assign_word_speakers(diarize_segments, aligned)
+                logger.info("[WhisperX] Diarization applied")
+        except Exception:  # noqa: BLE001
+            logger.exception("[WhisperX] Diarization failed — returning words without speakers")
+
+        words = _clean_word_segments_with_speaker(aligned.get("word_segments", []))
+        num_speakers = len({w["speaker"] for w in words if w.get("speaker")})
+        logger.info("[WhisperX] transcribe done: %d words, %d speaker(s), %d ms",
+                    len(words), num_speakers, duration_ms)
+
+        return {
+            "words": words,
+            "language": detected_language,
+            "duration_ms": duration_ms,
+            "num_speakers": num_speakers,
+        }
+    finally:
+        Path(preprocessed.name).unlink(missing_ok=True)
+
+
+def _clean_word_segments_with_speaker(word_segments: list[dict]) -> list[dict]:
+    """Like _clean_word_segments but preserves the diarized 'speaker' label."""
+    MIN_DURATION_MS = 50
+    words = []
+    for ws in word_segments:
+        word = ws.get("word", "").strip()
+        if not word or re.match(r'^[^\w]+$', word):
+            continue
+        start = ws.get("start")
+        end = ws.get("end")
+        if start is None or end is None:
+            continue
+        start_ms = int(round(start * 1000))
+        end_ms = int(round(end * 1000))
+        if end_ms - start_ms < MIN_DURATION_MS:
+            end_ms = start_ms + MIN_DURATION_MS
+        words.append({
+            "word": word,
+            "start_ms": start_ms,
+            "end_ms": end_ms,
+            "speaker": ws.get("speaker"),
+        })
+    words.sort(key=lambda w: w["start_ms"])
+    return words
 
 
 def _merge_transcript_with_segments(
