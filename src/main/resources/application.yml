@@ -9,6 +9,20 @@ server:
   # redirect_uri sent to Google) from the internal request, i.e.
   # http://localhost:8080 instead of the public https:// origin.
   forward-headers-strategy: framework
+  tomcat:
+    # Podcast episodes are large multi-hour files. Don't let Tomcat cap or
+    # "swallow" the request body — the multipart limits below are the real gate.
+    max-swallow-size: -1
+    max-http-form-post-size: -1
+
+spring:
+  servlet:
+    multipart:
+      # A 2-hour episode is a multi-hundred-MB (sometimes multi-GB) upload. The
+      # framework default is 1MB, which rejects every real podcast. Raise it so
+      # the podcast → clips upload path works end to end.
+      max-file-size: 2GB
+      max-request-size: 2GB
 
 postmark:
   api:

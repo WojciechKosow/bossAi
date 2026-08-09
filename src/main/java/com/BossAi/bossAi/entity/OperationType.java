@@ -8,6 +8,7 @@ public enum OperationType {
     MUSIC_GENERATION,
 
     TIKTOK_AD_FULL,
+    PODCAST_CLIPS,
     RENDER_ONLY,
 
     ASSET_UPLOAD,

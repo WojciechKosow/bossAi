@@ -9,6 +9,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.BodyInserters;
 import org.springframework.web.reactive.function.client.WebClient;
 
+import java.time.Duration;
+
 /**
  * HTTP client for the audio-analysis-service microservice (Python/FastAPI).
  *
@@ -18,6 +20,14 @@ import org.springframework.web.reactive.function.client.WebClient;
 @Slf4j
 @Service
 public class AudioAnalysisClient {
+
+    /**
+     * Upper bound for a full transcription+diarization call. WhisperX on a
+     * 2-hour episode can run for many minutes; the shared WebClient sets no
+     * response timeout, so this block bound is the only guard on the calling
+     * pipeline thread.
+     */
+    private static final Duration TRANSCRIBE_TIMEOUT = Duration.ofMinutes(45);
 
     private final WebClient webClient;
 
@@ -121,6 +131,51 @@ public class AudioAnalysisClient {
                     response.words().size(), response.durationMs(), response.model());
         }
 
+        return response;
+    }
+
+    /**
+     * Full open transcription + speaker diarization of a source episode.
+     * Powers the podcast → clips pipeline: returns every word with an absolute
+     * timing and a diarized speaker label.
+     *
+     * @param audioBytes  the extracted episode audio (WAV/MP3, mono 16kHz preferred)
+     * @param filename    the file name (e.g. "episode.wav") — needed for multipart
+     * @param language    language code (e.g. "en"); null = auto-detect
+     * @return a {@link TranscribeResponse}; never null on success
+     */
+    public TranscribeResponse transcribeAndDiarize(byte[] audioBytes, String filename, String language) {
+        log.info("[AudioAnalysisClient] Transcribe+diarize — file: {}, size: {} bytes, lang: {}",
+                filename, audioBytes.length, language != null ? language : "auto");
+
+        MultipartBodyBuilder bodyBuilder = new MultipartBodyBuilder();
+        bodyBuilder.part("file", new ByteArrayResource(audioBytes) {
+            @Override
+            public String getFilename() {
+                return filename;
+            }
+        }).contentType(MediaType.APPLICATION_OCTET_STREAM);
+
+        if (language != null && !language.isBlank()) {
+            bodyBuilder.part("language", language);
+        }
+
+        TranscribeResponse response = webClient.post()
+                .uri("/api/v1/transcribe")
+                .contentType(MediaType.MULTIPART_FORM_DATA)
+                .body(BodyInserters.fromMultipartData(bodyBuilder.build()))
+                .retrieve()
+                .bodyToMono(TranscribeResponse.class)
+                .block(TRANSCRIBE_TIMEOUT);
+
+        if (response == null || response.words() == null || response.words().isEmpty()) {
+            throw new IllegalStateException(
+                    "audio-analysis /transcribe returned no words for " + filename);
+        }
+
+        log.info("[AudioAnalysisClient] Transcribe OK — {} words, {} speaker(s), duration={}ms",
+                response.words().size(), response.toDiarizedTranscript().distinctSpeakers(),
+                response.durationMs());
         return response;
     }
 }
