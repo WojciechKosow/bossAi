@@ -81,7 +81,11 @@ public class PodcastClipOrchestrator {
         log.info("[Podcast] START — generationId: {}, source asset: {}, clips: {}",
                 generationId, source.getId(), clipCount);
 
-        DiarizedTranscript transcript = transcribe(source, workDir, language);
+        // Materialize the source locally ONCE (on R2 this downloads the object to
+        // a temp file). Reused for audio extraction and for cutting every clip.
+        Path sourcePath = storageService.resolvePath(source.getStorageKey());
+
+        DiarizedTranscript transcript = transcribe(sourcePath, workDir, language);
         log.info("[Podcast] Transcript — {} words, {} speaker(s), {} ms",
                 transcript.words().size(), transcript.distinctSpeakers(), transcript.durationMs());
 
@@ -93,12 +97,12 @@ public class PodcastClipOrchestrator {
         log.info("[Podcast] Director picked {} moment(s) → {} sentence-snapped clip(s)",
                 moments.size(), snapped.size());
 
-        String sourceUrl = resolveSourceUrl(source);
-        String sourceAssetId = source.getId() != null ? source.getId().toString() : null;
+        // Fallback URL: the full source, used only if a clip's pre-cut fails.
+        String fullSourceUrl = resolveUrl(source.getStorageKey());
 
         List<Clip> clips = new ArrayList<>(snapped.size());
         for (int i = 0; i < snapped.size(); i++) {
-            clips.add(renderOne(generation, snapped.get(i), i, sourceUrl, sourceAssetId));
+            clips.add(renderOne(generation, snapped.get(i), i, sourcePath, workDir, fullSourceUrl));
         }
         log.info("[Podcast] DONE — generationId: {}, {} clip(s) ({} ready)",
                 generationId, clips.size(),
@@ -106,26 +110,29 @@ public class PodcastClipOrchestrator {
         return clips;
     }
 
-    private DiarizedTranscript transcribe(Asset source, Path workDir, String language) {
+    private DiarizedTranscript transcribe(Path sourcePath, Path workDir, String language) {
         try {
-            Path sourcePath = storageService.resolvePath(source.getStorageKey());
             Path wav = audioExtractor.extractWav(sourcePath, workDir);
             byte[] audioBytes = Files.readAllBytes(wav);
             TranscribeResponse resp = audioAnalysisClient.transcribeAndDiarize(
                     audioBytes, "episode.wav", language);
             return resp.toDiarizedTranscript();
         } catch (Exception e) {
-            throw new RuntimeException("Transcription failed for generation source "
-                    + source.getId(), e);
+            throw new RuntimeException("Transcription failed for " + sourcePath, e);
         }
     }
 
     /**
      * Renders a single clip and persists its Clip row. A failure here fails only
      * this clip (marked FAILED) — the other clips still get their chance.
+     *
+     * <p>The clip's window is first cut out of the source into a small MP4 so
+     * Remotion renders a ~1-minute file rather than range-seeking the full
+     * episode. If the cut/upload fails, it falls back to rendering from the full
+     * source with a trim window.
      */
     private Clip renderOne(Generation generation, SnappedClip snapped, int index,
-                           String sourceUrl, String sourceAssetId) {
+                           Path sourcePath, Path workDir, String fullSourceUrl) {
         Clip clip = clipRepository.save(Clip.builder()
                 .generation(generation)
                 .status(ClipStatus.PENDING)
@@ -137,11 +144,27 @@ public class PodcastClipOrchestrator {
                 .build());
 
         String renderId = clip.getId().toString();
+        String cutKey = null;
         try {
             clip.setStatus(ClipStatus.RENDERING);
             clipRepository.save(clip);
 
-            EdlDto edl = clipEdlBuilder.build(snapped, sourceUrl, sourceAssetId);
+            // Pre-cut the clip window into its own small file (best-effort).
+            EdlDto edl;
+            try {
+                Path cutFile = audioExtractor.cutSubclip(
+                        sourcePath, snapped.startMs(), snapped.endMs(),
+                        workDir.resolve("clip-" + index + ".mp4"));
+                cutKey = "clips/" + renderId + "-src.mp4";
+                storageService.save(Files.readAllBytes(cutFile), cutKey);
+                Files.deleteIfExists(cutFile);
+                edl = clipEdlBuilder.buildPreCut(snapped, resolveUrl(cutKey), null);
+            } catch (Exception cutEx) {
+                log.warn("[Podcast] Clip {} pre-cut failed, rendering from full source — {}",
+                        index, cutEx.getMessage());
+                cutKey = null;
+                edl = clipEdlBuilder.build(snapped, fullSourceUrl, null);
+            }
 
             @SuppressWarnings("unchecked")
             Map<String, Object> edlMap = objectMapper.convertValue(edl, Map.class);
@@ -175,13 +198,21 @@ public class PodcastClipOrchestrator {
             clip.setErrorMessage(trim(e.getMessage(), 2000));
             clip.setFinishedAt(LocalDateTime.now());
             clipRepository.save(clip);
+        } finally {
+            // The pre-cut is an intermediate — drop it once the render has ingested.
+            if (cutKey != null) {
+                try {
+                    storageService.delete(cutKey);
+                } catch (Exception ignore) {
+                    log.debug("[Podcast] Could not delete intermediate cut {}", cutKey);
+                }
+            }
         }
         return clip;
     }
 
-    /** Direct, fetchable URL for Remotion to pull the source from (presigned on R2). */
-    private String resolveSourceUrl(Asset source) {
-        String key = source.getStorageKey();
+    /** Direct, fetchable URL for Remotion to pull an object from (presigned on R2). */
+    private String resolveUrl(String key) {
         String presigned = storageService.presignedUrl(key, SOURCE_URL_TTL);
         return presigned != null ? presigned : storageService.generateUrl(key);
     }

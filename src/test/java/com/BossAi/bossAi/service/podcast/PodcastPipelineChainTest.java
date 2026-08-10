@@ -45,17 +45,17 @@ class PodcastPipelineChainTest {
         assertEquals(2500, clip.startMs());
         assertEquals(5900, clip.endMs());
 
-        // 4) Build the renderable EDL for this clip.
-        String sourceUrl = "https://cdn.example/episode.mp4";
-        EdlDto edl = edlBuilder.build(clip, sourceUrl, "asset-123");
+        // 4) Primary path: the clip window is pre-cut into its own small file, so
+        // the EDL points at that file and plays it whole (trim 0..duration).
+        String clipUrl = "https://cdn.example/clip-0-src.mp4";
+        EdlDto edl = edlBuilder.buildPreCut(clip, clipUrl, null);
 
-        // --- One VIDEO segment, trimmed to the clip's source window ---
         assertEquals(1, edl.getSegments().size());
         EdlSegment seg = edl.getSegments().get(0);
         assertEquals("VIDEO", seg.getAssetType());
-        assertEquals(sourceUrl, seg.getAssetUrl());
-        assertEquals(2500, seg.getTrimInMs());
-        assertEquals(5900, seg.getTrimOutMs());
+        assertEquals(clipUrl, seg.getAssetUrl());
+        assertEquals(0, seg.getTrimInMs());
+        assertEquals(3400, seg.getTrimOutMs()); // whole pre-cut file
         assertEquals(0, seg.getStartMs());
         assertEquals(3400, seg.getEndMs()); // clip-local duration
 
@@ -63,10 +63,17 @@ class PodcastPipelineChainTest {
         assertEquals(1, edl.getAudioTracks().size());
         EdlAudioTrack voice = edl.getAudioTracks().get(0);
         assertEquals("voiceover", voice.getType());
-        assertEquals(sourceUrl, voice.getAssetUrl());
-        assertEquals(2500, voice.getTrimInMs());
-        assertEquals(5900, voice.getTrimOutMs());
+        assertEquals(clipUrl, voice.getAssetUrl());
+        assertEquals(0, voice.getTrimInMs());
+        assertEquals(3400, voice.getTrimOutMs());
         assertEquals(1.0, voice.getVolume(), 1e-9);
+
+        // --- Fallback path: full source with a trim window into the episode ---
+        EdlDto fallback = edlBuilder.build(clip, "https://cdn.example/episode.mp4", "asset-123");
+        EdlSegment fseg = fallback.getSegments().get(0);
+        assertEquals(2500, fseg.getTrimInMs());
+        assertEquals(5900, fseg.getTrimOutMs());
+        assertEquals(3400, fseg.getEndMs());
 
         // --- Captions: enabled, words rebased to clip-local time, sentence-grouped ---
         assertTrue(edl.getSubtitleConfig().isEnabled());
