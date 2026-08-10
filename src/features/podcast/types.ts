@@ -21,3 +21,9 @@ export interface PodcastStartResponse {
   generationId: UUID;
   status: GenerationStatus;
 }
+
+/** Response from POST /api/podcast/upload-url — a presigned direct-to-R2 PUT. */
+export interface PodcastUploadUrlResponse {
+  uploadUrl: string;
+  storageKey: string;
+}
