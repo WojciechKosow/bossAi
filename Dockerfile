@@ -1,9 +1,23 @@
 FROM python:3.11-slim
 
+# Runtime libs (libsndfile, ffmpeg, git) plus the toolchain PyAV needs to build
+# from source: faster-whisper==1.0.0 (required for whisperx 3.1.6) pins av==11.*,
+# which has no wheel picked here and compiles against the system ffmpeg — that
+# needs a C compiler, pkg-config, and the ffmpeg dev headers. Debian bookworm's
+# ffmpeg 5.1 dev libs are within PyAV 11's supported range.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libsndfile1 \
     ffmpeg \
     git \
+    build-essential \
+    pkg-config \
+    libavformat-dev \
+    libavcodec-dev \
+    libavdevice-dev \
+    libavutil-dev \
+    libavfilter-dev \
+    libswscale-dev \
+    libswresample-dev \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
