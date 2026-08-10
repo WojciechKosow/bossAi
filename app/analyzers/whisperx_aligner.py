@@ -84,6 +84,11 @@ logger = logging.getLogger(__name__)
 _whisper_model = None
 _align_models: dict[str, tuple] = {}
 _diarize_model = None
+# Direct faster-whisper + pyannote handles for the podcast /transcribe path
+# (see transcribe_and_diarize — it deliberately bypasses whisperx's ASR).
+_fw_model = None
+_pyannote_pipeline = None
+_pyannote_disabled = False
 
 
 def _get_device() -> str:
@@ -309,31 +314,61 @@ def align_words(
         Path(preprocessed_path.name).unlink(missing_ok=True)
 
 
-def _load_diarize_model():
+def _load_fw_model():
     """
-    Load the pyannote diarization pipeline (cached). Requires a Hugging Face
-    token that has accepted the pyannote/speaker-diarization gated conditions.
-    Returns None when no token is configured, so callers can degrade gracefully.
+    Load faster-whisper's WhisperModel directly (cached).
+
+    The podcast /transcribe path deliberately does NOT go through whisperx's ASR
+    wrapper: the pinned whisperx build constructs faster-whisper's
+    TranscriptionOptions with an incompatible argument set (missing
+    'multilingual'/'hotwords'), which 500s on every call. faster-whisper's own
+    WhisperModel.transcribe(word_timestamps=True) is a stable public API that
+    gives per-word timings without that coupling.
     """
-    global _diarize_model
-    if _diarize_model is not None:
-        return _diarize_model
-    if not settings.hf_token:
-        logger.warning("[WhisperX] No AUDIO_HF_TOKEN set — diarization disabled")
+    global _fw_model
+    if _fw_model is None:
+        from faster_whisper import WhisperModel
+        device = _get_device()
+        compute_type = _get_compute_type()
+        model_size = settings.whisperx_model_size
+        logger.info("[FasterWhisper] Loading model=%s device=%s compute=%s",
+                    model_size, device, compute_type)
+        _fw_model = WhisperModel(model_size, device=device, compute_type=compute_type)
+        logger.info("[FasterWhisper] Model loaded")
+    return _fw_model
+
+
+def _load_pyannote_pipeline():
+    """
+    Load pyannote's speaker-diarization pipeline directly (cached, best-effort).
+    Returns None when no HF token is set or loading fails, so the caller degrades
+    to single-speaker instead of erroring.
+    """
+    global _pyannote_pipeline, _pyannote_disabled
+    if _pyannote_pipeline is not None:
+        return _pyannote_pipeline
+    if _pyannote_disabled:
         return None
-
-    device = _get_device()
-    # DiarizationPipeline moved between top-level and whisperx.diarize across
-    # versions — try both so we don't break on a minor bump.
+    if not settings.hf_token:
+        logger.warning("[Diarize] No AUDIO_HF_TOKEN set — diarization disabled")
+        _pyannote_disabled = True
+        return None
     try:
-        from whisperx import DiarizationPipeline  # type: ignore
+        from pyannote.audio import Pipeline
+        logger.info("[Diarize] Loading pyannote/speaker-diarization-3.1")
+        pipeline = Pipeline.from_pretrained(
+            "pyannote/speaker-diarization-3.1",
+            use_auth_token=settings.hf_token,
+        )
+        if _get_device() == "cuda":
+            pipeline.to(torch.device("cuda"))
+        _pyannote_pipeline = pipeline
+        logger.info("[Diarize] Pipeline loaded")
+        return _pyannote_pipeline
     except Exception:  # noqa: BLE001
-        from whisperx.diarize import DiarizationPipeline  # type: ignore
-
-    logger.info("[WhisperX] Loading diarization pipeline on device=%s", device)
-    _diarize_model = DiarizationPipeline(use_auth_token=settings.hf_token, device=device)
-    logger.info("[WhisperX] Diarization pipeline loaded")
-    return _diarize_model
+        logger.exception("[Diarize] pyannote load failed — diarization disabled")
+        _pyannote_disabled = True
+        return None
 
 
 def transcribe_and_diarize(
@@ -341,11 +376,9 @@ def transcribe_and_diarize(
     language: str | None = None,
 ) -> dict:
     """
-    Full open transcription + forced alignment + speaker diarization.
-
-    This is the entry point for the podcast → clips pipeline. Unlike
-    align_words (forced alignment of a known TTS transcript), this transcribes
-    the whole episode and attaches a diarized speaker label to every word.
+    Full open transcription + speaker diarization for the podcast → clips
+    pipeline. Uses faster-whisper directly for word-level transcription and
+    pyannote directly for diarization (no whisperx ASR involved).
 
     Returns:
         {
@@ -355,11 +388,7 @@ def transcribe_and_diarize(
           "num_speakers": 2,
         }
     """
-    device = _get_device()
-
-    # Preprocess WITHOUT noise reduction — too slow on long episodes, and podcast
-    # audio is clean enough.
-    logger.info("[WhisperX] Preprocessing (transcribe): %s", audio_path)
+    logger.info("[FasterWhisper] Preprocessing (transcribe): %s", audio_path)
     audio_np, sr = _preprocess_audio(audio_path, noise_reduce=False)
     duration_ms = int(round(len(audio_np) / sr * 1000))
 
@@ -368,48 +397,65 @@ def transcribe_and_diarize(
     preprocessed.close()
 
     try:
-        audio = whisperx.load_audio(preprocessed.name)
-
-        # Transcribe (VAD + Whisper)
-        model = _load_whisper_model()
-        transcribe_kwargs = {"batch_size": settings.whisperx_batch_size}
-        if language:
-            transcribe_kwargs["language"] = language
-        whisper_result = model.transcribe(audio, **transcribe_kwargs)
-        segments = whisper_result.get("segments", [])
-        detected_language = whisper_result.get("language", language or "en")
-        logger.info("[WhisperX] Transcribed %d segments, lang=%s",
-                    len(segments), detected_language)
-
-        # Forced alignment for precise word timings
-        align_model, align_metadata = _load_align_model(detected_language)
-        aligned = whisperx.align(
-            segments, align_model, align_metadata, audio, device=device,
-            return_char_alignments=False,
+        # 1) Transcribe with per-word timestamps (faster-whisper public API).
+        model = _load_fw_model()
+        segments, info = model.transcribe(
+            preprocessed.name,
+            language=language,
+            word_timestamps=True,
+            vad_filter=True,
         )
+        detected_language = language or getattr(info, "language", None) or "en"
 
-        # Diarization (best-effort). On any failure or missing token, words come
-        # back with speaker=None and the caller degrades to a single speaker.
+        words: list[dict] = []
+        for segment in segments:  # generator — consumes the transcription
+            for w in (segment.words or []):
+                text = (w.word or "").strip()
+                if not text or re.match(r'^[^\w]+$', text):
+                    continue
+                start_ms = int(round(w.start * 1000))
+                end_ms = int(round(w.end * 1000))
+                if end_ms - start_ms < 50:
+                    end_ms = start_ms + 50
+                words.append({
+                    "word": text,
+                    "start_ms": start_ms,
+                    "end_ms": end_ms,
+                    "speaker": None,
+                })
+        words.sort(key=lambda x: x["start_ms"])
+        logger.info("[FasterWhisper] Transcribed %d words, lang=%s", len(words), detected_language)
+
+        # 2) Diarize (best-effort) and assign each word to the speaker whose turn
+        #    covers its midpoint.
         num_speakers = 0
-        try:
-            diarize_model = _load_diarize_model()
-            if diarize_model is not None:
+        pipeline = _load_pyannote_pipeline()
+        if pipeline is not None and words:
+            try:
                 diarize_kwargs = {}
                 if settings.diarize_min_speakers is not None:
                     diarize_kwargs["min_speakers"] = settings.diarize_min_speakers
                 if settings.diarize_max_speakers is not None:
                     diarize_kwargs["max_speakers"] = settings.diarize_max_speakers
-                diarize_segments = diarize_model(audio, **diarize_kwargs)
-                aligned = whisperx.assign_word_speakers(diarize_segments, aligned)
-                logger.info("[WhisperX] Diarization applied")
-        except Exception:  # noqa: BLE001
-            logger.exception("[WhisperX] Diarization failed — returning words without speakers")
+                diarization = pipeline(preprocessed.name, **diarize_kwargs)
+                turns = [
+                    (turn.start * 1000.0, turn.end * 1000.0, label)
+                    for turn, _, label in diarization.itertracks(yield_label=True)
+                ]
+                turns.sort(key=lambda t: t[0])
+                for wd in words:
+                    mid = (wd["start_ms"] + wd["end_ms"]) / 2.0
+                    for start_ms, end_ms, label in turns:
+                        if start_ms <= mid <= end_ms:
+                            wd["speaker"] = label
+                            break
+                num_speakers = len({t[2] for t in turns})
+                logger.info("[Diarize] Applied — %d turn(s), %d speaker(s)", len(turns), num_speakers)
+            except Exception:  # noqa: BLE001
+                logger.exception("[Diarize] Failed — returning words without speakers")
 
-        words = _clean_word_segments_with_speaker(aligned.get("word_segments", []))
-        num_speakers = len({w["speaker"] for w in words if w.get("speaker")})
-        logger.info("[WhisperX] transcribe done: %d words, %d speaker(s), %d ms",
+        logger.info("[FasterWhisper] transcribe done: %d words, %d speaker(s), %d ms",
                     len(words), num_speakers, duration_ms)
-
         return {
             "words": words,
             "language": detected_language,
