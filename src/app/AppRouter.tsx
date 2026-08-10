@@ -17,6 +17,7 @@ import { PublicOnlyRoute } from "../features/auth/guards/PublicOnlyRoute";
 import DashboardLayout from "../shared/layouts/DashboardLayout";
 import DashboardPage from "../pages/dashboard/DashboardPage";
 import CreateVideoPage from "../pages/dashboard/CreateVideoPage";
+import PodcastPage from "../pages/dashboard/PodcastPage";
 import LibraryPage from "../pages/dashboard/LibraryPage";
 import ProjectEditorPage from "../pages/dashboard/ProjectEditorPage";
 import GenerationPreviewPage from "../pages/dashboard/GenerationPreviewPage";
@@ -117,6 +118,7 @@ const AppRouter = () => {
           }
         >
           <Route index element={<DashboardPage />} />
+          <Route path="podcast" element={<PodcastPage />} />
           <Route path="create" element={<CreateVideoPage />} />
           <Route path="library" element={<LibraryPage />} />
           <Route
