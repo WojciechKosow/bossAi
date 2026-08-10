@@ -66,6 +66,9 @@ public class PodcastClipOrchestrator {
     /** How long the source presigned URL must stay valid — long enough to render every clip. */
     private static final Duration SOURCE_URL_TTL = Duration.ofHours(3);
 
+    /** Max length of the fallback clip used when the director returns nothing. */
+    private static final int FALLBACK_CLIP_MS = 90_000;
+
     /**
      * Runs the full pipeline for one generation over one source episode.
      *
@@ -93,9 +96,25 @@ public class PodcastClipOrchestrator {
         log.info("[Podcast] {} speaker turn(s)", turns.size());
 
         List<SelectedMoment> moments = momentSelector.selectMoments(transcript, turns, clipCount);
-        List<SnappedClip> snapped = boundarySnapper.snapAll(transcript, moments);
+        List<SnappedClip> snapped = new ArrayList<>(boundarySnapper.snapAll(transcript, moments));
         log.info("[Podcast] Director picked {} moment(s) → {} sentence-snapped clip(s)",
                 moments.size(), snapped.size());
+
+        // Fallback: if the director found nothing usable (e.g. a very short
+        // source it can't split into standalone moments), still produce one clip
+        // from the start of the episode so the user gets output. Capped so a long
+        // episode never yields a runaway "whole-episode" clip.
+        if (snapped.isEmpty() && !transcript.isEmpty()) {
+            int end = Math.min(transcript.durationMs(), FALLBACK_CLIP_MS);
+            SnappedClip whole = boundarySnapper.snap(transcript,
+                    new SelectedMoment(0, end, "Clip 1",
+                            "Auto-selected — the director returned no moments"));
+            if (whole != null) {
+                snapped.add(whole);
+                log.warn("[Podcast] Director returned no moments — using a single fallback clip ({} ms)",
+                        whole.durationMs());
+            }
+        }
 
         // Fallback URL: the full source, used only if a clip's pre-cut fails.
         String fullSourceUrl = resolveUrl(source.getStorageKey());
