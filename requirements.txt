@@ -10,6 +10,14 @@ pytest==8.3.4
 
 # --- WhisperX alignment ---
 whisperx==3.1.6
+# WhisperX 3.1.6 constructs faster-whisper's TranscriptionOptions with the old
+# argument set. faster-whisper >= 1.1.0 made `multilingual` and `hotwords`
+# required, so an unpinned resolve pulls a too-new build and every transcribe
+# fails with: "TranscriptionOptions.__init__() missing 2 required positional
+# arguments: 'multilingual' and 'hotwords'". Pin to the version 3.1.6 targets,
+# and pin ctranslate2 to a matching CPU/cuDNN-8-compatible release.
+faster-whisper==1.0.0
+ctranslate2==4.4.0
 torch>=2.4.0,<2.7
 torchaudio>=2.4.0,<2.7
 pyannote.audio>=3.1.0
