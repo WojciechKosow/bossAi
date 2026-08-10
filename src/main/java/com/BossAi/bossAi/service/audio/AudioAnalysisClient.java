@@ -160,12 +160,26 @@ public class AudioAnalysisClient {
             bodyBuilder.part("language", language);
         }
 
+        // Capture the audio service's error body on failure — a bare
+        // WebClientResponseException hides the Python `detail`, which is exactly
+        // the WhisperX/diarization message we need to diagnose a 500.
         TranscribeResponse response = webClient.post()
                 .uri("/api/v1/transcribe")
                 .contentType(MediaType.MULTIPART_FORM_DATA)
                 .body(BodyInserters.fromMultipartData(bodyBuilder.build()))
-                .retrieve()
-                .bodyToMono(TranscribeResponse.class)
+                .exchangeToMono(clientResponse -> {
+                    if (clientResponse.statusCode().isError()) {
+                        return clientResponse.bodyToMono(String.class).defaultIfEmpty("")
+                                .flatMap(body -> {
+                                    log.error("[AudioAnalysisClient] /transcribe {} — body: {}",
+                                            clientResponse.statusCode(), body);
+                                    return reactor.core.publisher.Mono.error(new IllegalStateException(
+                                            "audio /transcribe " + clientResponse.statusCode()
+                                                    + ": " + body));
+                                });
+                    }
+                    return clientResponse.bodyToMono(TranscribeResponse.class);
+                })
                 .block(TRANSCRIBE_TIMEOUT);
 
         if (response == null || response.words() == null || response.words().isEmpty()) {
