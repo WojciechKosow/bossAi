@@ -1,4 +1,8 @@
-FROM python:3.11-slim
+# Pin to bookworm (Debian 12, ffmpeg 5.1). The unqualified python:3.11-slim now
+# tracks trixie (Debian 13, ffmpeg 7), and PyAV 11 — pulled in by
+# faster-whisper==1.0.0 and built from source here — only supports ffmpeg <= 6,
+# so it compiles for a while and then fails against ffmpeg 7's changed APIs.
+FROM python:3.11-slim-bookworm
 
 # Runtime libs (libsndfile, ffmpeg, git) plus the toolchain PyAV needs to build
 # from source: faster-whisper==1.0.0 (required for whisperx 3.1.6) pins av==11.*,
