@@ -68,17 +68,26 @@ public class MomentSelector {
     }
 
     private String buildPrompt(List<SpeakerTurn> turns, int n, int durationMs) {
+        int durationSec = Math.max(1, durationMs / 1000);
+        // Never ask for more/longer clips than the source can hold. On a short
+        // source, allow shorter clips and fewer of them rather than getting none.
+        int maxClips = Math.max(1, Math.min(n, durationSec / TARGET_MIN_SECONDS));
+        int targetMax = Math.min(TARGET_MAX_SECONDS, durationSec);
+        int targetMin = Math.min(TARGET_MIN_SECONDS, Math.max(5, durationSec / 2));
+
         StringBuilder sb = new StringBuilder(TRANSCRIPT_CHAR_BUDGET + 4_000);
         sb.append("You are an elite short-form video editor who finds viral moments in podcasts.\n\n");
-        sb.append("Below is a speaker-diarized transcript of a ").append(durationMs / 60_000)
-          .append("-minute episode. Each line is: [mm:ss] SPEAKER: text\n\n");
-        sb.append("TASK: Pick the ").append(n)
-          .append(" BEST standalone moments to cut into vertical short clips.\n");
+        sb.append("Below is a speaker-diarized transcript of a ").append(durationSec)
+          .append("-second episode. Each line is: [mm:ss] SPEAKER: text\n\n");
+        sb.append("TASK: Pick up to ").append(maxClips)
+          .append(" of the BEST standalone moments to cut into vertical short clips. ")
+          .append("Return fewer if the material is thin, but you MUST return at least one.\n");
         sb.append("Rules:\n");
         sb.append("- Each moment must stand on its own without outside context.\n");
         sb.append("- Prefer a strong hook in the first seconds: a bold claim, a story, a punchline, tension.\n");
-        sb.append("- Favor complete thoughts. Target ").append(TARGET_MIN_SECONDS).append("-")
-          .append(TARGET_MAX_SECONDS).append(" seconds each.\n");
+        sb.append("- Favor complete thoughts. Target ").append(targetMin).append("-")
+          .append(targetMax).append(" seconds each; every clip must fit within the ")
+          .append(durationSec).append("-second source.\n");
         sb.append("- Spread picks across the episode; do not cluster them.\n");
         sb.append("- start_ms/end_ms are milliseconds from the episode start. They can be approximate; ")
           .append("they will be snapped to sentence boundaries by code afterwards.\n\n");
