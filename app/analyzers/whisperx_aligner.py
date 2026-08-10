@@ -63,7 +63,13 @@ def _validate_runtime_dependencies() -> None:
 
 _validate_runtime_dependencies()
 
-import noisereduce as nr
+# noisereduce is optional — only the (legacy) TTS-align path uses it. Import it
+# lazily so a missing wheel never blocks module load or the podcast /transcribe
+# path (which runs with noise reduction off).
+try:
+    import noisereduce as nr
+except Exception:  # noqa: BLE001
+    nr = None
 import soundfile as sf
 import torch
 
@@ -165,7 +171,7 @@ def _preprocess_audio(audio_path: str, noise_reduce: bool | None = None) -> tupl
     y, sr = librosa.load(audio_path, sr=target_sr, mono=True)
 
     # Noise reduction — gentle settings to preserve speech clarity
-    if do_noise_reduce:
+    if do_noise_reduce and nr is not None:
         logger.info("[WhisperX] Applying noise reduction")
         y = nr.reduce_noise(
             y=y,
