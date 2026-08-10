@@ -33,37 +33,59 @@ public class ClipEdlBuilder {
     private static final int FPS = 30;
 
     /**
+     * Builds an EDL that references the FULL source episode and trims to the
+     * clip's window. Used as a fallback when pre-cutting the subclip fails.
+     *
      * @param clip          the sentence-snapped clip
      * @param sourceAssetUrl URL the renderer can fetch the source episode from
      * @param sourceAssetId  optional asset id for the source (may be null)
      */
     public EdlDto build(SnappedClip clip, String sourceAssetUrl, String sourceAssetId) {
+        return build(clip, sourceAssetUrl, sourceAssetId, clip.startMs(), clip.endMs());
+    }
+
+    /**
+     * Builds an EDL for a clip whose window has already been cut out of the
+     * source into its own small file (see {@code AudioExtractor.cutSubclip}).
+     * The renderer fetches a ~1-minute file and plays it whole (trim 0..duration)
+     * instead of range-seeking the multi-hour source.
+     *
+     * @param clip        the sentence-snapped clip (for captions + duration)
+     * @param clipUrl     URL of the pre-cut subclip file
+     * @param clipAssetId optional asset id for the subclip (may be null)
+     */
+    public EdlDto buildPreCut(SnappedClip clip, String clipUrl, String clipAssetId) {
+        return build(clip, clipUrl, clipAssetId, 0, clip.durationMs());
+    }
+
+    private EdlDto build(SnappedClip clip, String assetUrl, String assetId,
+                         int trimInMs, int trimOutMs) {
         int durationMs = clip.durationMs();
 
         EdlSegment segment = EdlSegment.builder()
                 .id("clip-seg-0")
-                .assetId(sourceAssetId)
-                .assetUrl(sourceAssetUrl)
+                .assetId(assetId)
+                .assetUrl(assetUrl)
                 .assetType("VIDEO")
                 .startMs(0)
                 .endMs(durationMs)
-                .trimInMs(clip.startMs())
-                .trimOutMs(clip.endMs())
+                .trimInMs(trimInMs)
+                .trimOutMs(trimOutMs)
                 .layer(0)
                 .build();
 
-        // The podcast speech: same source, same window, full volume. The video
-        // segment is muted by the renderer, so this track carries the audio.
+        // The podcast speech: same file + window, full volume. The video segment
+        // is muted by the renderer, so this track carries the audio.
         EdlAudioTrack speech = EdlAudioTrack.builder()
                 .id("clip-voice-0")
-                .assetId(sourceAssetId)
-                .assetUrl(sourceAssetUrl)
+                .assetId(assetId)
+                .assetUrl(assetUrl)
                 .type("voiceover")
                 .startMs(0)
                 .endMs(durationMs)
                 .volume(1.0)
-                .trimInMs(clip.startMs())
-                .trimOutMs(clip.endMs())
+                .trimInMs(trimInMs)
+                .trimOutMs(trimOutMs)
                 .build();
 
         List<EdlWhisperWord> whisperWords = toClipLocalWords(clip);

@@ -90,6 +90,49 @@ public class AudioExtractor {
         return extractWav(sourcePath, Paths.get(workDir));
     }
 
+    /**
+     * Cuts the window {@code [startMs, endMs)} out of the source into a small,
+     * frame-accurate MP4. This lets Remotion render a ~1-minute file instead of
+     * range-seeking the multi-hour source for every clip.
+     *
+     * <p>Input seeking ({@code -ss} before {@code -i}) plus a re-encode is both
+     * fast and frame-accurate in modern ffmpeg — accuracy matters here because a
+     * keyframe-snapped cut would drift the start and desync the burned captions.
+     *
+     * @return the path to the written subclip
+     */
+    public Path cutSubclip(Path sourcePath, int startMs, int endMs, Path outPath) {
+        try {
+            Files.createDirectories(outPath.getParent());
+            double startSec = Math.max(0, startMs) / 1000.0;
+            double durSec = Math.max(1, endMs - startMs) / 1000.0;
+
+            List<String> cmd = List.of(
+                    ffmpegProperties.getBinary().getPath(),
+                    "-y",
+                    "-ss", String.format(java.util.Locale.ROOT, "%.3f", startSec),
+                    "-i", sourcePath.toString(),
+                    "-t", String.format(java.util.Locale.ROOT, "%.3f", durSec),
+                    "-c:v", "libx264",
+                    "-preset", "veryfast",
+                    "-crf", "20",
+                    "-c:a", "aac",
+                    "-movflags", "+faststart",
+                    outPath.toString()
+            );
+
+            log.info("[AudioExtractor] Cutting subclip [{} ms, {} ms) → {}", startMs, endMs, outPath);
+            runFfmpeg(cmd);
+
+            if (!Files.exists(outPath) || Files.size(outPath) == 0) {
+                throw new IllegalStateException("ffmpeg produced no subclip for " + sourcePath);
+            }
+            return outPath;
+        } catch (Exception e) {
+            throw new RuntimeException("Subclip cut failed for " + sourcePath, e);
+        }
+    }
+
     private static final java.util.regex.Pattern DURATION_PATTERN =
             java.util.regex.Pattern.compile("Duration:\\s*(\\d+):(\\d+):(\\d+)\\.(\\d+)");
 
