@@ -136,6 +136,38 @@ public class AssetServiceImpl implements AssetService {
     }
 
     @Override
+    @Transactional
+    public AssetDTO createUserUploadFromKey(String email, AssetType type, String storageKey,
+                                            String originalFilename, long sizeBytes) {
+        User user = userRepository.findByEmail(email).orElseThrow();
+
+        // Same retention model as createUserUpload: stored (reusable, no expiry)
+        // for storage plans and in beta mode; ephemeral otherwise (removed after
+        // a successful generation via purgeUploadsAfterGeneration).
+        UserPlan userPlan = planSelectionService.selectActivePlan(user);
+        PlanDefinition planDefinition = planDefinitionRepository
+                .findById(userPlan.getPlanType()).orElse(null);
+        boolean storage = betaConfig.isBetaMode()
+                || (planDefinition != null && planDefinition.isStorage());
+
+        Asset asset = new Asset();
+        asset.setUser(user);
+        asset.setType(type);
+        asset.setCreatedAt(LocalDateTime.now());
+        asset.setSizeBytes(sizeBytes);
+        asset.setReusable(storage);
+        asset.setExpiresAt(betaConfig.isBetaMode() ? null : resolveExpiration(planDefinition));
+        asset.setSource(AssetSource.USER_UPLOAD);
+        asset.setStorageKey(storageKey);
+        asset.setOriginalFilename(originalFilename);
+
+        assetRepository.save(asset);
+
+        log.debug("[AssetService] Asset (pre-uploaded key) saved — type: {}, key: {}", type, storageKey);
+        return mapToDto(asset);
+    }
+
+    @Override
     public AssetDTO createAssetFromUrl(
             UUID userId,
             AssetType type,

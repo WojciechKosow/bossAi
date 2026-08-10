@@ -35,4 +35,18 @@ public interface StorageService {
     default String presignedUrl(String key, Duration ttl) {
         return null;
     }
+
+    /**
+     * Returns a short-lived, directly-usable URL a client can PUT bytes to, or
+     * {@code null} when the backend has no direct-upload path (LocalStorageService).
+     *
+     * When non-null, the browser uploads the object body straight to the storage
+     * backend (R2) with a single HTTP PUT, bypassing the JVM entirely — which
+     * sidesteps the HTTP/2 edge + multipart limits that break large uploads
+     * routed through the backend. The URL embeds time-limited credentials
+     * (presigned PUT), so a private bucket stays private.
+     */
+    default String presignedUpload(String key, Duration ttl) {
+        return null;
+    }
 }

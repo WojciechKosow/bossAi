@@ -13,12 +13,16 @@ import java.util.Locale;
 
 /**
  * Minimal AWS Signature Version 4 query-string presigner for S3-compatible GET
- * requests (used against Cloudflare R2).
+ * and PUT requests (used against Cloudflare R2).
  *
- * Produces a directly-fetchable URL whose auth lives entirely in the query
- * string, so a browser or Chromium (Remotion) can GET the object from a private
- * bucket without any credentials of its own. Depends only on the JDK — no
- * s3-presigner module — which keeps the build portable.
+ * Produces a directly-usable URL whose auth lives entirely in the query
+ * string, so a browser or Chromium (Remotion) can GET (or PUT) the object on a
+ * private bucket without any credentials of its own. Depends only on the JDK —
+ * no s3-presigner module — which keeps the build portable.
+ *
+ * The signed-headers set is {@code host} only, and the payload is
+ * {@code UNSIGNED-PAYLOAD}; extra unsigned request headers (e.g. a browser's
+ * auto-added {@code Content-Type} on an XHR PUT) do not break the signature.
  *
  * Reference: https://docs.aws.amazon.com/general/latest/gr/sigv4-create-canonical-request.html
  */
@@ -50,7 +54,27 @@ public final class SigV4Presigner {
      */
     public static String presignGet(String endpoint, String region, String accessKey,
                                     String secretKey, String bucket, String key, Duration ttl) {
-        return presignGet(endpoint, region, accessKey, secretKey, bucket, key, ttl,
+        return presign("GET", endpoint, region, accessKey, secretKey, bucket, key, ttl,
+                ZonedDateTime.now(ZoneOffset.UTC));
+    }
+
+    /**
+     * Builds a presigned PUT URL for {@code <endpoint>/<bucket>/<key>} — a
+     * browser or any HTTP client can upload the object body straight to R2 with
+     * a single PUT, no credentials of its own. Same SigV4 structure as
+     * {@link #presignGet}, only the HTTP verb differs.
+     *
+     * @param endpoint  S3 endpoint, e.g. https://acct.r2.cloudflarestorage.com
+     * @param region    signing region ("auto" for R2)
+     * @param accessKey R2 access key id
+     * @param secretKey R2 secret access key
+     * @param bucket    bucket name (path-style)
+     * @param key       object key (may contain '/')
+     * @param ttl       how long the URL stays valid
+     */
+    public static String presignPut(String endpoint, String region, String accessKey,
+                                    String secretKey, String bucket, String key, Duration ttl) {
+        return presign("PUT", endpoint, region, accessKey, secretKey, bucket, key, ttl,
                 ZonedDateTime.now(ZoneOffset.UTC));
     }
 
@@ -58,6 +82,24 @@ public final class SigV4Presigner {
     static String presignGet(String endpoint, String region, String accessKey,
                              String secretKey, String bucket, String key, Duration ttl,
                              ZonedDateTime now) {
+        return presign("GET", endpoint, region, accessKey, secretKey, bucket, key, ttl, now);
+    }
+
+    /** Testable variant with an injectable signing timestamp. */
+    static String presignPut(String endpoint, String region, String accessKey,
+                             String secretKey, String bucket, String key, Duration ttl,
+                             ZonedDateTime now) {
+        return presign("PUT", endpoint, region, accessKey, secretKey, bucket, key, ttl, now);
+    }
+
+    /**
+     * Shared SigV4 query-string presigner. {@code httpMethod} is the only thing
+     * that varies between GET (download) and PUT (upload) — the canonical
+     * request, string-to-sign, and signature are otherwise identical.
+     */
+    private static String presign(String httpMethod, String endpoint, String region, String accessKey,
+                                  String secretKey, String bucket, String key, Duration ttl,
+                                  ZonedDateTime now) {
         URI uri = URI.create(endpoint);
         String host = uri.getHost();
         if (uri.getPort() != -1) {
@@ -84,7 +126,7 @@ public final class SigV4Presigner {
         String signedHeaders = "host";
 
         String canonicalRequest = String.join("\n",
-                "GET",
+                httpMethod,
                 canonicalUri,
                 canonicalQuery,
                 canonicalHeaders,
