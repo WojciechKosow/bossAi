@@ -459,6 +459,7 @@ public class OpenAiService {
     // DIRECTOR PLAN
     // =========================================================================
 
+    @Retry(name = "openAi")
     public String generateDirectorPlan(String prompt) {
         Map<String, Object> requestBody = Map.of(
                 "model", properties.getModel().getChat(),
