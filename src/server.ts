@@ -162,6 +162,14 @@ async function startRender(
     // at a consistent frame. Serial rendering frees each frame's decode memory
     // before the next, keeping peak memory bounded.
     concurrency: 1,
+    // Cap the OffthreadVideo frame cache explicitly. Remotion's default cache
+    // size is a heuristic derived from the machine's TOTAL RAM — but inside a
+    // Railway container that reads the host's memory, not the (much smaller)
+    // cgroup limit. So the cache grows far past what the container allows as
+    // the render decodes forward, and the compositor is OOM-killed (SIGKILL)
+    // at a consistent frame regardless of other trims. Pin it low so cache
+    // memory stays well within the container.
+    offthreadVideoCacheSizeInBytes: 150 * 1024 * 1024,
     onProgress: ({ progress }) => {
       job.progress = 0.2 + progress * 0.8; // Rendering is 20-100%
     },
