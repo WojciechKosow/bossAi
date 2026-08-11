@@ -116,6 +116,19 @@ public class AudioExtractor {
                     "-c:v", "libx264",
                     "-preset", "veryfast",
                     "-crf", "20",
+                    // Force a universally-decodable 8-bit 4:2:0 stream. A .mov
+                    // source can be 4:2:2 / 10-bit (ProRes etc.); libx264 would
+                    // otherwise preserve that, and Remotion's OffthreadVideo frame
+                    // extractor stalls on non-4:2:0 → delayRender timeout.
+                    "-pix_fmt", "yuv420p",
+                    "-profile:v", "high",
+                    "-level", "4.1",
+                    // Keyframe every ~1s so seeking to any frame is cheap. With a
+                    // sparse GOP, extracting a frame deep in the clip decodes a long
+                    // run and a single frame can exceed the 123s render timeout.
+                    "-g", "30",
+                    "-keyint_min", "30",
+                    "-sc_threshold", "0",
                     "-c:a", "aac",
                     "-movflags", "+faststart",
                     outPath.toString()
