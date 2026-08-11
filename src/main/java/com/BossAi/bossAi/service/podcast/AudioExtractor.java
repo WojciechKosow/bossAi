@@ -113,6 +113,14 @@ public class AudioExtractor {
                     "-ss", String.format(java.util.Locale.ROOT, "%.3f", startSec),
                     "-i", sourcePath.toString(),
                     "-t", String.format(java.util.Locale.ROOT, "%.3f", durSec),
+                    // Cap decode resolution at the render size. The final clip is
+                    // 1080x1920, but a 4K phone .mov would otherwise be decoded at
+                    // full 4K per frame in Remotion's compositor (twice, for
+                    // blur-fill) — enough memory to get the compositor OOM-killed
+                    // (SIGKILL) mid-render. Shrink-only (never upscale), aspect
+                    // preserved, even dimensions for yuv420p.
+                    "-vf", "scale='min(1920,iw)':'min(1920,ih)':"
+                            + "force_original_aspect_ratio=decrease:force_divisible_by=2",
                     "-c:v", "libx264",
                     "-preset", "veryfast",
                     "-crf", "20",
