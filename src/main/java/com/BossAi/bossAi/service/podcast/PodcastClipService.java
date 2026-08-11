@@ -8,8 +8,11 @@ import com.BossAi.bossAi.repository.AssetRepository;
 import com.BossAi.bossAi.repository.ClipRepository;
 import com.BossAi.bossAi.repository.GenerationRepository;
 import com.BossAi.bossAi.repository.UserRepository;
+import com.BossAi.bossAi.request.PodcastClipFromUploadRequest;
 import com.BossAi.bossAi.request.PodcastClipRequest;
+import com.BossAi.bossAi.request.PodcastUploadUrlRequest;
 import com.BossAi.bossAi.response.GenerationResponse;
+import com.BossAi.bossAi.response.PodcastUploadUrlResponse;
 import com.BossAi.bossAi.service.AssetService;
 import com.BossAi.bossAi.service.CreditService;
 import com.BossAi.bossAi.service.PlanSelectionService;
@@ -25,6 +28,7 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import org.springframework.web.server.ResponseStatusException;
 
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
@@ -50,10 +54,36 @@ public class PodcastClipService {
     private final PlanSelectionService planSelectionService;
     private final PodcastAsyncRunner podcastAsyncRunner;
 
-    @Transactional
-    public GenerationResponse generateClips(PodcastClipRequest request, String email) throws Exception {
+    /** TTL for a presigned direct-to-R2 upload URL (a 2h podcast can take a while). */
+    private static final Duration UPLOAD_URL_TTL = Duration.ofHours(1);
+
+    /**
+     * Issues a presigned PUT URL so the client can upload a (potentially
+     * multi-GB) episode straight to R2, bypassing the backend's HTTP/2 edge +
+     * multipart limits. The returned {@code storageKey} is handed back to
+     * {@link #generateClipsFromUpload} to start generation.
+     */
+    @Transactional(readOnly = true)
+    public PodcastUploadUrlResponse createUploadUrl(PodcastUploadUrlRequest request, String email) {
         User user = userRepository.findByEmail(email).orElseThrow();
 
+        String ext = extension(request == null ? null : request.filename());
+        String storageKey = "uploads/" + user.getId() + "/" + UUID.randomUUID() + ext;
+
+        String uploadUrl = storageService.presignedUpload(storageKey, UPLOAD_URL_TTL);
+        if (uploadUrl == null) {
+            // LocalStorageService (dev) has no direct-upload path — the small-file
+            // multipart endpoint must be used there.
+            throw new ResponseStatusException(HttpStatus.NOT_IMPLEMENTED,
+                    "Direct upload is not available on this storage backend.");
+        }
+
+        log.info("[PodcastClipService] Issued upload URL — user: {}, key: {}", email, storageKey);
+        return new PodcastUploadUrlResponse(uploadUrl, storageKey);
+    }
+
+    @Transactional
+    public GenerationResponse generateClips(PodcastClipRequest request, String email) throws Exception {
         if (request.getFile() == null || request.getFile().isEmpty()) {
             if (request.getYoutubeUrl() != null && !request.getYoutubeUrl().isBlank()) {
                 throw new ResponseStatusException(HttpStatus.NOT_IMPLEMENTED,
@@ -67,6 +97,49 @@ public class PodcastClipService {
         // Store the source episode as an Asset (reuses upload/storage/retention).
         AssetDTO dto = assetService.createUserUpload(email, type, request.getFile());
         Asset source = assetRepository.findById(dto.getId()).orElseThrow();
+
+        return charge(source, email, request.resolvedClipCount(), request.getLanguage());
+    }
+
+    /**
+     * Large-file path: the client already PUT the episode straight to R2 (via a
+     * presigned URL), so no bytes pass through the JVM here. We register the
+     * pre-uploaded object as an Asset, then run the exact same pipeline as the
+     * multipart path.
+     */
+    @Transactional
+    public GenerationResponse generateClipsFromUpload(PodcastClipFromUploadRequest request, String email) {
+        User user = userRepository.findByEmail(email).orElseThrow();
+
+        String storageKey = request == null ? null : request.storageKey();
+        if (storageKey == null || storageKey.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "storageKey is required");
+        }
+        // The key must live under THIS user's upload prefix — otherwise a caller
+        // could point generation at another user's (or an arbitrary) object.
+        String expectedPrefix = "uploads/" + user.getId() + "/";
+        if (!storageKey.startsWith(expectedPrefix)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "storageKey does not belong to this user");
+        }
+
+        AssetType type = inferType(request.originalFilename());
+
+        // Register the already-uploaded object as an Asset (same retention rules
+        // as a multipart upload); no bytes are copied — the object is in R2.
+        AssetDTO dto = assetService.createUserUploadFromKey(
+                email, type, storageKey, request.originalFilename(), 0L);
+        Asset source = assetRepository.findById(dto.getId()).orElseThrow();
+
+        return charge(source, email, request.resolvedClipCount(), request.language());
+    }
+
+    /**
+     * Shared tail of both generate paths: probe the real duration, charge credits
+     * upfront, and queue the pipeline after commit. The {@code source} Asset must
+     * already be persisted with its {@code storageKey} set.
+     */
+    private GenerationResponse charge(Asset source, String email, int clipCount, String language) {
+        User user = userRepository.findByEmail(email).orElseThrow();
 
         // Probe duration so credits are charged on the real length BEFORE compute.
         Path localSource = storageService.resolvePath(source.getStorageKey());
@@ -91,22 +164,22 @@ public class PodcastClipService {
         int cost = CreditCosts.processVideo(sourceSeconds);
         creditService.charge(user, generation.getId(), OperationType.PODCAST_CLIPS, cost, "podcast_clips");
 
-        int clipCount = request.resolvedClipCount();
-        String language = request.getLanguage();
         UUID genId = generation.getId();
         UUID sourceId = source.getId();
+        int clips = clipCount;
+        String lang = language;
 
         // Start the pipeline only after the transaction commits (so the async
         // thread sees the committed Generation + Asset rows).
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
             @Override
             public void afterCommit() {
-                podcastAsyncRunner.runAsync(genId, sourceId, clipCount, language);
+                podcastAsyncRunner.runAsync(genId, sourceId, clips, lang);
             }
         });
 
         log.info("[PodcastClipService] Queued — generationId: {}, user: {}, duration: {}s, clips: {}",
-                genId, email, sourceSeconds, clipCount);
+                genId, email, sourceSeconds, clips);
         return new GenerationResponse(genId, generation.getGenerationStatus());
     }
 
@@ -120,6 +193,26 @@ public class PodcastClipService {
         return clipRepository.findByGenerationIdOrderByClipIndexAsc(generationId).stream()
                 .map(ClipDto::from)
                 .toList();
+    }
+
+    /**
+     * Lower-cased file extension (with the leading dot) from a filename, or a
+     * {@code .mp4} default when none is present — keeps the R2 key and the
+     * content-type guess sensible.
+     */
+    private static String extension(String filename) {
+        if (filename == null) {
+            return ".mp4";
+        }
+        String name = filename.trim().toLowerCase(Locale.ROOT);
+        int dot = name.lastIndexOf('.');
+        int slash = Math.max(name.lastIndexOf('/'), name.lastIndexOf('\\'));
+        if (dot <= slash || dot == name.length() - 1) {
+            return ".mp4";
+        }
+        String ext = name.substring(dot);
+        // Guard against absurd/injected extensions in the object key.
+        return ext.matches("\\.[a-z0-9]{1,5}") ? ext : ".mp4";
     }
 
     /** VIDEO for common video containers, AUDIO otherwise. */

@@ -162,6 +162,22 @@ public class R2StorageService implements StorageService {
                 effective);
     }
 
+    @Override
+    public String presignedUpload(String key, Duration ttl) {
+        Duration effective = (ttl != null && !ttl.isZero() && !ttl.isNegative())
+                ? ttl
+                : Duration.ofMinutes(props.getPresignTtlMinutes());
+
+        return SigV4Presigner.presignPut(
+                props.resolveEndpoint(),
+                props.getRegion(),
+                props.getAccessKey(),
+                props.getSecretKey(),
+                props.getBucket(),
+                key,
+                effective);
+    }
+
     private static String guessContentType(String key) {
         String k = key.toLowerCase();
         if (k.endsWith(".mp4")) return "video/mp4";
