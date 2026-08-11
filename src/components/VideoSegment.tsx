@@ -515,6 +515,7 @@ export const VideoSegment: React.FC<VideoSegmentProps> = ({
             startFrom={trimIn + Math.round(srcOffset)}
             endAt={trimOut}
             muted
+            toneMapped={false}
             style={style}
           />
         </Sequence>
@@ -523,12 +524,19 @@ export const VideoSegment: React.FC<VideoSegmentProps> = ({
 
     // OffthreadVideo decodes via the native compositor — frame-accurate and
     // independent of the headless browser's codec support.
+    //
+    // toneMapped={false}: HDR/10-bit sources (common for phone .mov uploads)
+    // otherwise make the compositor tone-map every 1080x1920 frame, which is
+    // memory-heavy enough to get it OOM-killed (SIGKILL) mid-render. We already
+    // normalize clips to 8-bit yuv420p when cutting, so tone mapping is
+    // redundant here anyway.
     return (
       <OffthreadVideo
         src={segment.asset_url}
         startFrom={trimIn}
         endAt={trimOut}
         muted={muted}
+        toneMapped={false}
         style={style}
         playbackRate={playbackRate}
       />
