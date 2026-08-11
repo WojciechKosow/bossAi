@@ -153,10 +153,15 @@ async function startRender(
     // fails intermittently ("Timeout exceeded rendering the component at frame
     // N"). Give asset loading room to breathe.
     timeoutInMilliseconds: 120000,
-    // Lower concurrency: the render container is modestly sized, and fewer
-    // parallel Chromium tabs means each frame's asset fetch/decode isn't
-    // starved (which is what pushed frames past the timeout).
-    concurrency: 2,
+    // Render one frame at a time. Podcast clips use blur-fill framing, which
+    // decodes the source video TWICE per frame (blurred background + sharp
+    // foreground) via OffthreadVideo. At concurrency 2 that is up to four
+    // simultaneous 1080x1920 decodes, and the modestly-sized container OOMs
+    // mid-render — Chromium's tab dies ("Target closed") and the frame never
+    // renders, surfacing as "waiting for the page to render … timeout exceeded"
+    // at a consistent frame. Serial rendering frees each frame's decode memory
+    // before the next, keeping peak memory bounded.
+    concurrency: 1,
     onProgress: ({ progress }) => {
       job.progress = 0.2 + progress * 0.8; // Rendering is 20-100%
     },
