@@ -8,6 +8,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 import software.amazon.awssdk.core.ResponseBytes;
 import software.amazon.awssdk.core.sync.RequestBody;
+import software.amazon.awssdk.core.sync.ResponseTransformer;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.DeleteObjectRequest;
 import software.amazon.awssdk.services.s3.model.GetObjectRequest;
@@ -134,15 +135,37 @@ public class R2StorageService implements StorageService {
      */
     @Override
     public Path resolvePath(String key) {
+        String suffix = key.contains(".") ? key.substring(key.lastIndexOf('.')) : "";
+        Path tmp;
         try {
-            byte[] data = load(key);
-            String suffix = key.contains(".") ? key.substring(key.lastIndexOf('.')) : "";
-            Path tmp = Files.createTempFile("r2-", suffix);
-            Files.write(tmp, data);
+            tmp = Files.createTempFile("r2-", suffix);
             tmp.toFile().deleteOnExit();
-            return tmp;
+            // ResponseTransformer.toFile(Path) refuses to overwrite an existing
+            // file, so hand it a fresh (deleted) path — we only used
+            // createTempFile to reserve a unique name.
+            Files.delete(tmp);
         } catch (IOException e) {
-            throw new RuntimeException("R2 resolvePath (materialize) failed for key: " + key, e);
+            throw new RuntimeException("R2 resolvePath (temp file) failed for key: " + key, e);
+        }
+
+        try {
+            // Stream the object straight to disk. This MUST NOT buffer the whole
+            // object in memory (getObjectAsBytes) — a multi-GB podcast episode
+            // would exhaust the heap and blow past the 2 GiB max array length
+            // (OutOfMemoryError: Required array length 2147483639 …).
+            s3.getObject(
+                    GetObjectRequest.builder()
+                            .bucket(props.getBucket())
+                            .key(key)
+                            .build(),
+                    ResponseTransformer.toFile(tmp));
+            return tmp;
+        } catch (NoSuchKeyException e) {
+            throw new RuntimeException("R2 object not found: " + key, e);
+        } catch (S3Exception e) {
+            throw new RuntimeException("R2 resolvePath failed for key: " + key + " — " + describe(e), e);
+        } catch (Exception e) {
+            throw new RuntimeException("R2 resolvePath (materialize) failed for key: " + key + " — " + e.getMessage(), e);
         }
     }
 
