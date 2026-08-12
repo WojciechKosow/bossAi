@@ -4,6 +4,7 @@ import com.BossAi.bossAi.service.OpenAiService;
 import com.BossAi.bossAi.service.podcast.model.DiarizedTranscript;
 import com.BossAi.bossAi.service.podcast.model.SelectedMoment;
 import com.BossAi.bossAi.service.podcast.model.SpeakerTurn;
+import com.BossAi.bossAi.service.podcast.model.TranscriptWord;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
@@ -38,8 +39,16 @@ public class MomentSelector {
      */
     private static final int TRANSCRIPT_CHAR_BUDGET = 240_000;
 
-    /** Per-turn text cap so one rambling turn can't dominate the budget. */
-    private static final int MAX_TURN_CHARS = 400;
+    /**
+     * The transcript is fed to the director as timestamped windows, NOT as raw
+     * speaker turns. A long turn (or a whole undiarized monologue — one giant
+     * turn) is split into windows of at most this many characters / this many
+     * milliseconds, each carrying its own {@code [mm:ss]} timecode. Without this
+     * the director only saw the first slice of a single turn and could only ever
+     * pick a clip from the very beginning of the episode.
+     */
+    private static final int SEGMENT_MAX_CHARS = 300;
+    private static final int SEGMENT_MAX_MS = 30_000;
 
     /** Target clip length band handed to the director as guidance (seconds). */
     private static final int TARGET_MIN_SECONDS = 20;
@@ -53,7 +62,7 @@ public class MomentSelector {
         }
         int n = Math.max(1, desiredClipCount);
 
-        String prompt = buildPrompt(turns, n, transcript.durationMs());
+        String prompt = buildPrompt(transcript.words(), turns, n, transcript.durationMs());
         String raw = openAiService.generateDirectorPlan(prompt);
         List<SelectedMoment> moments = parse(raw, transcript.durationMs());
 
@@ -67,7 +76,7 @@ public class MomentSelector {
         return moments;
     }
 
-    private String buildPrompt(List<SpeakerTurn> turns, int n, int durationMs) {
+    private String buildPrompt(List<TranscriptWord> words, List<SpeakerTurn> turns, int n, int durationMs) {
         int durationSec = Math.max(1, durationMs / 1000);
         // Never ask for more/longer clips than the source can hold. On a short
         // source, allow shorter clips and fewer of them rather than getting none.
@@ -94,42 +103,66 @@ public class MomentSelector {
         sb.append("Respond ONLY with JSON of this exact shape:\n");
         sb.append("{\"clips\":[{\"start_ms\":0,\"end_ms\":0,\"title\":\"...\",\"reasoning\":\"...\"}]}\n\n");
         sb.append("TRANSCRIPT:\n");
-        sb.append(formatTurns(turns));
+        sb.append(formatTranscript(words, turns));
         return sb.toString();
     }
 
     /**
-     * Renders speaker turns as {@code [mm:ss] SPEAKER: text} lines within a char
-     * budget. If the full rendering exceeds the budget, turns are proportionally
-     * downsampled so coverage still spans the whole episode.
+     * Renders the transcript as timestamped {@code [mm:ss] SPEAKER: text} windows
+     * that span the WHOLE episode. Each speaker turn is split into windows of at
+     * most {@link #SEGMENT_MAX_CHARS} / {@link #SEGMENT_MAX_MS}, each stamped with
+     * its own start time — so a monologue (or an undiarized episode, which is one
+     * giant turn) is still presented across the full duration instead of only its
+     * first slice. If the whole rendering exceeds the char budget, windows are
+     * uniformly downsampled so coverage still spans the entire episode.
      */
-    private String formatTurns(List<SpeakerTurn> turns) {
-        List<SpeakerTurn> selected = turns;
-        // Estimate full size; downsample by uniform stride if needed.
-        long estimate = 0;
-        for (SpeakerTurn t : turns) {
-            estimate += Math.min(t.text().length(), MAX_TURN_CHARS) + 20;
-        }
-        if (estimate > TRANSCRIPT_CHAR_BUDGET) {
-            int stride = (int) Math.ceil((double) estimate / TRANSCRIPT_CHAR_BUDGET);
-            selected = new ArrayList<>();
-            for (int i = 0; i < turns.size(); i += stride) {
-                selected.add(turns.get(i));
+    // Package-private for direct unit testing of whole-episode windowing.
+    String formatTranscript(List<TranscriptWord> words, List<SpeakerTurn> turns) {
+        List<String> lines = new ArrayList<>();
+        for (SpeakerTurn turn : turns) {
+            StringBuilder seg = new StringBuilder();
+            int segStartMs = -1;
+            for (TranscriptWord w : turn.wordsFrom(words)) {
+                String tok = w.word() == null ? "" : w.word().strip();
+                if (tok.isEmpty()) {
+                    continue;
+                }
+                if (segStartMs < 0) {
+                    segStartMs = w.startMs();
+                }
+                if (seg.length() > 0) {
+                    seg.append(' ');
+                }
+                seg.append(tok);
+                boolean overChars = seg.length() >= SEGMENT_MAX_CHARS;
+                boolean overTime = w.endMs() - segStartMs >= SEGMENT_MAX_MS;
+                if (overChars || overTime) {
+                    lines.add("[" + timecode(segStartMs) + "] " + turn.speaker() + ": " + seg);
+                    seg.setLength(0);
+                    segStartMs = -1;
+                }
             }
-            log.warn("[MomentSelector] Transcript over budget (~{} chars) — downsampled 1/{} to {} turns",
-                    estimate, stride, selected.size());
+            if (seg.length() > 0) {
+                lines.add("[" + timecode(segStartMs) + "] " + turn.speaker() + ": " + seg);
+            }
         }
 
-        StringBuilder sb = new StringBuilder();
-        for (SpeakerTurn t : selected) {
-            String text = t.text();
-            if (text.length() > MAX_TURN_CHARS) {
-                text = text.substring(0, MAX_TURN_CHARS).stripTrailing() + "…";
-            }
-            sb.append('[').append(timecode(t.startMs())).append("] ")
-              .append(t.speaker()).append(": ").append(text).append('\n');
+        long total = 0;
+        for (String l : lines) {
+            total += l.length() + 1;
         }
-        return sb.toString();
+        if (total > TRANSCRIPT_CHAR_BUDGET && lines.size() > 1) {
+            int stride = (int) Math.ceil((double) total / TRANSCRIPT_CHAR_BUDGET);
+            List<String> sampled = new ArrayList<>();
+            for (int i = 0; i < lines.size(); i += stride) {
+                sampled.add(lines.get(i));
+            }
+            log.warn("[MomentSelector] Transcript over budget (~{} chars) — downsampled 1/{} to {} windows",
+                    total, stride, sampled.size());
+            lines = sampled;
+        }
+
+        return String.join("\n", lines) + "\n";
     }
 
     private static String timecode(int ms) {
