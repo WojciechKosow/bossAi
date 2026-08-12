@@ -93,6 +93,36 @@ class SigV4PresignerTest {
         return url.substring(i + "&X-Amz-Signature=".length());
     }
 
+    /**
+     * A presigned UploadPart URL must carry the signed partNumber + uploadId in
+     * the query, and the canonical query must stay sorted: the X-Amz-* keys
+     * (uppercase 'X') sort before the lowercase partNumber/uploadId, and
+     * partNumber before uploadId. If the order is wrong the signature won't
+     * match and R2 returns 403.
+     */
+    @Test
+    void presignUploadPartIsWellFormedAndCanonicallyOrdered() {
+        String url = SigV4Presigner.presignUploadPart(
+                "https://acct.r2.cloudflarestorage.com",
+                "auto", "AKIDEXAMPLE", "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY",
+                "my-bucket", "uploads/user/big.mp4", "test-upload-id-123", 7,
+                Duration.ofHours(6));
+
+        assertTrue(url.startsWith(
+                "https://acct.r2.cloudflarestorage.com/my-bucket/uploads/user/big.mp4?"),
+                url);
+        assertTrue(url.contains("partNumber=7"), url);
+        assertTrue(url.contains("uploadId=test-upload-id-123"), url);
+        assertTrue(url.contains("&X-Amz-Signature="), url);
+        // Canonical ordering: signed query params sorted, X-Amz-* before the
+        // lowercase extras, partNumber before uploadId.
+        int algo = url.indexOf("X-Amz-Algorithm");
+        int signedHeaders = url.indexOf("X-Amz-SignedHeaders");
+        int part = url.indexOf("partNumber=");
+        int upload = url.indexOf("uploadId=");
+        assertTrue(algo < signedHeaders && signedHeaders < part && part < upload, url);
+    }
+
     @Test
     void presignGetProducesWellFormedSignedUrl() {
         String url = SigV4Presigner.presignGet(

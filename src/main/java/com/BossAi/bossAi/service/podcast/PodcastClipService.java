@@ -10,8 +10,11 @@ import com.BossAi.bossAi.repository.GenerationRepository;
 import com.BossAi.bossAi.repository.UserRepository;
 import com.BossAi.bossAi.request.PodcastClipFromUploadRequest;
 import com.BossAi.bossAi.request.PodcastClipRequest;
+import com.BossAi.bossAi.request.PodcastMultipartCompleteRequest;
+import com.BossAi.bossAi.request.PodcastMultipartInitRequest;
 import com.BossAi.bossAi.request.PodcastUploadUrlRequest;
 import com.BossAi.bossAi.response.GenerationResponse;
+import com.BossAi.bossAi.response.PodcastMultipartInitResponse;
 import com.BossAi.bossAi.response.PodcastUploadUrlResponse;
 import com.BossAi.bossAi.service.AssetService;
 import com.BossAi.bossAi.service.CreditService;
@@ -27,7 +30,6 @@ import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.server.ResponseStatusException;
 
-import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
 import java.util.Locale;
@@ -57,6 +59,12 @@ public class PodcastClipService {
     /** TTL for a presigned direct-to-R2 upload URL (a 2h podcast can take a while). */
     private static final Duration UPLOAD_URL_TTL = Duration.ofHours(1);
 
+    /** TTL for multipart part URLs — a multi-GB upload of many parts can run long. */
+    private static final Duration MULTIPART_URL_TTL = Duration.ofHours(6);
+
+    /** R2 allows at most 10,000 parts per multipart upload. */
+    private static final int MAX_MULTIPART_PARTS = 10_000;
+
     /**
      * Issues a presigned PUT URL so the client can upload a (potentially
      * multi-GB) episode straight to R2, bypassing the backend's HTTP/2 edge +
@@ -80,6 +88,76 @@ public class PodcastClipService {
 
         log.info("[PodcastClipService] Issued upload URL — user: {}, key: {}", email, storageKey);
         return new PodcastUploadUrlResponse(uploadUrl, storageKey);
+    }
+
+    /**
+     * Begins a multipart direct-to-R2 upload for a large episode (&gt; 5 GiB, past
+     * the single-PUT limit). Returns one presigned PUT URL per part; the client
+     * uploads each chunk straight to R2, then calls {@link #completeMultipartUpload}.
+     */
+    @Transactional(readOnly = true)
+    public PodcastMultipartInitResponse initMultipartUpload(PodcastMultipartInitRequest request, String email) {
+        User user = userRepository.findByEmail(email).orElseThrow();
+
+        int partCount = request == null || request.partCount() == null ? 0 : request.partCount();
+        if (partCount < 1 || partCount > MAX_MULTIPART_PARTS) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "partCount must be between 1 and " + MAX_MULTIPART_PARTS);
+        }
+
+        String ext = extension(request.filename());
+        String storageKey = "uploads/" + user.getId() + "/" + UUID.randomUUID() + ext;
+
+        String uploadId;
+        try {
+            uploadId = storageService.createMultipartUpload(storageKey);
+        } catch (UnsupportedOperationException e) {
+            throw new ResponseStatusException(HttpStatus.NOT_IMPLEMENTED,
+                    "Multipart upload is not available on this storage backend.");
+        }
+
+        List<PodcastMultipartInitResponse.PartUrl> parts = new java.util.ArrayList<>(partCount);
+        for (int partNumber = 1; partNumber <= partCount; partNumber++) {
+            String url = storageService.presignedUploadPart(storageKey, uploadId, partNumber, MULTIPART_URL_TTL);
+            parts.add(new PodcastMultipartInitResponse.PartUrl(partNumber, url));
+        }
+
+        log.info("[PodcastClipService] Multipart upload init — user: {}, key: {}, parts: {}",
+                email, storageKey, partCount);
+        return new PodcastMultipartInitResponse(storageKey, uploadId, parts);
+    }
+
+    /**
+     * Finalizes a multipart upload once every part has been PUT to R2. The client
+     * sends back each part's ETag; R2 assembles them into the object. After this
+     * the client calls {@code POST /api/podcast/clips} with the storageKey.
+     */
+    @Transactional(readOnly = true)
+    public void completeMultipartUpload(PodcastMultipartCompleteRequest request, String email) {
+        User user = userRepository.findByEmail(email).orElseThrow();
+
+        if (request == null || request.storageKey() == null || request.uploadId() == null
+                || request.parts() == null || request.parts().isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "storageKey, uploadId and parts are required");
+        }
+        String expectedPrefix = "uploads/" + user.getId() + "/";
+        if (!request.storageKey().startsWith(expectedPrefix)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "storageKey does not belong to this user");
+        }
+
+        List<StorageService.MultipartPart> parts = request.parts().stream()
+                .map(p -> new StorageService.MultipartPart(p.partNumber(), p.etag()))
+                .toList();
+
+        try {
+            storageService.completeMultipartUpload(request.storageKey(), request.uploadId(), parts);
+        } catch (UnsupportedOperationException e) {
+            throw new ResponseStatusException(HttpStatus.NOT_IMPLEMENTED,
+                    "Multipart upload is not available on this storage backend.");
+        }
+        log.info("[PodcastClipService] Multipart upload completed — user: {}, key: {}, parts: {}",
+                email, request.storageKey(), parts.size());
     }
 
     @Transactional
@@ -142,8 +220,10 @@ public class PodcastClipService {
         User user = userRepository.findByEmail(email).orElseThrow();
 
         // Probe duration so credits are charged on the real length BEFORE compute.
-        Path localSource = storageService.resolvePath(source.getStorageKey());
-        int sourceSeconds = audioExtractor.probeDurationSeconds(localSource);
+        // Probe over the presigned R2 URL when available (ffmpeg reads only the
+        // container headers) so a 20 GB source is never downloaded just to read
+        // its length; fall back to a local path for the local dev backend.
+        int sourceSeconds = audioExtractor.probeDurationSeconds(ffmpegSource(source.getStorageKey()));
         source.setDurationSeconds(sourceSeconds);
         assetRepository.save(source);
 
@@ -213,6 +293,16 @@ public class PodcastClipService {
         String ext = name.substring(dot);
         // Guard against absurd/injected extensions in the object key.
         return ext.matches("\\.[a-z0-9]{1,5}") ? ext : ".mp4";
+    }
+
+    /**
+     * ffmpeg-usable source for a stored object: the presigned R2 GET URL when the
+     * backend supports it (ffmpeg streams straight from R2), otherwise a local
+     * materialized path (dev). Using the URL keeps multi-GB sources off local disk.
+     */
+    private String ffmpegSource(String storageKey) {
+        String url = storageService.presignedUrl(storageKey, Duration.ofHours(1));
+        return url != null ? url : storageService.resolvePath(storageKey).toString();
     }
 
     /** VIDEO for common video containers, AUDIO otherwise. */

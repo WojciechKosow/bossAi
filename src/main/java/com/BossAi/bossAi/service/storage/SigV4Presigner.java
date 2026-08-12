@@ -10,6 +10,8 @@ import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.Locale;
+import java.util.Map;
+import java.util.TreeMap;
 
 /**
  * Minimal AWS Signature Version 4 query-string presigner for S3-compatible GET
@@ -55,7 +57,7 @@ public final class SigV4Presigner {
     public static String presignGet(String endpoint, String region, String accessKey,
                                     String secretKey, String bucket, String key, Duration ttl) {
         return presign("GET", endpoint, region, accessKey, secretKey, bucket, key, ttl,
-                ZonedDateTime.now(ZoneOffset.UTC));
+                ZonedDateTime.now(ZoneOffset.UTC), null);
     }
 
     /**
@@ -75,31 +77,60 @@ public final class SigV4Presigner {
     public static String presignPut(String endpoint, String region, String accessKey,
                                     String secretKey, String bucket, String key, Duration ttl) {
         return presign("PUT", endpoint, region, accessKey, secretKey, bucket, key, ttl,
-                ZonedDateTime.now(ZoneOffset.UTC));
+                ZonedDateTime.now(ZoneOffset.UTC), null);
+    }
+
+    /**
+     * Builds a presigned PUT URL for a single multipart {@code UploadPart} — the
+     * client PUTs one chunk's bytes to {@code <endpoint>/<bucket>/<key>?partNumber=N&uploadId=…}.
+     * This is how objects larger than R2's 5 GiB single-PUT limit are uploaded
+     * directly from the browser: initiate the multipart upload server-side, hand
+     * out one of these per part, then complete server-side with the parts' ETags.
+     *
+     * @param uploadId   the multipart upload id from CreateMultipartUpload
+     * @param partNumber 1-based part index
+     */
+    public static String presignUploadPart(String endpoint, String region, String accessKey,
+                                           String secretKey, String bucket, String key,
+                                           String uploadId, int partNumber, Duration ttl) {
+        return presignUploadPart(endpoint, region, accessKey, secretKey, bucket, key,
+                uploadId, partNumber, ttl, ZonedDateTime.now(ZoneOffset.UTC));
+    }
+
+    /** Testable variant with an injectable signing timestamp. */
+    static String presignUploadPart(String endpoint, String region, String accessKey,
+                                    String secretKey, String bucket, String key,
+                                    String uploadId, int partNumber, Duration ttl, ZonedDateTime now) {
+        Map<String, String> extra = new TreeMap<>();
+        extra.put("partNumber", Integer.toString(partNumber));
+        extra.put("uploadId", uploadId);
+        return presign("PUT", endpoint, region, accessKey, secretKey, bucket, key, ttl, now, extra);
     }
 
     /** Testable variant with an injectable signing timestamp. */
     static String presignGet(String endpoint, String region, String accessKey,
                              String secretKey, String bucket, String key, Duration ttl,
                              ZonedDateTime now) {
-        return presign("GET", endpoint, region, accessKey, secretKey, bucket, key, ttl, now);
+        return presign("GET", endpoint, region, accessKey, secretKey, bucket, key, ttl, now, null);
     }
 
     /** Testable variant with an injectable signing timestamp. */
     static String presignPut(String endpoint, String region, String accessKey,
                              String secretKey, String bucket, String key, Duration ttl,
                              ZonedDateTime now) {
-        return presign("PUT", endpoint, region, accessKey, secretKey, bucket, key, ttl, now);
+        return presign("PUT", endpoint, region, accessKey, secretKey, bucket, key, ttl, now, null);
     }
 
     /**
-     * Shared SigV4 query-string presigner. {@code httpMethod} is the only thing
-     * that varies between GET (download) and PUT (upload) — the canonical
-     * request, string-to-sign, and signature are otherwise identical.
+     * Shared SigV4 query-string presigner. {@code httpMethod} varies between GET
+     * (download) and PUT (upload); {@code extraQueryParams} carries any
+     * request-specific signed query params (e.g. {@code partNumber}/{@code uploadId}
+     * for a multipart UploadPart). The canonical request, string-to-sign, and
+     * signature are otherwise identical.
      */
     private static String presign(String httpMethod, String endpoint, String region, String accessKey,
                                   String secretKey, String bucket, String key, Duration ttl,
-                                  ZonedDateTime now) {
+                                  ZonedDateTime now, Map<String, String> extraQueryParams) {
         URI uri = URI.create(endpoint);
         String host = uri.getHost();
         if (uri.getPort() != -1) {
@@ -114,16 +145,33 @@ public final class SigV4Presigner {
         String canonicalUri = "/" + uriEncode(bucket, false) + "/" + uriEncode(key, false);
 
         long expires = Math.max(1, ttl.getSeconds());
+        String signedHeaders = "host";
+
         // Query params must be sorted by key for the canonical query string.
-        String canonicalQuery =
-                "X-Amz-Algorithm=" + uriEncode(ALGORITHM, true)
-                + "&X-Amz-Credential=" + uriEncode(accessKey + "/" + credentialScope, true)
-                + "&X-Amz-Date=" + amzDate
-                + "&X-Amz-Expires=" + expires
-                + "&X-Amz-SignedHeaders=host";
+        // A TreeMap keeps them ordered; the X-Amz-* keys start with uppercase
+        // 'X' (0x58) so they sort before any lowercase extra keys (partNumber,
+        // uploadId) — and building the base params this way is byte-identical to
+        // the previous hand-ordered string, so existing signatures are unchanged.
+        TreeMap<String, String> params = new TreeMap<>();
+        params.put("X-Amz-Algorithm", ALGORITHM);
+        params.put("X-Amz-Credential", accessKey + "/" + credentialScope);
+        params.put("X-Amz-Date", amzDate);
+        params.put("X-Amz-Expires", Long.toString(expires));
+        params.put("X-Amz-SignedHeaders", signedHeaders);
+        if (extraQueryParams != null) {
+            params.putAll(extraQueryParams);
+        }
+
+        StringBuilder cq = new StringBuilder();
+        for (Map.Entry<String, String> e : params.entrySet()) {
+            if (cq.length() > 0) {
+                cq.append('&');
+            }
+            cq.append(uriEncode(e.getKey(), true)).append('=').append(uriEncode(e.getValue(), true));
+        }
+        String canonicalQuery = cq.toString();
 
         String canonicalHeaders = "host:" + host + "\n";
-        String signedHeaders = "host";
 
         String canonicalRequest = String.join("\n",
                 httpMethod,
