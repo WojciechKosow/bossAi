@@ -49,4 +49,35 @@ public interface StorageService {
     default String presignedUpload(String key, Duration ttl) {
         return null;
     }
+
+    /** One finished multipart part: its 1-based number and the ETag R2 returned. */
+    record MultipartPart(int partNumber, String etag) {
+    }
+
+    /**
+     * Begins a multipart upload for {@code key} and returns the upload id.
+     *
+     * Multipart upload is how files larger than R2's 5 GiB single-PUT limit are
+     * uploaded directly from the browser: initiate here, hand out one presigned
+     * {@link #presignedUploadPart} URL per chunk, then {@link #completeMultipartUpload}
+     * with the parts' ETags. Unsupported on backends that serve bytes locally.
+     */
+    default String createMultipartUpload(String key) {
+        throw new UnsupportedOperationException("Multipart upload not supported by this storage backend");
+    }
+
+    /** Short-lived presigned PUT URL for one part, or {@code null} when unsupported. */
+    default String presignedUploadPart(String key, String uploadId, int partNumber, Duration ttl) {
+        return null;
+    }
+
+    /** Finalizes a multipart upload, assembling the parts into the object at {@code key}. */
+    default void completeMultipartUpload(String key, String uploadId, java.util.List<MultipartPart> parts) {
+        throw new UnsupportedOperationException("Multipart upload not supported by this storage backend");
+    }
+
+    /** Cancels an in-progress multipart upload, discarding any uploaded parts. */
+    default void abortMultipartUpload(String key, String uploadId) {
+        // no-op by default
+    }
 }

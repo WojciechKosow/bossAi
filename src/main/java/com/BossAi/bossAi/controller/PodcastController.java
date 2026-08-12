@@ -3,8 +3,11 @@ package com.BossAi.bossAi.controller;
 import com.BossAi.bossAi.dto.ClipDto;
 import com.BossAi.bossAi.request.PodcastClipFromUploadRequest;
 import com.BossAi.bossAi.request.PodcastClipRequest;
+import com.BossAi.bossAi.request.PodcastMultipartCompleteRequest;
+import com.BossAi.bossAi.request.PodcastMultipartInitRequest;
 import com.BossAi.bossAi.request.PodcastUploadUrlRequest;
 import com.BossAi.bossAi.response.GenerationResponse;
+import com.BossAi.bossAi.response.PodcastMultipartInitResponse;
 import com.BossAi.bossAi.response.PodcastUploadUrlResponse;
 import com.BossAi.bossAi.service.podcast.PodcastClipService;
 import lombok.RequiredArgsConstructor;
@@ -48,6 +51,30 @@ public class PodcastController {
         return ResponseEntity.ok(
                 podcastClipService.createUploadUrl(request, authentication.getName())
         );
+    }
+
+    /**
+     * Begins a multipart direct-to-R2 upload for files past R2's 5 GiB single-PUT
+     * limit (10–20 GB podcasts). Returns a presigned PUT URL per part.
+     */
+    @PostMapping(value = "/upload-multipart/init", consumes = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<PodcastMultipartInitResponse> initMultipartUpload(
+            @RequestBody PodcastMultipartInitRequest request,
+            Authentication authentication
+    ) {
+        return ResponseEntity.ok(
+                podcastClipService.initMultipartUpload(request, authentication.getName())
+        );
+    }
+
+    /** Finalizes a multipart upload with the parts' ETags, assembling the object. */
+    @PostMapping(value = "/upload-multipart/complete", consumes = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<Void> completeMultipartUpload(
+            @RequestBody PodcastMultipartCompleteRequest request,
+            Authentication authentication
+    ) {
+        podcastClipService.completeMultipartUpload(request, authentication.getName());
+        return ResponseEntity.noContent().build();
     }
 
     /** Small-file path: the episode is sent inline as multipart form data. */

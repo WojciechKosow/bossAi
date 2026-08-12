@@ -10,6 +10,12 @@ import software.amazon.awssdk.core.ResponseBytes;
 import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.core.sync.ResponseTransformer;
 import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.services.s3.model.AbortMultipartUploadRequest;
+import software.amazon.awssdk.services.s3.model.CompleteMultipartUploadRequest;
+import software.amazon.awssdk.services.s3.model.CompletedMultipartUpload;
+import software.amazon.awssdk.services.s3.model.CompletedPart;
+import software.amazon.awssdk.services.s3.model.CreateMultipartUploadRequest;
+import software.amazon.awssdk.services.s3.model.CreateMultipartUploadResponse;
 import software.amazon.awssdk.services.s3.model.DeleteObjectRequest;
 import software.amazon.awssdk.services.s3.model.GetObjectRequest;
 import software.amazon.awssdk.services.s3.model.GetObjectResponse;
@@ -199,6 +205,77 @@ public class R2StorageService implements StorageService {
                 props.getBucket(),
                 key,
                 effective);
+    }
+
+    @Override
+    public String createMultipartUpload(String key) {
+        try {
+            CreateMultipartUploadResponse resp = s3.createMultipartUpload(
+                    CreateMultipartUploadRequest.builder()
+                            .bucket(props.getBucket())
+                            .key(key)
+                            .contentType(guessContentType(key))
+                            .build());
+            log.info("[R2Storage] Multipart upload started — key={}, uploadId={}", key, resp.uploadId());
+            return resp.uploadId();
+        } catch (S3Exception e) {
+            throw new RuntimeException("R2 createMultipartUpload failed for key: " + key + " — " + describe(e), e);
+        }
+    }
+
+    @Override
+    public String presignedUploadPart(String key, String uploadId, int partNumber, Duration ttl) {
+        Duration effective = (ttl != null && !ttl.isZero() && !ttl.isNegative())
+                ? ttl
+                : Duration.ofMinutes(props.getPresignTtlMinutes());
+
+        return SigV4Presigner.presignUploadPart(
+                props.resolveEndpoint(),
+                props.getRegion(),
+                props.getAccessKey(),
+                props.getSecretKey(),
+                props.getBucket(),
+                key,
+                uploadId,
+                partNumber,
+                effective);
+    }
+
+    @Override
+    public void completeMultipartUpload(String key, String uploadId, java.util.List<MultipartPart> parts) {
+        try {
+            java.util.List<CompletedPart> completed = parts.stream()
+                    .sorted(java.util.Comparator.comparingInt(MultipartPart::partNumber))
+                    .map(p -> CompletedPart.builder()
+                            .partNumber(p.partNumber())
+                            .eTag(p.etag())
+                            .build())
+                    .toList();
+
+            s3.completeMultipartUpload(CompleteMultipartUploadRequest.builder()
+                    .bucket(props.getBucket())
+                    .key(key)
+                    .uploadId(uploadId)
+                    .multipartUpload(CompletedMultipartUpload.builder().parts(completed).build())
+                    .build());
+            log.info("[R2Storage] Multipart upload completed — key={}, parts={}", key, completed.size());
+        } catch (S3Exception e) {
+            throw new RuntimeException("R2 completeMultipartUpload failed for key: " + key + " — " + describe(e), e);
+        }
+    }
+
+    @Override
+    public void abortMultipartUpload(String key, String uploadId) {
+        try {
+            s3.abortMultipartUpload(AbortMultipartUploadRequest.builder()
+                    .bucket(props.getBucket())
+                    .key(key)
+                    .uploadId(uploadId)
+                    .build());
+            log.info("[R2Storage] Multipart upload aborted — key={}, uploadId={}", key, uploadId);
+        } catch (S3Exception e) {
+            log.warn("[R2Storage] abortMultipartUpload failed for key {} — {}", key, describe(e));
+        }
     }
 
     private static String guessContentType(String key) {
