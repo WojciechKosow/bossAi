@@ -111,7 +111,7 @@ public class PodcastClipOrchestrator {
             int end = Math.min(transcript.durationMs(), FALLBACK_CLIP_MS);
             SnappedClip whole = boundarySnapper.snap(transcript,
                     new SelectedMoment(0, end, "Clip 1",
-                            "Auto-selected — the director returned no moments"));
+                            "Auto-selected — the director returned no moments", 50));
             if (whole != null) {
                 snapped.add(whole);
                 log.warn("[Podcast] Director returned no moments — using a single fallback clip ({} ms)",

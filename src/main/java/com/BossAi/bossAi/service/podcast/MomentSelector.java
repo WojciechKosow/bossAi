@@ -66,14 +66,49 @@ public class MomentSelector {
         String raw = openAiService.generateDirectorPlan(prompt);
         List<SelectedMoment> moments = parse(raw, transcript.durationMs());
 
-        // Keep at most n, in chronological order.
-        moments.sort((a, b) -> Integer.compare(a.approxStartMs(), b.approxStartMs()));
-        if (moments.size() > n) {
-            moments = new ArrayList<>(moments.subList(0, n));
+        List<SelectedMoment> kept = rankAndDedup(moments, n);
+        log.info("[MomentSelector] Director returned {} moment(s), kept {} (top by score, de-overlapped)",
+                moments.size(), kept.size());
+        return kept;
+    }
+
+    /**
+     * Picks the best up-to-{@code n} moments: highest virality score first,
+     * skipping any that overlap an already-kept pick (so we don't ship two clips
+     * of the same stretch), then returns them in chronological order for rendering.
+     */
+    // Package-private for unit testing.
+    List<SelectedMoment> rankAndDedup(List<SelectedMoment> moments, int n) {
+        List<SelectedMoment> byScore = new ArrayList<>(moments);
+        // Highest score first; tie-break on the longer moment, then earlier start.
+        byScore.sort((a, b) -> {
+            int s = Integer.compare(b.score(), a.score());
+            if (s != 0) return s;
+            int d = Integer.compare(b.approxEndMs() - b.approxStartMs(),
+                    a.approxEndMs() - a.approxStartMs());
+            if (d != 0) return d;
+            return Integer.compare(a.approxStartMs(), b.approxStartMs());
+        });
+
+        List<SelectedMoment> kept = new ArrayList<>();
+        for (SelectedMoment m : byScore) {
+            if (kept.size() >= n) {
+                break;
+            }
+            boolean clashes = kept.stream().anyMatch(k -> overlaps(k, m));
+            if (!clashes) {
+                kept.add(m);
+            }
         }
-        log.info("[MomentSelector] Director returned {} moment(s), keeping {}",
-                moments.size(), Math.min(moments.size(), n));
-        return moments;
+        kept.sort((a, b) -> Integer.compare(a.approxStartMs(), b.approxStartMs()));
+        return kept;
+    }
+
+    /** True when two moments overlap in time (with a small gap so picks aren't back-to-back). */
+    private static boolean overlaps(SelectedMoment a, SelectedMoment b) {
+        int gap = 1_000; // treat picks within 1s of each other as clashing
+        return a.approxStartMs() < b.approxEndMs() + gap
+                && b.approxStartMs() < a.approxEndMs() + gap;
     }
 
     private String buildPrompt(List<TranscriptWord> words, List<SpeakerTurn> turns, int n, int durationMs) {
@@ -81,6 +116,10 @@ public class MomentSelector {
         // Never ask for more/longer clips than the source can hold. On a short
         // source, allow shorter clips and fewer of them rather than getting none.
         int maxClips = Math.max(1, Math.min(n, durationSec / TARGET_MIN_SECONDS));
+        // Ask for a larger scored candidate pool than we keep, so code can pick
+        // the best non-overlapping ones. Still bounded by how many clips fit.
+        int candidatePool = Math.max(maxClips,
+                Math.min(3 * n, Math.max(1, durationSec / TARGET_MIN_SECONDS)));
         int targetMax = Math.min(TARGET_MAX_SECONDS, durationSec);
         int targetMin = Math.min(TARGET_MIN_SECONDS, Math.max(5, durationSec / 2));
 
@@ -88,9 +127,10 @@ public class MomentSelector {
         sb.append("You are an elite short-form video editor who finds viral moments in podcasts.\n\n");
         sb.append("Below is a speaker-diarized transcript of a ").append(durationSec)
           .append("-second episode. Each line is: [mm:ss] SPEAKER: text\n\n");
-        sb.append("TASK: Pick up to ").append(maxClips)
-          .append(" of the BEST standalone moments to cut into vertical short clips. ")
-          .append("Return fewer if the material is thin, but you MUST return at least one.\n");
+        sb.append("TASK: Identify the strongest standalone moments to cut into vertical short clips. ")
+          .append("Return up to ").append(candidatePool)
+          .append(" scored candidates (code keeps the best ").append(maxClips)
+          .append(" non-overlapping). Return fewer if the material is thin, but you MUST return at least one.\n");
         sb.append("Rules:\n");
         sb.append("- Each moment must stand on its own without outside context.\n");
         sb.append("- Prefer a strong hook in the first seconds: a bold claim, a story, a punchline, tension.\n");
@@ -99,9 +139,13 @@ public class MomentSelector {
           .append(durationSec).append("-second source.\n");
         sb.append("- Spread picks across the episode; do not cluster them.\n");
         sb.append("- start_ms/end_ms are milliseconds from the episode start. They can be approximate; ")
-          .append("they will be snapped to sentence boundaries by code afterwards.\n\n");
+          .append("they will be snapped to sentence boundaries by code afterwards.\n");
+        sb.append("- score each moment 0-100 for viral potential: reward a strong hook, a clear payoff, ")
+          .append("emotion or controversy, and standalone clarity; penalize rambling or needing context. ")
+          .append("Return MORE candidates than needed and score honestly — the best-scoring, ")
+          .append("non-overlapping ones are chosen by code.\n\n");
         sb.append("Respond ONLY with JSON of this exact shape:\n");
-        sb.append("{\"clips\":[{\"start_ms\":0,\"end_ms\":0,\"title\":\"...\",\"reasoning\":\"...\"}]}\n\n");
+        sb.append("{\"clips\":[{\"start_ms\":0,\"end_ms\":0,\"score\":0,\"title\":\"...\",\"reasoning\":\"...\"}]}\n\n");
         sb.append("TRANSCRIPT:\n");
         sb.append(formatTranscript(words, turns));
         return sb.toString();
@@ -190,10 +234,12 @@ public class MomentSelector {
                 if (end <= start) {
                     continue;
                 }
+                int score = clamp(c.path("score").asInt(50), 0, 100);
                 out.add(new SelectedMoment(
                         start, end,
                         c.path("title").asText(""),
-                        c.path("reasoning").asText("")
+                        c.path("reasoning").asText(""),
+                        score
                 ));
             }
             return out;

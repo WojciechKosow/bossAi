@@ -1,6 +1,7 @@
 package com.BossAi.bossAi.service.podcast;
 
 import com.BossAi.bossAi.service.podcast.model.DiarizedTranscript;
+import com.BossAi.bossAi.service.podcast.model.SelectedMoment;
 import com.BossAi.bossAi.service.podcast.model.SpeakerTurn;
 import com.BossAi.bossAi.service.podcast.model.TranscriptWord;
 import org.junit.jupiter.api.Test;
@@ -8,6 +9,7 @@ import org.junit.jupiter.api.Test;
 import java.util.ArrayList;
 import java.util.List;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class MomentSelectorTest {
@@ -42,5 +44,29 @@ class MomentSelectorTest {
                 "transcript windows must reach the end of the episode:\n" + rendered);
         // And it still starts at the beginning.
         assertTrue(lines[0].startsWith("[00:00]"), lines[0]);
+    }
+
+    /**
+     * Ranking keeps the highest-scoring moments, drops ones that overlap a
+     * higher-scored pick, and returns the survivors in chronological order.
+     */
+    @Test
+    void ranksByScoreDropsOverlapsReturnsChronological() {
+        MomentSelector selector = new MomentSelector(null, null);
+
+        SelectedMoment a = new SelectedMoment(0, 20_000, "A", "", 90);       // best
+        SelectedMoment b = new SelectedMoment(10_000, 25_000, "B", "", 70);  // overlaps A → dropped
+        SelectedMoment c = new SelectedMoment(60_000, 80_000, "C", "", 80);  // distinct, high
+        SelectedMoment d = new SelectedMoment(120_000, 140_000, "D", "", 40); // distinct, low
+
+        List<SelectedMoment> kept = selector.rankAndDedup(new ArrayList<>(List.of(b, d, a, c)), 3);
+
+        // A (90) and C (80) win; B overlaps A so it's out; D (40) fills the 3rd slot.
+        assertEquals(3, kept.size(), kept.toString());
+        assertEquals(List.of("A", "C", "D"),
+                kept.stream().map(SelectedMoment::title).toList());
+        // Chronological order for rendering.
+        assertTrue(kept.get(0).approxStartMs() < kept.get(1).approxStartMs()
+                && kept.get(1).approxStartMs() < kept.get(2).approxStartMs());
     }
 }

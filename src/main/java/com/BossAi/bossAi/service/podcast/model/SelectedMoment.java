@@ -12,6 +12,7 @@ package com.BossAi.bossAi.service.podcast.model;
  * @param approxEndMs    rough end in the source episode, in milliseconds
  * @param title          short headline for the clip
  * @param reasoning      why this moment stands alone / would perform well
+ * @param score          director's virality potential, 0–100 (used to rank picks)
  */
-public record SelectedMoment(int approxStartMs, int approxEndMs, String title, String reasoning) {
+public record SelectedMoment(int approxStartMs, int approxEndMs, String title, String reasoning, int score) {
 }
