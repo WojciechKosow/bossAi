@@ -171,6 +171,7 @@ public class PodcastClipOrchestrator {
                 .clipIndex(index)
                 .title(trim(snapped.title(), 300))
                 .reasoning(trim(snapped.reasoning(), 2000))
+                .score(snapped.score())
                 .sourceStartMs(snapped.startMs())
                 .sourceEndMs(snapped.endMs())
                 .build());
