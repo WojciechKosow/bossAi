@@ -451,10 +451,22 @@ def transcribe_and_diarize(
                 turns.sort(key=lambda t: t[0])
                 for wd in words:
                     mid = (wd["start_ms"] + wd["end_ms"]) / 2.0
+                    covering = None
+                    nearest = None
+                    nearest_dist = None
                     for start_ms, end_ms, label in turns:
                         if start_ms <= mid <= end_ms:
-                            wd["speaker"] = label
+                            covering = label
                             break
+                        # Distance from this word's midpoint to the turn.
+                        dist = start_ms - mid if mid < start_ms else mid - end_ms
+                        if nearest_dist is None or dist < nearest_dist:
+                            nearest_dist = dist
+                            nearest = label
+                    # Words in a gap between turns (VAD/diarization boundary
+                    # mismatch) get the nearest speaker rather than None, so they
+                    # don't fragment a turn with UNKNOWN chunks downstream.
+                    wd["speaker"] = covering if covering is not None else nearest
                 num_speakers = len({t[2] for t in turns})
                 logger.info("[Diarize] Applied — %d turn(s), %d speaker(s)", len(turns), num_speakers)
             except Exception:  # noqa: BLE001
