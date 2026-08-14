@@ -156,6 +156,10 @@ public class UserServiceImpl implements UserService {
             throw new RuntimeException("Please verify your email before logging in.");
         }
 
+        UserWallet userWallet = userWalletRepository.findById(user.getId()).orElseThrow();
+        userWallet.setCreditsBalance(100000);
+        userWalletRepository.save(userWallet);
+
         String accessToken = jwtProvider.generateToken(user.getEmail(), request.isRememberMe());
         String refreshToken = refreshTokenService.createRefreshToken(user, request.isRememberMe());
         return new AuthResponse(accessToken, refreshToken, mapToDTO(user));
