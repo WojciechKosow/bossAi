@@ -51,8 +51,8 @@ public class MomentSelector {
     private static final int SEGMENT_MAX_MS = 30_000;
 
     /** Target clip length band handed to the director as guidance (seconds). */
-    private static final int TARGET_MIN_SECONDS = 20;
-    private static final int TARGET_MAX_SECONDS = 90;
+    private static final int TARGET_MIN_SECONDS = 10;
+    private static final int TARGET_MAX_SECONDS = 60;
 
     /**
      * Virality factor weights (sum = 1.0). Grounded in what drives short-form
@@ -68,10 +68,10 @@ public class MomentSelector {
     private static final double W_SHARE = 0.15;
     private static final double W_STANDALONE = 0.10;
 
-    /** Ideal clip length band; moments well outside it take a mild score penalty. */
-    private static final int IDEAL_MIN_MS = 18_000;
-    private static final int IDEAL_MAX_MS = 75_000;
-    private static final int MAX_LENGTH_PENALTY = 20;
+    /** Ideal short-form clip length band; moments outside 10–60s take a mild score penalty. */
+    private static final int IDEAL_MIN_MS = 10_000;
+    private static final int IDEAL_MAX_MS = 60_000;
+    private static final int MAX_LENGTH_PENALTY = 25;
 
     public List<SelectedMoment> selectMoments(DiarizedTranscript transcript,
                                               List<SpeakerTurn> turns,
@@ -245,8 +245,11 @@ public class MomentSelector {
           .append(" only if the segment is genuinely weak.\n");
         sb.append("Rules:\n");
         sb.append("- Each moment must stand on its own without outside context.\n");
-        sb.append("- Favor complete thoughts. Target ").append(targetMin).append("-")
-          .append(targetMax).append(" seconds each; the moment must lie inside this segment.\n");
+        sb.append("- LENGTH IS CRITICAL: target ").append(targetMin).append("-").append(targetMax)
+          .append(" seconds; a clip must NEVER exceed 60 seconds. Pick one tight, self-contained ")
+          .append("moment — a single punchy exchange or point — NOT a long multi-minute tangent. ")
+          .append("If a great idea runs long, choose the strongest ~30–45s slice of it.\n");
+        sb.append("- Favor complete thoughts that fit the length; the moment must lie inside this segment.\n");
         sb.append("- start_ms/end_ms are ABSOLUTE milliseconds from the EPISODE start — use the [mm:ss] ")
           .append("timecodes shown. They can be approximate; code snaps them to sentence boundaries.\n\n");
         sb.append("Score each moment 0-100 on these factors (what actually drives short-form performance):\n");

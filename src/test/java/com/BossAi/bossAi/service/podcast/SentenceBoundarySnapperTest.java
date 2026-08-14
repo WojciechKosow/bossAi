@@ -75,6 +75,31 @@ class SentenceBoundarySnapperTest {
     }
 
     @Test
+    @DisplayName("a long moment is capped to <=60s on a sentence boundary")
+    void capsLongMomentToSentenceBoundary() {
+        // 3-minute transcript: one sentence every ~5s (each ends with '.').
+        List<TranscriptWord> words = new java.util.ArrayList<>();
+        int idx = 0;
+        for (int s = 0; s < 36; s++) {           // 36 sentences over 180s
+            int base = s * 5000;
+            words.add(new TranscriptWord("word" + idx++, base, base + 1500, "S"));
+            words.add(new TranscriptWord("word" + idx++, base + 2000, base + 3500, "S"));
+            words.add(new TranscriptWord("end" + s + ".", base + 4000, base + 4800, "S")); // sentence end
+        }
+        DiarizedTranscript t = new DiarizedTranscript(words, "en", 180_000);
+
+        // Director asked for a 3-minute clip.
+        SnappedClip clip = snapper.snap(t, new SelectedMoment(0, 180_000, "Long", "r", 80));
+
+        assertNotNull(clip);
+        assertTrue(clip.durationMs() <= SentenceBoundarySnapper.MAX_CLIP_MS,
+                "clip must be capped to <=60s, was " + clip.durationMs() + "ms");
+        // And it still ends on a whole sentence, not mid-sentence.
+        assertTrue(clip.words().get(clip.words().size() - 1).endsSentence(),
+                "capped clip must end on a sentence boundary");
+    }
+
+    @Test
     @DisplayName("null moment or empty transcript yields null, not an exception")
     void nullSafety() {
         assertNull(snapper.snap(TranscriptFixture.episode(), null));
