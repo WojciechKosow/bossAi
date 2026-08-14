@@ -76,6 +76,29 @@ class MomentSelectorTest {
     }
 
     /**
+     * The composite virality score weights the hook most, and an ideal-length
+     * clip beats an over-long one with the same factor scores.
+     */
+    @Test
+    void viralityScoreWeightsHookAndPenalizesLength() {
+        int idealMs = 40_000; // inside the ideal band → no penalty
+
+        // All-90 factors, ideal length → 90.
+        assertEquals(90, MomentSelector.viralityScore(90, 90, 90, 90, 90, idealMs));
+
+        // Hook is the highest-weighted single factor: concentrating the same
+        // "extra" points on the hook beats concentrating them on emotion.
+        int hookHeavy = MomentSelector.viralityScore(100, 50, 50, 50, 50, idealMs);
+        int emotionHeavy = MomentSelector.viralityScore(50, 50, 100, 50, 50, idealMs);
+        assertTrue(hookHeavy > emotionHeavy, hookHeavy + " !> " + emotionHeavy);
+
+        // Same factors, but a 4-minute clip is penalized vs. an ideal-length one.
+        int ideal = MomentSelector.viralityScore(80, 80, 80, 80, 80, idealMs);
+        int tooLong = MomentSelector.viralityScore(80, 80, 80, 80, 80, 240_000);
+        assertTrue(tooLong < ideal, tooLong + " !< " + ideal);
+    }
+
+    /**
      * Ranking keeps the highest-scoring moments, drops ones that overlap a
      * higher-scored pick, and returns the survivors in chronological order.
      */

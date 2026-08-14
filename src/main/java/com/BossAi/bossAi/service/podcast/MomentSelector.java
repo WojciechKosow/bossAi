@@ -54,6 +54,25 @@ public class MomentSelector {
     private static final int TARGET_MIN_SECONDS = 20;
     private static final int TARGET_MAX_SECONDS = 90;
 
+    /**
+     * Virality factor weights (sum = 1.0). Grounded in what drives short-form
+     * retention and shares: the hook matters most (it decides the scroll), then a
+     * clear standalone payoff, then emotional intensity, then shareability
+     * (controversy / curiosity gap / quotability), then standalone clarity.
+     * The director scores each factor 0–100; the composite is computed here so
+     * "viral" is tunable in code without re-prompting.
+     */
+    private static final double W_HOOK = 0.30;
+    private static final double W_PAYOFF = 0.25;
+    private static final double W_EMOTION = 0.20;
+    private static final double W_SHARE = 0.15;
+    private static final double W_STANDALONE = 0.10;
+
+    /** Ideal clip length band; moments well outside it take a mild score penalty. */
+    private static final int IDEAL_MIN_MS = 18_000;
+    private static final int IDEAL_MAX_MS = 75_000;
+    private static final int MAX_LENGTH_PENALTY = 20;
+
     public List<SelectedMoment> selectMoments(DiarizedTranscript transcript,
                                               List<SpeakerTurn> turns,
                                               int desiredClipCount) {
@@ -156,7 +175,11 @@ public class MomentSelector {
             if (kept.size() >= n) {
                 break;
             }
-            boolean clashes = kept.stream().anyMatch(k -> overlaps(k, m));
+            // Skip anything that overlaps a higher-scored pick in time, or is a
+            // near-duplicate of one (same beat, near-identical title) — a light
+            // diversity guard so the final set isn't the same moment twice.
+            boolean clashes = kept.stream()
+                    .anyMatch(k -> overlaps(k, m) || tooSimilarTitle(k, m));
             if (!clashes) {
                 kept.add(m);
             }
@@ -170,6 +193,33 @@ public class MomentSelector {
         int gap = 1_000; // treat picks within 1s of each other as clashing
         return a.approxStartMs() < b.approxEndMs() + gap
                 && b.approxStartMs() < a.approxEndMs() + gap;
+    }
+
+    /** True when two titles share most of their significant words (Jaccard ≥ 0.7). */
+    private static boolean tooSimilarTitle(SelectedMoment a, SelectedMoment b) {
+        java.util.Set<String> ta = titleTokens(a.title());
+        java.util.Set<String> tb = titleTokens(b.title());
+        if (ta.isEmpty() || tb.isEmpty()) {
+            return false;
+        }
+        java.util.Set<String> inter = new java.util.HashSet<>(ta);
+        inter.retainAll(tb);
+        java.util.Set<String> union = new java.util.HashSet<>(ta);
+        union.addAll(tb);
+        return (double) inter.size() / union.size() >= 0.7;
+    }
+
+    private static java.util.Set<String> titleTokens(String title) {
+        java.util.Set<String> out = new java.util.HashSet<>();
+        if (title == null) {
+            return out;
+        }
+        for (String t : title.toLowerCase(java.util.Locale.ROOT).split("[^a-z0-9]+")) {
+            if (t.length() >= 3) { // ignore tiny/stopword-ish tokens
+                out.add(t);
+            }
+        }
+        return out;
     }
 
     /**
@@ -195,16 +245,23 @@ public class MomentSelector {
           .append(" only if the segment is genuinely weak.\n");
         sb.append("Rules:\n");
         sb.append("- Each moment must stand on its own without outside context.\n");
-        sb.append("- Prefer a strong hook in the first seconds: a bold claim, a story, a punchline, tension.\n");
         sb.append("- Favor complete thoughts. Target ").append(targetMin).append("-")
           .append(targetMax).append(" seconds each; the moment must lie inside this segment.\n");
         sb.append("- start_ms/end_ms are ABSOLUTE milliseconds from the EPISODE start — use the [mm:ss] ")
-          .append("timecodes shown. They can be approximate; code snaps them to sentence boundaries.\n");
-        sb.append("- score 0-100 for viral potential: reward a strong hook, a clear payoff, emotion or ")
-          .append("controversy, and standalone clarity; penalize rambling or needing context. Score honestly ")
-          .append("so a weak segment scores low and only genuinely strong moments score high.\n\n");
-        sb.append("Respond ONLY with JSON of this exact shape:\n");
-        sb.append("{\"clips\":[{\"start_ms\":0,\"end_ms\":0,\"score\":0,\"title\":\"...\",\"reasoning\":\"...\"}]}\n\n");
+          .append("timecodes shown. They can be approximate; code snaps them to sentence boundaries.\n\n");
+        sb.append("Score each moment 0-100 on these factors (what actually drives short-form performance):\n");
+        sb.append("- hook: does the FIRST sentence stop the scroll — a bold/controversial claim, a question, ")
+          .append("a surprising statement, immediate tension? A slow wind-up kills the clip.\n");
+        sb.append("- payoff: is there a clear, satisfying takeaway, punchline, or insight WITHIN the clip?\n");
+        sb.append("- emotion: emotional intensity — surprise, awe, anger, humor, inspiration.\n");
+        sb.append("- shareability: would someone send this to a friend — controversy, a hot take, a ")
+          .append("counterintuitive fact, a quotable line, an open curiosity gap?\n");
+        sb.append("- standalone: makes full sense with zero outside context.\n");
+        sb.append("Calibration — be honest and use the full range: 90+ = would genuinely stop a scroll and ")
+          .append("get shared; ~50 = fine but forgettable; below 30 = filler. Most moments are NOT 90+.\n\n");
+        sb.append("Respond ONLY with JSON of this exact shape (all factors 0-100):\n");
+        sb.append("{\"clips\":[{\"start_ms\":0,\"end_ms\":0,\"hook\":0,\"payoff\":0,\"emotion\":0,")
+          .append("\"shareability\":0,\"standalone\":0,\"title\":\"...\",\"reasoning\":\"...\"}]}\n\n");
         sb.append("SEGMENT TRANSCRIPT:\n");
         sb.append(renderWindows(bucketWords));
         return sb.toString();
@@ -312,7 +369,17 @@ public class MomentSelector {
                 if (end <= start) {
                     continue;
                 }
-                int score = clamp(c.path("score").asInt(50), 0, 100);
+                // Multi-factor scoring. Each factor defaults to the overall
+                // "score" when the model omits it (backward compatible), so a
+                // plain {"score":..} response still works.
+                int overall = c.path("score").asInt(50);
+                int score = viralityScore(
+                        c.path("hook").asInt(overall),
+                        c.path("payoff").asInt(overall),
+                        c.path("emotion").asInt(overall),
+                        c.path("shareability").asInt(overall),
+                        c.path("standalone").asInt(overall),
+                        end - start);
                 out.add(new SelectedMoment(
                         start, end,
                         c.path("title").asText(""),
@@ -328,5 +395,34 @@ public class MomentSelector {
 
     private static int clamp(int v, int lo, int hi) {
         return Math.max(lo, Math.min(hi, v));
+    }
+
+    /**
+     * Weighted composite virality score (0–100) from the director's per-factor
+     * scores, minus a mild penalty for clips well outside the ideal length band.
+     */
+    // Package-private for unit testing.
+    static int viralityScore(int hook, int payoff, int emotion, int share, int standalone, int durationMs) {
+        double base = W_HOOK * clampScore(hook)
+                + W_PAYOFF * clampScore(payoff)
+                + W_EMOTION * clampScore(emotion)
+                + W_SHARE * clampScore(share)
+                + W_STANDALONE * clampScore(standalone);
+        int score = (int) Math.round(base) - lengthPenalty(durationMs);
+        return clamp(score, 0, 100);
+    }
+
+    /** 0 inside the ideal band, ramping up to {@link #MAX_LENGTH_PENALTY} as it falls outside. */
+    private static int lengthPenalty(int durationMs) {
+        if (durationMs >= IDEAL_MIN_MS && durationMs <= IDEAL_MAX_MS) {
+            return 0;
+        }
+        int over = durationMs > IDEAL_MAX_MS ? durationMs - IDEAL_MAX_MS : IDEAL_MIN_MS - durationMs;
+        double ratio = Math.min(1.0, over / (double) IDEAL_MIN_MS);
+        return (int) Math.round(MAX_LENGTH_PENALTY * ratio);
+    }
+
+    private static int clampScore(int v) {
+        return Math.max(0, Math.min(100, v));
     }
 }
