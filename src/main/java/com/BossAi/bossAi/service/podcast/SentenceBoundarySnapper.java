@@ -36,6 +36,15 @@ import java.util.List;
 public class SentenceBoundarySnapper {
 
     /**
+     * Hard cap on clip length. Short-form (TikTok/Reels/Shorts) clips live in the
+     * ~10–60s band; the director aims for that, and this is the safety net for
+     * when it overshoots. The cap is applied on a SENTENCE boundary — we pull the
+     * end back to the last whole sentence within the cap rather than cutting
+     * mid-sentence.
+     */
+    static final int MAX_CLIP_MS = 60_000;
+
+    /**
      * Snaps one moment. Returns null when the transcript is empty or the moment
      * cannot be mapped onto any words (nothing to render).
      */
@@ -60,6 +69,8 @@ public class SentenceBoundarySnapper {
 
         int firstWord = snapStartWord(words, sentenceStarts, approxStart);
         int lastWord = snapEndWord(words, firstWord, approxEnd);
+        // Enforce the short-form length cap on a sentence boundary.
+        lastWord = capEndWord(words, firstWord, words.get(firstWord).startMs(), lastWord);
 
         if (firstWord > lastWord) {
             return null;
@@ -129,6 +140,29 @@ public class SentenceBoundarySnapper {
             }
         }
         return lastWordAtOrAfter(words, firstWord, approxEndMs);
+    }
+
+    /**
+     * Pulls the end back to at most {@link #MAX_CLIP_MS} after the clip start,
+     * landing on a whole sentence. If the clip is already within the cap it is
+     * unchanged. If a single sentence is itself longer than the cap (rare — very
+     * sparse punctuation), the whole sentence is kept rather than cutting
+     * mid-sentence.
+     */
+    private int capEndWord(List<TranscriptWord> words, int firstWord, int startMs, int lastWord) {
+        int cap = startMs + MAX_CLIP_MS;
+        if (words.get(lastWord).endMs() <= cap) {
+            return lastWord;
+        }
+        // Walk back to the last sentence-ending word that fits within the cap.
+        for (int i = lastWord - 1; i >= firstWord; i--) {
+            if (words.get(i).endsSentence() && words.get(i).endMs() <= cap) {
+                return i;
+            }
+        }
+        // No sentence boundary fits — keep the current whole sentence (don't cut
+        // mid-sentence). This only happens for an unusually long single sentence.
+        return lastWord;
     }
 
     /** Word-grid fallback: the last word whose end is ≤ approxEnd, or firstWord. */

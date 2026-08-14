@@ -67,7 +67,7 @@ public class PodcastClipOrchestrator {
     private static final Duration SOURCE_URL_TTL = Duration.ofHours(6);
 
     /** Max length of the fallback clip used when the director returns nothing. */
-    private static final int FALLBACK_CLIP_MS = 90_000;
+    private static final int FALLBACK_CLIP_MS = 60_000;
 
     /**
      * Runs the full pipeline for one generation over one source episode.
