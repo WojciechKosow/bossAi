@@ -37,7 +37,7 @@ class PodcastPipelineChainTest {
         assertEquals(3, turns.size());
 
         // 2) Director stand-in: a moment with rough, mid-sentence timestamps.
-        SelectedMoment picked = new SelectedMoment(2600, 5600, "It works", "clear payoff");
+        SelectedMoment picked = new SelectedMoment(2600, 5600, "It works", "clear payoff", 90);
 
         // 3) Deterministic sentence snap.
         SnappedClip clip = snapper.snap(episode, picked);

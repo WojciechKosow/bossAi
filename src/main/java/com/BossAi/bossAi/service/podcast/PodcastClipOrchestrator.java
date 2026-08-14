@@ -63,8 +63,11 @@ public class PodcastClipOrchestrator {
     private final ObjectMapper objectMapper;
     private final FfmpegProperties ffmpegProperties;
 
-    /** How long the source presigned URL must stay valid — long enough to render every clip. */
-    private static final Duration SOURCE_URL_TTL = Duration.ofHours(3);
+    /** How long the source presigned URL must stay valid — long enough to extract audio and render every clip. */
+    private static final Duration SOURCE_URL_TTL = Duration.ofHours(6);
+
+    /** Max length of the fallback clip used when the director returns nothing. */
+    private static final int FALLBACK_CLIP_MS = 90_000;
 
     /**
      * Runs the full pipeline for one generation over one source episode.
@@ -81,11 +84,14 @@ public class PodcastClipOrchestrator {
         log.info("[Podcast] START — generationId: {}, source asset: {}, clips: {}",
                 generationId, source.getId(), clipCount);
 
-        // Materialize the source locally ONCE (on R2 this downloads the object to
-        // a temp file). Reused for audio extraction and for cutting every clip.
-        Path sourcePath = storageService.resolvePath(source.getStorageKey());
+        // ffmpeg reads the source straight from R2 via a presigned URL — audio
+        // extraction streams it, and each clip cut HTTP-range-seeks only its
+        // window. This keeps a 20 GB episode entirely off the container's disk
+        // (downloading it would blow Railway's ephemeral storage). Falls back to
+        // a materialized local path on the dev backend.
+        String sourceInput = ffmpegSource(source.getStorageKey());
 
-        DiarizedTranscript transcript = transcribe(sourcePath, workDir, language);
+        DiarizedTranscript transcript = transcribe(sourceInput, workDir, language);
         log.info("[Podcast] Transcript — {} words, {} speaker(s), {} ms",
                 transcript.words().size(), transcript.distinctSpeakers(), transcript.durationMs());
 
@@ -93,16 +99,32 @@ public class PodcastClipOrchestrator {
         log.info("[Podcast] {} speaker turn(s)", turns.size());
 
         List<SelectedMoment> moments = momentSelector.selectMoments(transcript, turns, clipCount);
-        List<SnappedClip> snapped = boundarySnapper.snapAll(transcript, moments);
+        List<SnappedClip> snapped = new ArrayList<>(boundarySnapper.snapAll(transcript, moments));
         log.info("[Podcast] Director picked {} moment(s) → {} sentence-snapped clip(s)",
                 moments.size(), snapped.size());
+
+        // Fallback: if the director found nothing usable (e.g. a very short
+        // source it can't split into standalone moments), still produce one clip
+        // from the start of the episode so the user gets output. Capped so a long
+        // episode never yields a runaway "whole-episode" clip.
+        if (snapped.isEmpty() && !transcript.isEmpty()) {
+            int end = Math.min(transcript.durationMs(), FALLBACK_CLIP_MS);
+            SnappedClip whole = boundarySnapper.snap(transcript,
+                    new SelectedMoment(0, end, "Clip 1",
+                            "Auto-selected — the director returned no moments", 50));
+            if (whole != null) {
+                snapped.add(whole);
+                log.warn("[Podcast] Director returned no moments — using a single fallback clip ({} ms)",
+                        whole.durationMs());
+            }
+        }
 
         // Fallback URL: the full source, used only if a clip's pre-cut fails.
         String fullSourceUrl = resolveUrl(source.getStorageKey());
 
         List<Clip> clips = new ArrayList<>(snapped.size());
         for (int i = 0; i < snapped.size(); i++) {
-            clips.add(renderOne(generation, snapped.get(i), i, sourcePath, workDir, fullSourceUrl));
+            clips.add(renderOne(generation, snapped.get(i), i, sourceInput, workDir, fullSourceUrl));
         }
         log.info("[Podcast] DONE — generationId: {}, {} clip(s) ({} ready)",
                 generationId, clips.size(),
@@ -110,16 +132,26 @@ public class PodcastClipOrchestrator {
         return clips;
     }
 
-    private DiarizedTranscript transcribe(Path sourcePath, Path workDir, String language) {
+    private DiarizedTranscript transcribe(String sourceInput, Path workDir, String language) {
         try {
-            Path wav = audioExtractor.extractWav(sourcePath, workDir);
+            Path wav = audioExtractor.extractWav(sourceInput, workDir);
             byte[] audioBytes = Files.readAllBytes(wav);
             TranscribeResponse resp = audioAnalysisClient.transcribeAndDiarize(
                     audioBytes, "episode.wav", language);
             return resp.toDiarizedTranscript();
         } catch (Exception e) {
-            throw new RuntimeException("Transcription failed for " + sourcePath, e);
+            throw new RuntimeException("Transcription failed for " + sourceInput, e);
         }
+    }
+
+    /**
+     * ffmpeg-usable source for the stored episode: the presigned R2 GET URL when
+     * the backend supports it (ffmpeg streams / range-seeks straight from R2),
+     * otherwise a materialized local path (dev backend).
+     */
+    private String ffmpegSource(String key) {
+        String presigned = storageService.presignedUrl(key, SOURCE_URL_TTL);
+        return presigned != null ? presigned : storageService.resolvePath(key).toString();
     }
 
     /**
@@ -132,13 +164,14 @@ public class PodcastClipOrchestrator {
      * source with a trim window.
      */
     private Clip renderOne(Generation generation, SnappedClip snapped, int index,
-                           Path sourcePath, Path workDir, String fullSourceUrl) {
+                           String sourceInput, Path workDir, String fullSourceUrl) {
         Clip clip = clipRepository.save(Clip.builder()
                 .generation(generation)
                 .status(ClipStatus.PENDING)
                 .clipIndex(index)
                 .title(trim(snapped.title(), 300))
                 .reasoning(trim(snapped.reasoning(), 2000))
+                .score(snapped.score())
                 .sourceStartMs(snapped.startMs())
                 .sourceEndMs(snapped.endMs())
                 .build());
@@ -153,7 +186,7 @@ public class PodcastClipOrchestrator {
             EdlDto edl;
             try {
                 Path cutFile = audioExtractor.cutSubclip(
-                        sourcePath, snapped.startMs(), snapped.endMs(),
+                        sourceInput, snapped.startMs(), snapped.endMs(),
                         workDir.resolve("clip-" + index + ".mp4"));
                 cutKey = "clips/" + renderId + "-src.mp4";
                 storageService.save(Files.readAllBytes(cutFile), cutKey);

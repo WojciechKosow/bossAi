@@ -10,15 +10,21 @@ import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.Locale;
+import java.util.Map;
+import java.util.TreeMap;
 
 /**
  * Minimal AWS Signature Version 4 query-string presigner for S3-compatible GET
- * requests (used against Cloudflare R2).
+ * and PUT requests (used against Cloudflare R2).
  *
- * Produces a directly-fetchable URL whose auth lives entirely in the query
- * string, so a browser or Chromium (Remotion) can GET the object from a private
- * bucket without any credentials of its own. Depends only on the JDK — no
- * s3-presigner module — which keeps the build portable.
+ * Produces a directly-usable URL whose auth lives entirely in the query
+ * string, so a browser or Chromium (Remotion) can GET (or PUT) the object on a
+ * private bucket without any credentials of its own. Depends only on the JDK —
+ * no s3-presigner module — which keeps the build portable.
+ *
+ * The signed-headers set is {@code host} only, and the payload is
+ * {@code UNSIGNED-PAYLOAD}; extra unsigned request headers (e.g. a browser's
+ * auto-added {@code Content-Type} on an XHR PUT) do not break the signature.
  *
  * Reference: https://docs.aws.amazon.com/general/latest/gr/sigv4-create-canonical-request.html
  */
@@ -50,14 +56,81 @@ public final class SigV4Presigner {
      */
     public static String presignGet(String endpoint, String region, String accessKey,
                                     String secretKey, String bucket, String key, Duration ttl) {
-        return presignGet(endpoint, region, accessKey, secretKey, bucket, key, ttl,
-                ZonedDateTime.now(ZoneOffset.UTC));
+        return presign("GET", endpoint, region, accessKey, secretKey, bucket, key, ttl,
+                ZonedDateTime.now(ZoneOffset.UTC), null);
+    }
+
+    /**
+     * Builds a presigned PUT URL for {@code <endpoint>/<bucket>/<key>} — a
+     * browser or any HTTP client can upload the object body straight to R2 with
+     * a single PUT, no credentials of its own. Same SigV4 structure as
+     * {@link #presignGet}, only the HTTP verb differs.
+     *
+     * @param endpoint  S3 endpoint, e.g. https://acct.r2.cloudflarestorage.com
+     * @param region    signing region ("auto" for R2)
+     * @param accessKey R2 access key id
+     * @param secretKey R2 secret access key
+     * @param bucket    bucket name (path-style)
+     * @param key       object key (may contain '/')
+     * @param ttl       how long the URL stays valid
+     */
+    public static String presignPut(String endpoint, String region, String accessKey,
+                                    String secretKey, String bucket, String key, Duration ttl) {
+        return presign("PUT", endpoint, region, accessKey, secretKey, bucket, key, ttl,
+                ZonedDateTime.now(ZoneOffset.UTC), null);
+    }
+
+    /**
+     * Builds a presigned PUT URL for a single multipart {@code UploadPart} — the
+     * client PUTs one chunk's bytes to {@code <endpoint>/<bucket>/<key>?partNumber=N&uploadId=…}.
+     * This is how objects larger than R2's 5 GiB single-PUT limit are uploaded
+     * directly from the browser: initiate the multipart upload server-side, hand
+     * out one of these per part, then complete server-side with the parts' ETags.
+     *
+     * @param uploadId   the multipart upload id from CreateMultipartUpload
+     * @param partNumber 1-based part index
+     */
+    public static String presignUploadPart(String endpoint, String region, String accessKey,
+                                           String secretKey, String bucket, String key,
+                                           String uploadId, int partNumber, Duration ttl) {
+        return presignUploadPart(endpoint, region, accessKey, secretKey, bucket, key,
+                uploadId, partNumber, ttl, ZonedDateTime.now(ZoneOffset.UTC));
+    }
+
+    /** Testable variant with an injectable signing timestamp. */
+    static String presignUploadPart(String endpoint, String region, String accessKey,
+                                    String secretKey, String bucket, String key,
+                                    String uploadId, int partNumber, Duration ttl, ZonedDateTime now) {
+        Map<String, String> extra = new TreeMap<>();
+        extra.put("partNumber", Integer.toString(partNumber));
+        extra.put("uploadId", uploadId);
+        return presign("PUT", endpoint, region, accessKey, secretKey, bucket, key, ttl, now, extra);
     }
 
     /** Testable variant with an injectable signing timestamp. */
     static String presignGet(String endpoint, String region, String accessKey,
                              String secretKey, String bucket, String key, Duration ttl,
                              ZonedDateTime now) {
+        return presign("GET", endpoint, region, accessKey, secretKey, bucket, key, ttl, now, null);
+    }
+
+    /** Testable variant with an injectable signing timestamp. */
+    static String presignPut(String endpoint, String region, String accessKey,
+                             String secretKey, String bucket, String key, Duration ttl,
+                             ZonedDateTime now) {
+        return presign("PUT", endpoint, region, accessKey, secretKey, bucket, key, ttl, now, null);
+    }
+
+    /**
+     * Shared SigV4 query-string presigner. {@code httpMethod} varies between GET
+     * (download) and PUT (upload); {@code extraQueryParams} carries any
+     * request-specific signed query params (e.g. {@code partNumber}/{@code uploadId}
+     * for a multipart UploadPart). The canonical request, string-to-sign, and
+     * signature are otherwise identical.
+     */
+    private static String presign(String httpMethod, String endpoint, String region, String accessKey,
+                                  String secretKey, String bucket, String key, Duration ttl,
+                                  ZonedDateTime now, Map<String, String> extraQueryParams) {
         URI uri = URI.create(endpoint);
         String host = uri.getHost();
         if (uri.getPort() != -1) {
@@ -72,19 +145,36 @@ public final class SigV4Presigner {
         String canonicalUri = "/" + uriEncode(bucket, false) + "/" + uriEncode(key, false);
 
         long expires = Math.max(1, ttl.getSeconds());
-        // Query params must be sorted by key for the canonical query string.
-        String canonicalQuery =
-                "X-Amz-Algorithm=" + uriEncode(ALGORITHM, true)
-                + "&X-Amz-Credential=" + uriEncode(accessKey + "/" + credentialScope, true)
-                + "&X-Amz-Date=" + amzDate
-                + "&X-Amz-Expires=" + expires
-                + "&X-Amz-SignedHeaders=host";
-
-        String canonicalHeaders = "host:" + host + "\n";
         String signedHeaders = "host";
 
+        // Query params must be sorted by key for the canonical query string.
+        // A TreeMap keeps them ordered; the X-Amz-* keys start with uppercase
+        // 'X' (0x58) so they sort before any lowercase extra keys (partNumber,
+        // uploadId) — and building the base params this way is byte-identical to
+        // the previous hand-ordered string, so existing signatures are unchanged.
+        TreeMap<String, String> params = new TreeMap<>();
+        params.put("X-Amz-Algorithm", ALGORITHM);
+        params.put("X-Amz-Credential", accessKey + "/" + credentialScope);
+        params.put("X-Amz-Date", amzDate);
+        params.put("X-Amz-Expires", Long.toString(expires));
+        params.put("X-Amz-SignedHeaders", signedHeaders);
+        if (extraQueryParams != null) {
+            params.putAll(extraQueryParams);
+        }
+
+        StringBuilder cq = new StringBuilder();
+        for (Map.Entry<String, String> e : params.entrySet()) {
+            if (cq.length() > 0) {
+                cq.append('&');
+            }
+            cq.append(uriEncode(e.getKey(), true)).append('=').append(uriEncode(e.getValue(), true));
+        }
+        String canonicalQuery = cq.toString();
+
+        String canonicalHeaders = "host:" + host + "\n";
+
         String canonicalRequest = String.join("\n",
-                "GET",
+                httpMethod,
                 canonicalUri,
                 canonicalQuery,
                 canonicalHeaders,

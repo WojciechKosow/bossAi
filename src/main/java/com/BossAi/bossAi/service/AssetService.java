@@ -54,6 +54,21 @@ public interface AssetService {
             Integer orderIndex
     ) throws Exception;
 
+    /**
+     * Registers a USER_UPLOAD asset for a file the client already uploaded
+     * directly to object storage (presigned PUT to R2). No bytes pass through
+     * the JVM — the object is already at {@code storageKey}; this only creates
+     * the DB row, applying the same plan-based retention/reuse rules as
+     * {@link #createUserUpload}.
+     */
+    AssetDTO createUserUploadFromKey(
+            String email,
+            AssetType type,
+            String storageKey,
+            String originalFilename,
+            long sizeBytes
+    );
+
     AssetDTO createAssetFromUrl(
             UUID userId,
             AssetType type,

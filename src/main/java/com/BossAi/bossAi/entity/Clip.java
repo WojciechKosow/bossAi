@@ -50,6 +50,13 @@ public class Clip {
     private String reasoning;
 
     /**
+     * Director's virality score for this clip, 0–100 (higher = stronger short).
+     * Nullable for legacy rows produced before scoring existed.
+     */
+    @Column(name = "score")
+    private Integer score;
+
+    /**
      * Sentence-snapped in/out points into the SOURCE episode, in milliseconds.
      * These are the deterministic boundaries — never mid-sentence.
      */
