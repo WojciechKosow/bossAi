@@ -9,6 +9,7 @@ import java.util.List;
  *
  * @param title          headline from the LLM director (carried through)
  * @param reasoning      why this moment was chosen (carried through)
+ * @param score          director's virality score 0–100 (carried through)
  * @param startMs        sentence-snapped start in the SOURCE episode
  * @param endMs          sentence-snapped end in the SOURCE episode
  * @param firstWordIndex index (inclusive) of the first word, into the full transcript
@@ -18,6 +19,7 @@ import java.util.List;
 public record SnappedClip(
         String title,
         String reasoning,
+        int score,
         int startMs,
         int endMs,
         int firstWordIndex,

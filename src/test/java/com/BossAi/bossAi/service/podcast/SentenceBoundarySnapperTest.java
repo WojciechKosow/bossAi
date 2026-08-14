@@ -26,7 +26,7 @@ class SentenceBoundarySnapperTest {
 
         // Director eyeballed a start mid-sentence B ("Hold on.") and an end
         // mid-sentence D ("Sure, it works.").
-        SelectedMoment moment = new SelectedMoment(2600, 5600, "Title", "why");
+        SelectedMoment moment = new SelectedMoment(2600, 5600, "Title", "why", 80);
         SnappedClip clip = snapper.snap(t, moment);
 
         assertNotNull(clip);
@@ -47,7 +47,7 @@ class SentenceBoundarySnapperTest {
     @DisplayName("a moment landing inside the first sentence keeps word 0 as the start")
     void snapsStartToBeginning() {
         DiarizedTranscript t = TranscriptFixture.episode();
-        SelectedMoment moment = new SelectedMoment(700, 1800, "T", "r");
+        SelectedMoment moment = new SelectedMoment(700, 1800, "T", "r", 80);
         SnappedClip clip = snapper.snap(t, moment);
 
         assertNotNull(clip);
@@ -68,7 +68,7 @@ class SentenceBoundarySnapperTest {
         );
         DiarizedTranscript t = new DiarizedTranscript(words, "en", 1900);
 
-        SnappedClip clip = snapper.snap(t, new SelectedMoment(400, 1100, "T", "r"));
+        SnappedClip clip = snapper.snap(t, new SelectedMoment(400, 1100, "T", "r", 80));
         assertNotNull(clip);
         assertTrue(clip.startMs() <= clip.endMs());
         assertFalse(clip.words().isEmpty());
@@ -79,6 +79,6 @@ class SentenceBoundarySnapperTest {
     void nullSafety() {
         assertNull(snapper.snap(TranscriptFixture.episode(), null));
         assertNull(snapper.snap(new DiarizedTranscript(List.of(), "en", 0),
-                new SelectedMoment(0, 100, "t", "r")));
+                new SelectedMoment(0, 100, "t", "r", 80)));
     }
 }

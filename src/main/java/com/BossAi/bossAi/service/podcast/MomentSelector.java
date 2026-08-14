@@ -4,6 +4,7 @@ import com.BossAi.bossAi.service.OpenAiService;
 import com.BossAi.bossAi.service.podcast.model.DiarizedTranscript;
 import com.BossAi.bossAi.service.podcast.model.SelectedMoment;
 import com.BossAi.bossAi.service.podcast.model.SpeakerTurn;
+import com.BossAi.bossAi.service.podcast.model.TranscriptWord;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
@@ -38,8 +39,16 @@ public class MomentSelector {
      */
     private static final int TRANSCRIPT_CHAR_BUDGET = 240_000;
 
-    /** Per-turn text cap so one rambling turn can't dominate the budget. */
-    private static final int MAX_TURN_CHARS = 400;
+    /**
+     * The transcript is fed to the director as timestamped windows, NOT as raw
+     * speaker turns. A long turn (or a whole undiarized monologue — one giant
+     * turn) is split into windows of at most this many characters / this many
+     * milliseconds, each carrying its own {@code [mm:ss]} timecode. Without this
+     * the director only saw the first slice of a single turn and could only ever
+     * pick a clip from the very beginning of the episode.
+     */
+    private static final int SEGMENT_MAX_CHARS = 300;
+    private static final int SEGMENT_MAX_MS = 30_000;
 
     /** Target clip length band handed to the director as guidance (seconds). */
     private static final int TARGET_MIN_SECONDS = 20;
@@ -53,25 +62,64 @@ public class MomentSelector {
         }
         int n = Math.max(1, desiredClipCount);
 
-        String prompt = buildPrompt(turns, n, transcript.durationMs());
+        String prompt = buildPrompt(transcript.words(), turns, n, transcript.durationMs());
         String raw = openAiService.generateDirectorPlan(prompt);
         List<SelectedMoment> moments = parse(raw, transcript.durationMs());
 
-        // Keep at most n, in chronological order.
-        moments.sort((a, b) -> Integer.compare(a.approxStartMs(), b.approxStartMs()));
-        if (moments.size() > n) {
-            moments = new ArrayList<>(moments.subList(0, n));
-        }
-        log.info("[MomentSelector] Director returned {} moment(s), keeping {}",
-                moments.size(), Math.min(moments.size(), n));
-        return moments;
+        List<SelectedMoment> kept = rankAndDedup(moments, n);
+        log.info("[MomentSelector] Director returned {} moment(s), kept {} (top by score, de-overlapped)",
+                moments.size(), kept.size());
+        return kept;
     }
 
-    private String buildPrompt(List<SpeakerTurn> turns, int n, int durationMs) {
+    /**
+     * Picks the best up-to-{@code n} moments: highest virality score first,
+     * skipping any that overlap an already-kept pick (so we don't ship two clips
+     * of the same stretch), then returns them in chronological order for rendering.
+     */
+    // Package-private for unit testing.
+    List<SelectedMoment> rankAndDedup(List<SelectedMoment> moments, int n) {
+        List<SelectedMoment> byScore = new ArrayList<>(moments);
+        // Highest score first; tie-break on the longer moment, then earlier start.
+        byScore.sort((a, b) -> {
+            int s = Integer.compare(b.score(), a.score());
+            if (s != 0) return s;
+            int d = Integer.compare(b.approxEndMs() - b.approxStartMs(),
+                    a.approxEndMs() - a.approxStartMs());
+            if (d != 0) return d;
+            return Integer.compare(a.approxStartMs(), b.approxStartMs());
+        });
+
+        List<SelectedMoment> kept = new ArrayList<>();
+        for (SelectedMoment m : byScore) {
+            if (kept.size() >= n) {
+                break;
+            }
+            boolean clashes = kept.stream().anyMatch(k -> overlaps(k, m));
+            if (!clashes) {
+                kept.add(m);
+            }
+        }
+        kept.sort((a, b) -> Integer.compare(a.approxStartMs(), b.approxStartMs()));
+        return kept;
+    }
+
+    /** True when two moments overlap in time (with a small gap so picks aren't back-to-back). */
+    private static boolean overlaps(SelectedMoment a, SelectedMoment b) {
+        int gap = 1_000; // treat picks within 1s of each other as clashing
+        return a.approxStartMs() < b.approxEndMs() + gap
+                && b.approxStartMs() < a.approxEndMs() + gap;
+    }
+
+    private String buildPrompt(List<TranscriptWord> words, List<SpeakerTurn> turns, int n, int durationMs) {
         int durationSec = Math.max(1, durationMs / 1000);
         // Never ask for more/longer clips than the source can hold. On a short
         // source, allow shorter clips and fewer of them rather than getting none.
         int maxClips = Math.max(1, Math.min(n, durationSec / TARGET_MIN_SECONDS));
+        // Ask for a larger scored candidate pool than we keep, so code can pick
+        // the best non-overlapping ones. Still bounded by how many clips fit.
+        int candidatePool = Math.max(maxClips,
+                Math.min(3 * n, Math.max(1, durationSec / TARGET_MIN_SECONDS)));
         int targetMax = Math.min(TARGET_MAX_SECONDS, durationSec);
         int targetMin = Math.min(TARGET_MIN_SECONDS, Math.max(5, durationSec / 2));
 
@@ -79,9 +127,10 @@ public class MomentSelector {
         sb.append("You are an elite short-form video editor who finds viral moments in podcasts.\n\n");
         sb.append("Below is a speaker-diarized transcript of a ").append(durationSec)
           .append("-second episode. Each line is: [mm:ss] SPEAKER: text\n\n");
-        sb.append("TASK: Pick up to ").append(maxClips)
-          .append(" of the BEST standalone moments to cut into vertical short clips. ")
-          .append("Return fewer if the material is thin, but you MUST return at least one.\n");
+        sb.append("TASK: Identify the strongest standalone moments to cut into vertical short clips. ")
+          .append("Return up to ").append(candidatePool)
+          .append(" scored candidates (code keeps the best ").append(maxClips)
+          .append(" non-overlapping). Return fewer if the material is thin, but you MUST return at least one.\n");
         sb.append("Rules:\n");
         sb.append("- Each moment must stand on its own without outside context.\n");
         sb.append("- Prefer a strong hook in the first seconds: a bold claim, a story, a punchline, tension.\n");
@@ -90,46 +139,74 @@ public class MomentSelector {
           .append(durationSec).append("-second source.\n");
         sb.append("- Spread picks across the episode; do not cluster them.\n");
         sb.append("- start_ms/end_ms are milliseconds from the episode start. They can be approximate; ")
-          .append("they will be snapped to sentence boundaries by code afterwards.\n\n");
+          .append("they will be snapped to sentence boundaries by code afterwards.\n");
+        sb.append("- score each moment 0-100 for viral potential: reward a strong hook, a clear payoff, ")
+          .append("emotion or controversy, and standalone clarity; penalize rambling or needing context. ")
+          .append("Return MORE candidates than needed and score honestly — the best-scoring, ")
+          .append("non-overlapping ones are chosen by code.\n\n");
         sb.append("Respond ONLY with JSON of this exact shape:\n");
-        sb.append("{\"clips\":[{\"start_ms\":0,\"end_ms\":0,\"title\":\"...\",\"reasoning\":\"...\"}]}\n\n");
+        sb.append("{\"clips\":[{\"start_ms\":0,\"end_ms\":0,\"score\":0,\"title\":\"...\",\"reasoning\":\"...\"}]}\n\n");
         sb.append("TRANSCRIPT:\n");
-        sb.append(formatTurns(turns));
+        sb.append(formatTranscript(words, turns));
         return sb.toString();
     }
 
     /**
-     * Renders speaker turns as {@code [mm:ss] SPEAKER: text} lines within a char
-     * budget. If the full rendering exceeds the budget, turns are proportionally
-     * downsampled so coverage still spans the whole episode.
+     * Renders the transcript as timestamped {@code [mm:ss] SPEAKER: text} windows
+     * that span the WHOLE episode. Each speaker turn is split into windows of at
+     * most {@link #SEGMENT_MAX_CHARS} / {@link #SEGMENT_MAX_MS}, each stamped with
+     * its own start time — so a monologue (or an undiarized episode, which is one
+     * giant turn) is still presented across the full duration instead of only its
+     * first slice. If the whole rendering exceeds the char budget, windows are
+     * uniformly downsampled so coverage still spans the entire episode.
      */
-    private String formatTurns(List<SpeakerTurn> turns) {
-        List<SpeakerTurn> selected = turns;
-        // Estimate full size; downsample by uniform stride if needed.
-        long estimate = 0;
-        for (SpeakerTurn t : turns) {
-            estimate += Math.min(t.text().length(), MAX_TURN_CHARS) + 20;
-        }
-        if (estimate > TRANSCRIPT_CHAR_BUDGET) {
-            int stride = (int) Math.ceil((double) estimate / TRANSCRIPT_CHAR_BUDGET);
-            selected = new ArrayList<>();
-            for (int i = 0; i < turns.size(); i += stride) {
-                selected.add(turns.get(i));
+    // Package-private for direct unit testing of whole-episode windowing.
+    String formatTranscript(List<TranscriptWord> words, List<SpeakerTurn> turns) {
+        List<String> lines = new ArrayList<>();
+        for (SpeakerTurn turn : turns) {
+            StringBuilder seg = new StringBuilder();
+            int segStartMs = -1;
+            for (TranscriptWord w : turn.wordsFrom(words)) {
+                String tok = w.word() == null ? "" : w.word().strip();
+                if (tok.isEmpty()) {
+                    continue;
+                }
+                if (segStartMs < 0) {
+                    segStartMs = w.startMs();
+                }
+                if (seg.length() > 0) {
+                    seg.append(' ');
+                }
+                seg.append(tok);
+                boolean overChars = seg.length() >= SEGMENT_MAX_CHARS;
+                boolean overTime = w.endMs() - segStartMs >= SEGMENT_MAX_MS;
+                if (overChars || overTime) {
+                    lines.add("[" + timecode(segStartMs) + "] " + turn.speaker() + ": " + seg);
+                    seg.setLength(0);
+                    segStartMs = -1;
+                }
             }
-            log.warn("[MomentSelector] Transcript over budget (~{} chars) — downsampled 1/{} to {} turns",
-                    estimate, stride, selected.size());
+            if (seg.length() > 0) {
+                lines.add("[" + timecode(segStartMs) + "] " + turn.speaker() + ": " + seg);
+            }
         }
 
-        StringBuilder sb = new StringBuilder();
-        for (SpeakerTurn t : selected) {
-            String text = t.text();
-            if (text.length() > MAX_TURN_CHARS) {
-                text = text.substring(0, MAX_TURN_CHARS).stripTrailing() + "…";
-            }
-            sb.append('[').append(timecode(t.startMs())).append("] ")
-              .append(t.speaker()).append(": ").append(text).append('\n');
+        long total = 0;
+        for (String l : lines) {
+            total += l.length() + 1;
         }
-        return sb.toString();
+        if (total > TRANSCRIPT_CHAR_BUDGET && lines.size() > 1) {
+            int stride = (int) Math.ceil((double) total / TRANSCRIPT_CHAR_BUDGET);
+            List<String> sampled = new ArrayList<>();
+            for (int i = 0; i < lines.size(); i += stride) {
+                sampled.add(lines.get(i));
+            }
+            log.warn("[MomentSelector] Transcript over budget (~{} chars) — downsampled 1/{} to {} windows",
+                    total, stride, sampled.size());
+            lines = sampled;
+        }
+
+        return String.join("\n", lines) + "\n";
     }
 
     private static String timecode(int ms) {
@@ -157,10 +234,12 @@ public class MomentSelector {
                 if (end <= start) {
                     continue;
                 }
+                int score = clamp(c.path("score").asInt(50), 0, 100);
                 out.add(new SelectedMoment(
                         start, end,
                         c.path("title").asText(""),
-                        c.path("reasoning").asText("")
+                        c.path("reasoning").asText(""),
+                        score
                 ));
             }
             return out;

@@ -69,6 +69,7 @@ public class SentenceBoundarySnapper {
         return new SnappedClip(
                 moment.title(),
                 moment.reasoning(),
+                moment.score(),
                 words.get(firstWord).startMs(),
                 words.get(lastWord).endMs(),
                 firstWord,
