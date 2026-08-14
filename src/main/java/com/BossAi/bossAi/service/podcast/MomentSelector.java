@@ -57,19 +57,80 @@ public class MomentSelector {
     public List<SelectedMoment> selectMoments(DiarizedTranscript transcript,
                                               List<SpeakerTurn> turns,
                                               int desiredClipCount) {
-        if (transcript == null || transcript.isEmpty() || turns == null || turns.isEmpty()) {
+        if (transcript == null || transcript.isEmpty()) {
             return List.of();
         }
         int n = Math.max(1, desiredClipCount);
+        int durationMs = transcript.durationMs();
+        int durationSec = Math.max(1, durationMs / 1000);
+        List<TranscriptWord> words = transcript.words();
 
-        String prompt = buildPrompt(transcript.words(), turns, n, transcript.durationMs());
-        String raw = openAiService.generateDirectorPlan(prompt);
-        List<SelectedMoment> moments = parse(raw, transcript.durationMs());
+        // Score the episode in contiguous time buckets and pick the best moment(s)
+        // in EACH, then rank globally. A single call over a 2-hour transcript
+        // anchors on the opening and returns near-duplicate first-part clips;
+        // bucketing forces candidates from across the whole timeline. Buckets are
+        // by WORD TIME (not speaker turn) so an undiarized episode — which is one
+        // giant turn — is still split across the timeline instead of all landing
+        // in the first bucket.
+        int buckets = chooseBucketCount(n, durationSec);
+        List<List<TranscriptWord>> bucketed = bucketWords(words, buckets, durationMs);
+        int perBucket = Math.max(1, (int) Math.ceil((2.0 * n) / Math.max(1, buckets)));
 
-        List<SelectedMoment> kept = rankAndDedup(moments, n);
-        log.info("[MomentSelector] Director returned {} moment(s), kept {} (top by score, de-overlapped)",
-                moments.size(), kept.size());
+        List<SelectedMoment> candidates = new ArrayList<>();
+        int b = 0;
+        for (List<TranscriptWord> bucket : bucketed) {
+            b++;
+            if (bucket.isEmpty()) {
+                continue;
+            }
+            int segStart = bucket.get(0).startMs();
+            int segEnd = bucket.get(bucket.size() - 1).endMs();
+            try {
+                String prompt = buildBucketPrompt(bucket, perBucket, segStart, segEnd, durationSec);
+                String raw = openAiService.generateDirectorPlan(prompt);
+                List<SelectedMoment> found = parse(raw, durationMs);
+                log.info("[MomentSelector] Bucket {}/{} [{}-{}] -> {} candidate(s)",
+                        b, bucketed.size(), timecode(segStart), timecode(segEnd), found.size());
+                candidates.addAll(found);
+            } catch (Exception e) {
+                log.warn("[MomentSelector] Bucket {}/{} director call failed: {}",
+                        b, bucketed.size(), e.getMessage());
+            }
+        }
+
+        List<SelectedMoment> kept = rankAndDedup(candidates, n);
+        log.info("[MomentSelector] {} candidate(s) across {} bucket(s) -> kept {} at {}",
+                candidates.size(), bucketed.size(), kept.size(),
+                kept.stream().map(m -> timecode(m.approxStartMs())).toList());
         return kept;
+    }
+
+    /** Contiguous time buckets to analyze: enough to spread, bounded by length and cost. */
+    private static int chooseBucketCount(int n, int durationSec) {
+        int aim = Math.max(n, Math.min(2 * n, 10));
+        int byLength = Math.max(1, durationSec / 60); // at least ~1 minute per bucket
+        return Math.max(1, Math.min(Math.min(aim, byLength), 12));
+    }
+
+    /** Splits words into {@code buckets} equal time ranges spanning the whole episode. */
+    // Package-private for unit testing.
+    static List<List<TranscriptWord>> bucketWords(List<TranscriptWord> words, int buckets, int durationMs) {
+        List<List<TranscriptWord>> out = new ArrayList<>();
+        for (int i = 0; i < buckets; i++) {
+            out.add(new ArrayList<>());
+        }
+        long span = Math.max(1, durationMs);
+        for (TranscriptWord w : words) {
+            int idx = (int) ((long) Math.max(0, w.startMs()) * buckets / span);
+            if (idx < 0) {
+                idx = 0;
+            }
+            if (idx >= buckets) {
+                idx = buckets - 1;
+            }
+            out.get(idx).add(w);
+        }
+        return out;
     }
 
     /**
@@ -111,43 +172,41 @@ public class MomentSelector {
                 && b.approxStartMs() < a.approxEndMs() + gap;
     }
 
-    private String buildPrompt(List<TranscriptWord> words, List<SpeakerTurn> turns, int n, int durationMs) {
-        int durationSec = Math.max(1, durationMs / 1000);
-        // Never ask for more/longer clips than the source can hold. On a short
-        // source, allow shorter clips and fewer of them rather than getting none.
-        int maxClips = Math.max(1, Math.min(n, durationSec / TARGET_MIN_SECONDS));
-        // Ask for a larger scored candidate pool than we keep, so code can pick
-        // the best non-overlapping ones. Still bounded by how many clips fit.
-        int candidatePool = Math.max(maxClips,
-                Math.min(3 * n, Math.max(1, durationSec / TARGET_MIN_SECONDS)));
-        int targetMax = Math.min(TARGET_MAX_SECONDS, durationSec);
-        int targetMin = Math.min(TARGET_MIN_SECONDS, Math.max(5, durationSec / 2));
+    /**
+     * Builds the director prompt for ONE time bucket: pick the best
+     * {@code perBucket} standalone moments within this segment, scored for
+     * virality. Timestamps are absolute (episode-relative) so picks slot straight
+     * into the global ranking.
+     */
+    private String buildBucketPrompt(List<TranscriptWord> bucketWords, int perBucket,
+                                     int segStartMs, int segEndMs, int episodeDurationSec) {
+        int segSec = Math.max(1, (segEndMs - segStartMs) / 1000);
+        int targetMax = Math.min(TARGET_MAX_SECONDS, segSec);
+        int targetMin = Math.min(TARGET_MIN_SECONDS, Math.max(5, segSec / 2));
 
         StringBuilder sb = new StringBuilder(TRANSCRIPT_CHAR_BUDGET + 4_000);
         sb.append("You are an elite short-form video editor who finds viral moments in podcasts.\n\n");
-        sb.append("Below is a speaker-diarized transcript of a ").append(durationSec)
+        sb.append("Below is ONE segment (").append(timecode(segStartMs)).append("-")
+          .append(timecode(segEndMs)).append(") of a ").append(episodeDurationSec)
           .append("-second episode. Each line is: [mm:ss] SPEAKER: text\n\n");
-        sb.append("TASK: Identify the strongest standalone moments to cut into vertical short clips. ")
-          .append("Return up to ").append(candidatePool)
-          .append(" scored candidates (code keeps the best ").append(maxClips)
-          .append(" non-overlapping). Return fewer if the material is thin, but you MUST return at least one.\n");
+        sb.append("TASK: From THIS segment, pick the ").append(perBucket)
+          .append(" strongest standalone moment(s) for vertical short clips, scored for viral potential. ")
+          .append("Return at least one; return fewer than ").append(perBucket)
+          .append(" only if the segment is genuinely weak.\n");
         sb.append("Rules:\n");
         sb.append("- Each moment must stand on its own without outside context.\n");
         sb.append("- Prefer a strong hook in the first seconds: a bold claim, a story, a punchline, tension.\n");
         sb.append("- Favor complete thoughts. Target ").append(targetMin).append("-")
-          .append(targetMax).append(" seconds each; every clip must fit within the ")
-          .append(durationSec).append("-second source.\n");
-        sb.append("- Spread picks across the episode; do not cluster them.\n");
-        sb.append("- start_ms/end_ms are milliseconds from the episode start. They can be approximate; ")
-          .append("they will be snapped to sentence boundaries by code afterwards.\n");
-        sb.append("- score each moment 0-100 for viral potential: reward a strong hook, a clear payoff, ")
-          .append("emotion or controversy, and standalone clarity; penalize rambling or needing context. ")
-          .append("Return MORE candidates than needed and score honestly — the best-scoring, ")
-          .append("non-overlapping ones are chosen by code.\n\n");
+          .append(targetMax).append(" seconds each; the moment must lie inside this segment.\n");
+        sb.append("- start_ms/end_ms are ABSOLUTE milliseconds from the EPISODE start — use the [mm:ss] ")
+          .append("timecodes shown. They can be approximate; code snaps them to sentence boundaries.\n");
+        sb.append("- score 0-100 for viral potential: reward a strong hook, a clear payoff, emotion or ")
+          .append("controversy, and standalone clarity; penalize rambling or needing context. Score honestly ")
+          .append("so a weak segment scores low and only genuinely strong moments score high.\n\n");
         sb.append("Respond ONLY with JSON of this exact shape:\n");
         sb.append("{\"clips\":[{\"start_ms\":0,\"end_ms\":0,\"score\":0,\"title\":\"...\",\"reasoning\":\"...\"}]}\n\n");
-        sb.append("TRANSCRIPT:\n");
-        sb.append(formatTranscript(words, turns));
+        sb.append("SEGMENT TRANSCRIPT:\n");
+        sb.append(renderWindows(bucketWords));
         return sb.toString();
     }
 
@@ -160,35 +219,54 @@ public class MomentSelector {
      * first slice. If the whole rendering exceeds the char budget, windows are
      * uniformly downsampled so coverage still spans the entire episode.
      */
+    /**
+     * Test shim: render the whole transcript as windows. Selection itself renders
+     * per bucket via {@link #renderWindows}; the {@code turns} argument is no
+     * longer needed (speaker labels come from the words directly).
+     */
     // Package-private for direct unit testing of whole-episode windowing.
     String formatTranscript(List<TranscriptWord> words, List<SpeakerTurn> turns) {
+        return renderWindows(words);
+    }
+
+    /**
+     * Renders words as timestamped {@code [mm:ss] SPEAKER: text} windows of at most
+     * {@link #SEGMENT_MAX_CHARS} / {@link #SEGMENT_MAX_MS}, starting a new window on
+     * a speaker change or a cap. Works on any word slice (whole episode or one
+     * bucket); an undiarized slice renders under a single "SPEAKER" label but still
+     * spans its full time range. Over-budget renderings are downsampled by window.
+     */
+    private String renderWindows(List<TranscriptWord> words) {
         List<String> lines = new ArrayList<>();
-        for (SpeakerTurn turn : turns) {
-            StringBuilder seg = new StringBuilder();
-            int segStartMs = -1;
-            for (TranscriptWord w : turn.wordsFrom(words)) {
-                String tok = w.word() == null ? "" : w.word().strip();
-                if (tok.isEmpty()) {
-                    continue;
-                }
-                if (segStartMs < 0) {
-                    segStartMs = w.startMs();
-                }
-                if (seg.length() > 0) {
-                    seg.append(' ');
-                }
-                seg.append(tok);
-                boolean overChars = seg.length() >= SEGMENT_MAX_CHARS;
-                boolean overTime = w.endMs() - segStartMs >= SEGMENT_MAX_MS;
-                if (overChars || overTime) {
-                    lines.add("[" + timecode(segStartMs) + "] " + turn.speaker() + ": " + seg);
-                    seg.setLength(0);
-                    segStartMs = -1;
-                }
+        StringBuilder seg = new StringBuilder();
+        int segStartMs = -1;
+        String segSpeaker = null;
+        for (TranscriptWord w : words) {
+            String tok = w.word() == null ? "" : w.word().strip();
+            if (tok.isEmpty()) {
+                continue;
+            }
+            String spk = (w.speaker() == null || w.speaker().isBlank()) ? "SPEAKER" : w.speaker();
+            boolean speakerChanged = segSpeaker != null && !spk.equals(segSpeaker);
+            boolean overChars = seg.length() >= SEGMENT_MAX_CHARS;
+            boolean overTime = segStartMs >= 0 && (w.endMs() - segStartMs >= SEGMENT_MAX_MS);
+            if (seg.length() > 0 && (speakerChanged || overChars || overTime)) {
+                lines.add("[" + timecode(segStartMs) + "] " + segSpeaker + ": " + seg);
+                seg.setLength(0);
+                segStartMs = -1;
+                segSpeaker = null;
+            }
+            if (segStartMs < 0) {
+                segStartMs = w.startMs();
+                segSpeaker = spk;
             }
             if (seg.length() > 0) {
-                lines.add("[" + timecode(segStartMs) + "] " + turn.speaker() + ": " + seg);
+                seg.append(' ');
             }
+            seg.append(tok);
+        }
+        if (seg.length() > 0) {
+            lines.add("[" + timecode(segStartMs) + "] " + segSpeaker + ": " + seg);
         }
 
         long total = 0;

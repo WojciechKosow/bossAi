@@ -47,6 +47,35 @@ class MomentSelectorTest {
     }
 
     /**
+     * The regression that produced "3x the first-part clip": an undiarized episode
+     * must still be split into buckets that span the WHOLE timeline, so the director
+     * is asked about every part of the episode — not just the opening.
+     */
+    @Test
+    void bucketsUndiarizedWordsAcrossTheWholeTimeline() {
+        List<TranscriptWord> words = new ArrayList<>();
+        for (int i = 0; i < 600; i++) {
+            words.add(new TranscriptWord("w" + i, i * 1000, i * 1000 + 800, null)); // one speaker
+        }
+
+        List<List<TranscriptWord>> buckets = MomentSelector.bucketWords(words, 6, 600_000);
+
+        assertEquals(6, buckets.size());
+        // Every bucket has content (words are spread evenly), and each covers a
+        // distinct, later slice of the episode.
+        int prevStart = -1;
+        for (List<TranscriptWord> bucket : buckets) {
+            assertTrue(!bucket.isEmpty(), "bucket should not be empty");
+            int start = bucket.get(0).startMs();
+            assertTrue(start > prevStart, "buckets must advance through the episode");
+            prevStart = start;
+        }
+        // Last bucket reaches the end of the episode, not the start.
+        List<TranscriptWord> last = buckets.get(5);
+        assertTrue(last.get(last.size() - 1).startMs() >= 500_000, "last bucket must cover the episode end");
+    }
+
+    /**
      * Ranking keeps the highest-scoring moments, drops ones that overlap a
      * higher-scored pick, and returns the survivors in chronological order.
      */
