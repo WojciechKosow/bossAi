@@ -103,8 +103,6 @@ public class UserServiceImpl implements UserService {
             throw new RuntimeException("Use Google login");
         }
 
-        assignPlanService.assignPlan(user, PlanType.CREATOR, "");
-
         if (user.getLockUntil() != null && user.getLockUntil().isAfter(LocalDateTime.now())) {
 
             securityEventService.log(
