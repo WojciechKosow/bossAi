@@ -7,8 +7,11 @@ import com.BossAi.bossAi.entity.ClipStatus;
 import com.BossAi.bossAi.entity.Generation;
 import com.BossAi.bossAi.repository.ClipRepository;
 import com.BossAi.bossAi.dto.edl.EdlDto;
+import com.BossAi.bossAi.dto.edl.EdlReframeKeyframe;
 import com.BossAi.bossAi.service.StorageService;
 import com.BossAi.bossAi.service.audio.AudioAnalysisClient;
+import com.BossAi.bossAi.service.audio.ReframeClient;
+import com.BossAi.bossAi.service.audio.ReframeResponse;
 import com.BossAi.bossAi.service.audio.TranscribeResponse;
 import com.BossAi.bossAi.service.podcast.model.DiarizedTranscript;
 import com.BossAi.bossAi.service.podcast.model.SelectedMoment;
@@ -53,6 +56,7 @@ public class PodcastClipOrchestrator {
 
     private final AudioExtractor audioExtractor;
     private final AudioAnalysisClient audioAnalysisClient;
+    private final ReframeClient reframeClient;
     private final SpeakerTurnSegmenter speakerTurnSegmenter;
     private final MomentSelector momentSelector;
     private final SentenceBoundarySnapper boundarySnapper;
@@ -188,10 +192,14 @@ public class PodcastClipOrchestrator {
                 Path cutFile = audioExtractor.cutSubclip(
                         sourceInput, snapped.startMs(), snapped.endMs(),
                         workDir.resolve("clip-" + index + ".mp4"));
+                byte[] cutBytes = Files.readAllBytes(cutFile);
                 cutKey = "clips/" + renderId + "-src.mp4";
-                storageService.save(Files.readAllBytes(cutFile), cutKey);
+                storageService.save(cutBytes, cutKey);
                 Files.deleteIfExists(cutFile);
-                edl = clipEdlBuilder.buildPreCut(snapped, resolveUrl(cutKey), null);
+                // Best-effort active-speaker reframe track on the pre-cut clip
+                // (clip-local keyframe times line up with the pre-cut timeline).
+                List<EdlReframeKeyframe> reframeTrack = reframeTrack(cutBytes, index);
+                edl = clipEdlBuilder.buildPreCut(snapped, resolveUrl(cutKey), null, reframeTrack);
             } catch (Exception cutEx) {
                 log.warn("[Podcast] Clip {} pre-cut failed, rendering from full source — {}",
                         index, cutEx.getMessage());
@@ -242,6 +250,21 @@ public class PodcastClipOrchestrator {
             }
         }
         return clip;
+    }
+
+    /**
+     * Best-effort active-speaker reframe track for a pre-cut clip. Returns the
+     * keyframes, or {@code null} on any failure / no face — the renderer then
+     * falls back to its default framing (never fails the clip).
+     */
+    private List<EdlReframeKeyframe> reframeTrack(byte[] cutBytes, int index) {
+        try {
+            ReframeResponse reframe = reframeClient.reframeClip(cutBytes, "clip-" + index + ".mp4");
+            return reframe != null ? reframe.keyframes() : null;
+        } catch (Exception e) {
+            log.warn("[Podcast] Clip {} reframe unavailable — default framing: {}", index, e.getMessage());
+            return null;
+        }
     }
 
     /** Direct, fetchable URL for Remotion to pull an object from (presigned on R2). */

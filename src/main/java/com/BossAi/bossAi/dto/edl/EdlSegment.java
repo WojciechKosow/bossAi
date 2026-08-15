@@ -83,6 +83,28 @@ public class EdlSegment {
     @JsonProperty("effects")
     private List<EdlEffect> effects;
 
+    /**
+     * Framing mode for a landscape source rendered into the 9:16 frame:
+     * <ul>
+     *   <li>{@code "auto"} — renderer decides (blur-fill for landscape). Default
+     *       when null.</li>
+     *   <li>{@code "reframe"} — face-tracking crop-to-fill; follow {@link #reframe}.</li>
+     *   <li>{@code "cover"} — static center crop-to-fill (no bars, no tracking).</li>
+     *   <li>{@code "blur_fill"} — legacy letterbox with blurred bars.</li>
+     * </ul>
+     */
+    @JsonProperty("framing")
+    private String framing;
+
+    /**
+     * Active-speaker reframe track — an ordered list of crop-window keyframes the
+     * renderer animates to keep the talking face framed (crop-to-fill 9:16, no
+     * blur bars). Null/empty → the renderer falls back per {@link #framing}
+     * (center-cover, then blur-fill). See {@link EdlReframeKeyframe}.
+     */
+    @JsonProperty("reframe")
+    private List<EdlReframeKeyframe> reframe;
+
     @JsonProperty("transition")
     private EdlTransition transition;
 
