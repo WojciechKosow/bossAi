@@ -21,9 +21,12 @@ import java.util.List;
  *       a subtitle config so captions are burned in.</li>
  * </ul>
  *
- * <p>Framing is left to the renderer's "auto" default, which blur-fills 16:9
- * source into the 9:16 frame — a safe podcast look. Active-speaker framing is a
- * later enhancement and needs no change here.
+ * <p>When an active-speaker <b>reframe track</b> is supplied (from the audio
+ * service's {@code /api/v1/reframe} face analyzer), it is attached to the video
+ * segment and the segment's {@code framing} is set to {@code "reframe"} so the
+ * renderer crops-to-fill the 9:16 frame following the talking face. Without a
+ * track the segment keeps the renderer's {@code "auto"} default (blur-fill of a
+ * 16:9 source) — a safe fallback that preserves the pre-reframe look.
  */
 @Service
 public class ClipEdlBuilder {
@@ -41,7 +44,16 @@ public class ClipEdlBuilder {
      * @param sourceAssetId  optional asset id for the source (may be null)
      */
     public EdlDto build(SnappedClip clip, String sourceAssetUrl, String sourceAssetId) {
-        return build(clip, sourceAssetUrl, sourceAssetId, clip.startMs(), clip.endMs());
+        return build(clip, sourceAssetUrl, sourceAssetId, null);
+    }
+
+    /**
+     * Full-source variant with an active-speaker reframe track. See
+     * {@link #build(SnappedClip, String, String)}.
+     */
+    public EdlDto build(SnappedClip clip, String sourceAssetUrl, String sourceAssetId,
+                        List<EdlReframeKeyframe> reframeTrack) {
+        return build(clip, sourceAssetUrl, sourceAssetId, clip.startMs(), clip.endMs(), reframeTrack);
     }
 
     /**
@@ -55,13 +67,24 @@ public class ClipEdlBuilder {
      * @param clipAssetId optional asset id for the subclip (may be null)
      */
     public EdlDto buildPreCut(SnappedClip clip, String clipUrl, String clipAssetId) {
-        return build(clip, clipUrl, clipAssetId, 0, clip.durationMs());
+        return buildPreCut(clip, clipUrl, clipAssetId, null);
+    }
+
+    /**
+     * Pre-cut variant with an active-speaker reframe track. The track's keyframe
+     * times are clip-local (0 == clip start), which matches the pre-cut file's
+     * timeline exactly. See {@link #buildPreCut(SnappedClip, String, String)}.
+     */
+    public EdlDto buildPreCut(SnappedClip clip, String clipUrl, String clipAssetId,
+                              List<EdlReframeKeyframe> reframeTrack) {
+        return build(clip, clipUrl, clipAssetId, 0, clip.durationMs(), reframeTrack);
     }
 
     private EdlDto build(SnappedClip clip, String assetUrl, String assetId,
-                         int trimInMs, int trimOutMs) {
+                         int trimInMs, int trimOutMs, List<EdlReframeKeyframe> reframeTrack) {
         int durationMs = clip.durationMs();
 
+        boolean hasReframe = reframeTrack != null && !reframeTrack.isEmpty();
         EdlSegment segment = EdlSegment.builder()
                 .id("clip-seg-0")
                 .assetId(assetId)
@@ -72,6 +95,10 @@ public class ClipEdlBuilder {
                 .trimInMs(trimInMs)
                 .trimOutMs(trimOutMs)
                 .layer(0)
+                // Face-tracking crop-to-fill when a track is present; otherwise
+                // leave framing null so the renderer keeps its "auto" default.
+                .framing(hasReframe ? "reframe" : null)
+                .reframe(hasReframe ? reframeTrack : null)
                 .build();
 
         // The podcast speech: same file + window, full volume. The video segment
