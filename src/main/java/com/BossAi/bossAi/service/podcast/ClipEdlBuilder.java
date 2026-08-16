@@ -130,7 +130,9 @@ public class ClipEdlBuilder {
                 .enabled(true)
                 .position("center")
                 .highlightMode("word")
-                .maxWordsPerGroup(5)
+                // TikTok-style: a few words on screen at a time, current one
+                // highlighted (the renderer chunks whisper words by this cap).
+                .maxWordsPerGroup(4)
                 .build();
 
         return EdlDto.builder()
