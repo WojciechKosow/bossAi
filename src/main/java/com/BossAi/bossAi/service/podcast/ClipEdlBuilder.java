@@ -128,7 +128,10 @@ public class ClipEdlBuilder {
 
         EdlSubtitleConfig subtitles = EdlSubtitleConfig.builder()
                 .enabled(true)
-                .position("center")
+                // Lower third (anchored ~20% from the bottom) — the TikTok-safe
+                // band, clear of the bottom UI and of the reframe's upper-center
+                // face safe-area.
+                .position("bottom_third")
                 .highlightMode("word")
                 // TikTok-style: a few words on screen at a time, current one
                 // highlighted (the renderer chunks whisper words by this cap).
